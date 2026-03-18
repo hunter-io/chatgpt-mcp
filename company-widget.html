@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- Local static preview for the company widget, only for debugging; NOT used by ChatGPT in production -->
+    <link rel="stylesheet" href="./dist/assets/company-widget.css" />
+  </head>
+  <body>
+    <div
+      id="root"
+      style="
+        width: 100vw;
+        height: 100vh;
+        display: grid;
+        justify-content: center;
+        align-content: center;
+        justify-items: center;
+        align-items: center;
+      "
+    ></div>
+    <script>
+      // Mock ChatGPT global data
+      window.openai = {
+        toolInput: { domain: "framer.com" },
+        toolOutput: {
+          data: {
+            id: "123",
+            name: "Framer",
+            domain: "framer.com",
+            logo: "https://company-logo.hunter.io/framer.com",
+            location: "San Jose, California, United States",
+            description:
+              "Framer is a digital design tool that empowers users to create interactive prototypes and seamless web experiences without coding.",
+            emailsCount: {
+              personal: 10,
+              generic: 16,
+              total: 26,
+            },
+            metrics: { employees: "1,001-5,000" },
+            site: {
+              emailAddresses: [
+                "support@framer.com",
+                "security@framer.com",
+                "contact@framer.com",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+    <script type="module" src="./dist/assets/company-widget.js"></script>
+  </body>
+</html>
+
+

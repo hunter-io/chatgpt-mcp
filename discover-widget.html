@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- Local static preview for the discover widget, only for debugging; NOT used by ChatGPT in production -->
+    <link rel="stylesheet" href="./dist/assets/discover-widget.css" />
+  </head>
+  <body>
+    <div
+      id="root"
+      style="
+        width: 100vw;
+        height: 100vh;
+        display: grid;
+        justify-content: center;
+        align-content: center;
+        justify-items: center;
+        align-items: center;
+      "
+    ></div>
+    <script>
+      // Mock ChatGPT global data for discover widget
+      window.openai = {
+        toolInput: { query: "software companies in San Francisco" },
+        toolOutput: [
+          {
+            domain: "adobe.com",
+            organization: "Adobe",
+            logo: "https://company-logo.hunter.io/adobe.com",
+            emails_count: {
+              total: 15992,
+            },
+            industry: "Software Development",
+            location: "United States",
+            hiring: true,
+          },
+          {
+            domain: "lavanguardia.com",
+            organization: "La Vanguardia",
+            emails_count: {
+              total: 321,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "relume.io",
+            organization: "Relume",
+            logo: "https://company-logo.hunter.io/relume.io",
+            emails_count: {
+              total: 48,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "molly.com",
+            organization: "Molly",
+            emails_count: {
+              total: 3,
+            },
+            industry: "Technology, Information",
+            location: "United States",
+          },
+          {
+            domain: "framer.com",
+            organization: "Framer",
+            logo: "https://company-logo.hunter.io/framer.com",
+            emails_count: {
+              total: 15992,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "stripe.comm",
+            organization: "Stripe",
+            logo: "https://company-logo.hunter.io/stripe.com",
+            emails_count: {
+              total: 450,
+            },
+            industry: "Financial Services",
+            location: "United States",
+            hiring: true,
+          },
+          {
+            domain: "vercel.comm",
+            organization: "Vercel",
+            emails_count: {
+              total: 128,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "linear.ampp",
+            organization: "Linear",
+            logo: "https://company-logo.hunter.io/linear.app",
+            emails_count: {
+              total: 25,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "github.cmom",
+            organization: "GitHub",
+            emails_count: {
+              total: 1200,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "notion.smo",
+            organization: "Notion",
+            emails_count: {
+              total: 89,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "airbnb.comm",
+            organization: "Airbnb",
+            emails_count: {
+              total: 560,
+            },
+            industry: "Travel & Hospitality",
+            location: "United States",
+            hiring: true,
+          },
+          {
+            domain: "spotify.com",
+            organization: "Spotify",
+            emails_count: {
+              total: 320,
+            },
+            industry: "Media & Entertainment",
+            location: "Sweden",
+          },
+          {
+            domain: "slack.codm",
+            organization: "Slack",
+            emails_count: {
+              total: 450,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "twitter.com",
+            organization: "Twitter",
+            emails_count: {
+              total: 890,
+            },
+            industry: "Social Media",
+            location: "United States",
+          },
+          {
+            domain: "netflix.caom",
+            organization: "Netflix",
+            emails_count: {
+              total: 670,
+            },
+            industry: "Media & Entertainment",
+            location: "United States",
+          },
+          {
+            domain: "uber.com",
+            organization: "Uber",
+            emails_count: {
+              total: 540,
+            },
+            industry: "Transportation",
+            location: "United States",
+          },
+          {
+            domain: "zoom.us",
+            organization: "Dropbox",
+            emails_count: {
+              total: 230,
+            },
+            industry: "Software Development",
+            location: "United States",
+          },
+          {
+            domain: "zoom.us",
+            organization: "Zoom",
+            emails_count: {
+              total: 380,
+            },
+            industry: "Software Development",
+            location: "United States",
+            hiring: true,
+          },
+        ],
+      };
+    </script>
+    <script type="module" src="./dist/assets/discover-widget.js"></script>
+  </body>
+</html>
+

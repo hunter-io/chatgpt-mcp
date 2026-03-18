@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "@openai/apps-sdk-ui/css";
+
+@source "../node_modules/@openai/apps-sdk-ui";
+@source "./*-widget.tsx";
+
+@theme {
+  --color-hunter-600: #FA5320; /* custom Hunter brand – medium */
+  --color-hunter-700: #D44519; /* custom Hunter brand – darker */
+}

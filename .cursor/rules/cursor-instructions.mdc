@@ -1,0 +1,127 @@
+---
+alwaysApply: true
+---
+
+## Hunter ChatGPT MCP – Cursor Helper
+
+This repo is a Cloudflare Worker that exposes a Model Context Protocol (MCP) server for Hunter, plus small React widgets rendered in ChatGPT via the Apps SDK.
+
+### Project layout
+
+- **Root worker / MCP**
+  - `src/index.ts` – Cloudflare Worker entry + MCP server, tools, and `/assets/*` proxy.
+  - `wrangler.jsonc` / `worker-configuration.d.ts` – Worker config and types.
+  - `global.d.ts` – helper module declarations (e.g. `*?raw`).
+- **Widget HTML templates**
+  - `bundle/company.html.ts` – HTML string used as `_meta["openai/outputTemplate"]` for the company widget.
+    - Must include:
+      - `<div id="root"></div>` – React mount point.
+      - `<link rel="stylesheet" href="https://chatgpt.hunter.io/assets/widgets.css" />`
+      - `<script type="module" src="https://chatgpt.hunter.io/assets/company-widget.js"></script>`
+- **React widgets**
+  - `src/company-widget.tsx` – React widget for the company tool.
+    - Reads `window.openai.toolOutput` and renders: `Company Name: ... Company ID: ...`.
+    - Uses `useEffect` to listen for `openai:set_globals` so the UI updates when ChatGPT refreshes globals.
+  - **Convention**: any file named `src/*-widget.tsx` is treated as a widget entry.
+- **Styling**
+  - `src/styles.css` – Tailwind entry (`@tailwind base; @tailwind components; @tailwind utilities;`).
+  - `tailwind.config.ts` – Tailwind config with `content` pointing at `./src/**/*` and `./bundle/**/*`.
+  - **Color palette**: Use `neutral` color scale (not `gray` or `zinc`) for consistent theming across widgets.
+- **Build output (generated)**
+  - `dist/assets/company-widget.js` – bundled React widget for company.
+  - `dist/assets/widgets.css` – Tailwind CSS bundle shared by widgets.
+
+### NPM scripts (root)
+
+```jsonc
+"scripts": {
+  "dev": "wrangler dev",
+  "deploy": "wrangler deploy",
+  "type-check": "tsc --noEmit",
+  "format": "biome format --write",
+  "lint:fix": "biome lint --fix",
+  "build:widgets:js": "esbuild src/*-widget.tsx --bundle --format=esm --target=es2020 --minify --sourcemap --outdir=dist/assets",
+  "build:widgets:css": "tailwindcss -i ./src/styles.css -o ./dist/assets/widgets.css --minify",
+  "build:widgets": "npm run build:widgets:js && npm run build:widgets:css"
+}
+```
+
+### Typical workflows in Cursor
+
+- **Install deps** (once):
+
+```bash
+npm install
+```
+
+- **Develop the worker / MCP server**:
+
+```bash
+npm run dev
+```
+
+This runs `wrangler dev`; ChatGPT (or your client) should point at the dev worker URL.
+
+- **Build all widgets (React + Tailwind)**:
+
+```bash
+npm run build:widgets
+```
+
+This:
+
+- Bundles every `src/*-widget.tsx` into `dist/assets/<name>-widget.js`.
+- Builds Tailwind CSS into `dist/assets/widgets.css`.
+
+- **Deploy**:
+
+```bash
+npm run build:widgets
+npm run deploy
+```
+
+Ensure your production origin (e.g. `https://chatgpt.hunter.io`) matches the URLs used in `bundle/company.html.ts`.
+
+### Adding a new widget
+
+1. **Create a TSX entry file** following the naming convention:
+
+   - Example: `src/search-widget.tsx`
+   - It should:
+     - Import React + `createRoot`.
+     - Read from `window.openai.toolInput/toolOutput` as needed.
+     - Mount into `document.getElementById("root")`.
+
+2. **Add an HTML template** in `bundle/`:
+
+   - Example: `bundle/search.html.ts`:
+
+```ts
+const html = `
+  <div id="root"></div>
+  <link rel="stylesheet" href="https://chatgpt.hunter.io/assets/widgets.css" />
+  <script type="module" src="https://chatgpt.hunter.io/assets/search-widget.js"></script>
+`;
+
+export default html;
+```
+
+3. **Wire it in the MCP server**:
+
+   - Import the template in `src/index.ts`.
+   - Register a resource and use its URI in the tool’s `_meta["openai/outputTemplate"]`.
+
+4. **Rebuild widgets**:
+
+```bash
+npm run build:widgets
+```
+
+### Notes for debugging in Cursor
+
+- Source maps (`*.js.map`) are generated for widgets so browser devtools map back to `*.tsx`.
+- If TypeScript complains about `React` or JSX types:
+  - Ensure `@types/react` and `@types/react-dom` are installed (they are in `devDependencies`).
+  - `tsconfig.json` has `"jsx": "react-jsx"` and `"lib": ["es2021", "dom"]` so `window` / `document` are typed.
+
+
