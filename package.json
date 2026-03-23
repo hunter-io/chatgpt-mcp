@@ -16,26 +16,26 @@
 		"build:widgets:discover": "WIDGET_ENTRY=discover-widget vite build"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.12.0",
-		"@openai/apps-sdk-ui": "^0.2.0",
-		"agents": "^0.0.93",
-		"fs-extra": "^11.3.2",
+		"@modelcontextprotocol/sdk": "^1.27.1",
+		"@openai/apps-sdk-ui": "^0.2.1",
+		"agents": "^0.7.6",
+		"fs-extra": "^11.3.4",
 		"react": "^19.2.4",
 		"react-dom": "^18.2.0",
 		"zod": "^3.25.28"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
-		"@tailwindcss/vite": "^4.1.17",
+		"@tailwindcss/vite": "^4.2.1",
 		"@types/node": "^25.5.0",
 		"@types/react": "^19.2.14",
 		"@types/react-dom": "^18.3.0",
 		"@vitejs/plugin-react": "^6.0.1",
-		"prettier": "^3.6.2",
+		"prettier": "^3.8.1",
 		"tailwindcss": "^4.1.17",
 		"typescript": "^5.8.3",
 		"vite": "^7.2.4",
-		"wrangler": "^4.43.0"
+		"wrangler": "^4.73.0"
 	},
 	"overrides": {
 		"sugarss": "^5.0.1"
