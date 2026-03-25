@@ -21,7 +21,7 @@
 		"agents": "^0.7.6",
 		"fs-extra": "^11.3.4",
 		"react": "^19.2.4",
-		"react-dom": "^18.2.0",
+		"react-dom": "^19.2.4",
 		"zod": "^3.25.28"
 	},
 	"devDependencies": {
@@ -29,7 +29,7 @@
 		"@tailwindcss/vite": "^4.2.1",
 		"@types/node": "^25.5.0",
 		"@types/react": "^19.2.14",
-		"@types/react-dom": "^18.3.0",
+		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.1",
 		"prettier": "^3.8.1",
 		"tailwindcss": "^4.1.17",
