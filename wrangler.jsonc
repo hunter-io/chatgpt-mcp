@@ -25,6 +25,10 @@
 	"observability": {
 		"enabled": true
 	},
+	"build": {
+		"define": {},
+		"external": ["ai"]
+	},
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
