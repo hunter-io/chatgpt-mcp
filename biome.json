@@ -1,10 +1,8 @@
 {
-	"$schema": "https://biomejs.dev/schemas/1.6.2/schema.json",
-	"organizeImports": {
-		"enabled": true
-	},
+	"$schema": "https://biomejs.dev/schemas/2.4.7/schema.json",
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
 	"files": {
-		"ignore": ["worker-configuration.d.ts"]
+		"includes": ["**", "!**/worker-configuration.d.ts"]
 	},
 	"vcs": {
 		"enabled": true,
@@ -18,13 +16,17 @@
 			"suspicious": {
 				"noExplicitAny": "off",
 				"noDebugger": "off",
-				"noConsoleLog": "off",
-				"noConfusingVoidType": "off"
+				"noConfusingVoidType": "off",
+				"noConsole": { "level": "off", "options": { "allow": ["log"] } }
 			},
 			"style": {
 				"noNonNullAssertion": "off"
 			}
 		}
+	},
+	"css": {
+		"linter": { "enabled": false },
+		"formatter": { "enabled": false }
 	},
 	"formatter": {
 		"enabled": true,

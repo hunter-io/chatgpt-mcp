@@ -25,13 +25,12 @@
 	"observability": {
 		"enabled": true
 	},
-	"build": {
-		"define": {},
-		"external": ["ai"]
+	"alias": {
+		"ai": "./src/ai-stub.ts"
 	},
-  "assets": {
-    "directory": "./dist",
-    "binding": "ASSETS",
-    "run_worker_first": true
-  }
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"run_worker_first": true
+	}
 }
