@@ -256,6 +256,9 @@ export default {
       if (!apiKey) {
         return new Response("Unauthorized: a Hunter API key is required", {
           status: 401,
+          headers: {
+            "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+          },
         });
       }
 
@@ -277,6 +280,9 @@ export default {
       if (!apiKey) {
         return new Response("Unauthorized: a Hunter API key is required", {
           status: 401,
+          headers: {
+            "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+          },
         });
       }
 
@@ -291,37 +297,12 @@ export default {
     ) {
       const wellKnownResource = {
         resource: url.origin,
-        authorization_servers: [url.origin],
+        authorization_servers: [AUTHORIZATION_SERVER],
         scopes_supported: ["read", "write"],
         bearer_methods_supported: ["header"],
       };
 
       return new Response(JSON.stringify(wellKnownResource, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers":
-            "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
-        },
-      });
-    }
-
-    if (url.pathname === "/.well-known/oauth-authorization-server") {
-      const metadata = {
-        issuer: url.origin,
-        authorization_endpoint: `${AUTHORIZATION_SERVER}/oauth/authorize`,
-        token_endpoint: `${AUTHORIZATION_SERVER}/oauth/token`,
-        registration_endpoint: `${AUTHORIZATION_SERVER}/oauth/register`,
-        response_types_supported: ["code"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        code_challenge_methods_supported: ["S256"],
-        token_endpoint_auth_methods_supported: ["none"],
-        scopes_supported: ["read", "write"],
-      };
-
-      return new Response(JSON.stringify(metadata, null, 2), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
