@@ -5,6 +5,6 @@
 @source "./*-widget.tsx";
 
 @theme {
-  --color-hunter-600: #FA5320; /* custom Hunter brand – medium */
-  --color-hunter-700: #D44519; /* custom Hunter brand – darker */
+  --color-hunter-600: #fa5320; /* custom Hunter brand – medium */
+  --color-hunter-700: #d44519; /* custom Hunter brand – darker */
 }

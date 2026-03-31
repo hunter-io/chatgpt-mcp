@@ -24,12 +24,13 @@ This repo is a Cloudflare Worker that exposes a Model Context Protocol (MCP) ser
     - Uses `useEffect` to listen for `openai:set_globals` so the UI updates when ChatGPT refreshes globals.
   - **Convention**: any file named `src/*-widget.tsx` is treated as a widget entry.
 - **Styling**
-  - `src/styles.css` – Tailwind entry (`@tailwind base; @tailwind components; @tailwind utilities;`).
-  - `tailwind.config.ts` – Tailwind config with `content` pointing at `./src/**/*` and `./bundle/**/*`.
+  - `src/main.css` – Tailwind CSS 4 entry with custom Hunter theme variables.
   - **Color palette**: Use `neutral` color scale (not `gray` or `zinc`) for consistent theming across widgets.
 - **Build output (generated)**
   - `dist/assets/company-widget.js` – bundled React widget for company.
-  - `dist/assets/widgets.css` – Tailwind CSS bundle shared by widgets.
+  - `dist/assets/company-widget.css` – CSS bundle for company widget.
+  - `dist/assets/discover-widget.js` – bundled React widget for discover.
+  - `dist/assets/discover-widget.css` – CSS bundle for discover widget.
 
 ### NPM scripts (root)
 
@@ -38,11 +39,13 @@ This repo is a Cloudflare Worker that exposes a Model Context Protocol (MCP) ser
   "dev": "wrangler dev",
   "deploy": "wrangler deploy",
   "type-check": "tsc --noEmit",
-  "format": "biome format --write",
-  "lint:fix": "biome lint --fix",
-  "build:widgets:js": "esbuild src/*-widget.tsx --bundle --format=esm --target=es2020 --minify --sourcemap --outdir=dist/assets",
-  "build:widgets:css": "tailwindcss -i ./src/styles.css -o ./dist/assets/widgets.css --minify",
-  "build:widgets": "npm run build:widgets:js && npm run build:widgets:css"
+  "lint": "oxlint src/ bundle/ vite.config.ts",
+  "lint:fix": "oxlint --fix src/ bundle/ vite.config.ts",
+  "format": "oxfmt --write src/ bundle/ vite.config.ts",
+  "format:check": "oxfmt --check src/ bundle/ vite.config.ts",
+  "build:widgets": "rm -rf dist/assets && pnpm run build:widgets:company && pnpm run build:widgets:discover",
+  "build:widgets:company": "WIDGET_ENTRY=company-widget vite build",
+  "build:widgets:discover": "WIDGET_ENTRY=discover-widget vite build"
 }
 ```
 
@@ -51,13 +54,13 @@ This repo is a Cloudflare Worker that exposes a Model Context Protocol (MCP) ser
 - **Install deps** (once):
 
 ```bash
-npm install
+pnpm install
 ```
 
 - **Develop the worker / MCP server**:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 This runs `wrangler dev`; ChatGPT (or your client) should point at the dev worker URL.
@@ -65,19 +68,25 @@ This runs `wrangler dev`; ChatGPT (or your client) should point at the dev worke
 - **Build all widgets (React + Tailwind)**:
 
 ```bash
-npm run build:widgets
+pnpm run build:widgets
 ```
 
-This:
+This bundles every widget into `dist/assets/<name>-widget.js` + `<name>-widget.css` using Vite.
 
-- Bundles every `src/*-widget.tsx` into `dist/assets/<name>-widget.js`.
-- Builds Tailwind CSS into `dist/assets/widgets.css`.
+- **Lint and format**:
+
+```bash
+pnpm run lint        # Check for lint issues
+pnpm run lint:fix    # Auto-fix lint issues
+pnpm run format      # Format files
+pnpm run format:check # Check formatting without writing
+```
 
 - **Deploy**:
 
 ```bash
-npm run build:widgets
-npm run deploy
+pnpm run build:widgets
+pnpm run deploy
 ```
 
 Ensure your production origin (e.g. `https://chatgpt.hunter.io`) matches the URLs used in `bundle/company.html.ts`.
@@ -109,19 +118,16 @@ export default html;
 3. **Wire it in the MCP server**:
 
    - Import the template in `src/index.ts`.
-   - Register a resource and use its URI in the tool’s `_meta["openai/outputTemplate"]`.
+   - Register a resource and use its URI in the tool's `_meta["openai/outputTemplate"]`.
 
 4. **Rebuild widgets**:
 
 ```bash
-npm run build:widgets
+pnpm run build:widgets
 ```
 
 ### Notes for debugging in Cursor
 
-- Source maps (`*.js.map`) are generated for widgets so browser devtools map back to `*.tsx`.
 - If TypeScript complains about `React` or JSX types:
   - Ensure `@types/react` and `@types/react-dom` are installed (they are in `devDependencies`).
-  - `tsconfig.json` has `"jsx": "react-jsx"` and `"lib": ["es2021", "dom"]` so `window` / `document` are typed.
-
-
+  - `tsconfig.json` has `"jsx": "react-jsx"` and `"lib": ["es2022", "dom"]` so `window` / `document` are typed.

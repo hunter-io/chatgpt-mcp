@@ -1,3 +1,3 @@
 export const jsonSchema = () => {
-	throw new Error("ai SDK not available");
-};
+  throw new Error("ai SDK not available")
+}

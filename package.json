@@ -2,16 +2,19 @@
 	"name": "hunter-chatgpt-mcp",
 	"version": "0.0.1",
 	"private": true,
+	"packageManager": "pnpm@10.33.0",
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
-		"format": "biome format --write",
-		"lint:fix": "biome lint --fix",
+		"lint": "oxlint src/ bundle/ vite.config.ts",
+		"lint:fix": "oxlint --fix src/ bundle/ vite.config.ts",
+		"format": "oxfmt --write src/ bundle/ vite.config.ts",
+		"format:check": "oxfmt --check src/ bundle/ vite.config.ts",
 		"start": "wrangler dev",
 		"cf-typegen": "wrangler types",
 		"type-check": "tsc --noEmit",
 		"dev:widgets": "vite",
-		"build:widgets": "rm -rf dist/assets && npm run build:widgets:company && npm run build:widgets:discover",
+		"build:widgets": "rm -rf dist/assets && pnpm run build:widgets:company && pnpm run build:widgets:discover",
 		"build:widgets:company": "WIDGET_ENTRY=company-widget vite build",
 		"build:widgets:discover": "WIDGET_ENTRY=discover-widget vite build"
 	},
@@ -25,13 +28,13 @@
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.7",
 		"@tailwindcss/vite": "^4.2.2",
 		"@types/node": "^25.5.0",
 		"@types/react": "^19.2.14",
 		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.1",
-		"prettier": "^3.8.1",
+		"oxfmt": "^0.41.0",
+		"oxlint": "^1.56.0",
 		"tailwindcss": "^4.1.17",
 		"typescript": "^5.8.3",
 		"vite": "^8.0.0",
@@ -39,5 +42,11 @@
 	},
 	"overrides": {
 		"sugarss": "^5.0.1"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild",
+			"workerd"
+		]
 	}
 }

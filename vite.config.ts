@@ -1,10 +1,10 @@
 // vite.config.ts
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
 
 // Determine which widget to build from environment variable
-const WIDGET_ENTRY = process.env.WIDGET_ENTRY || "company-widget";
+const WIDGET_ENTRY = process.env.WIDGET_ENTRY || "company-widget"
 const widgetConfigs: Record<string, { entry: string; name: string }> = {
   "company-widget": {
     entry: "src/company-widget.tsx",
@@ -14,9 +14,9 @@ const widgetConfigs: Record<string, { entry: string; name: string }> = {
     entry: "src/discover-widget.tsx",
     name: "discover-widget",
   },
-};
+}
 
-const config = widgetConfigs[WIDGET_ENTRY] || widgetConfigs["company-widget"];
+const config = widgetConfigs[WIDGET_ENTRY] || widgetConfigs["company-widget"]
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
@@ -42,11 +42,11 @@ export default defineConfig({
         assetFileNames: (assetInfo) => {
           if (assetInfo.name && assetInfo.name.endsWith(".css")) {
             // Give each widget its own CSS name to prevent overwrites
-            return `${config.name}.css`;
+            return `${config.name}.css`
           }
-          return "[name].[hash][extname]";
+          return "[name].[hash][extname]"
         },
       },
     },
   },
-});
+})
