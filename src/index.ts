@@ -9,6 +9,7 @@ import {
   READ_ONLY_ANNOTATIONS,
   WRITE_ANNOTATIONS,
   callHunterApi,
+  withDeepLink,
 } from "./helpers"
 import { registerAccountTools } from "./tools/account"
 import { registerCampaignTools } from "./tools/campaigns"
@@ -16,6 +17,7 @@ import { registerCustomAttributeTools } from "./tools/custom-attributes"
 import { registerEnrichmentTools } from "./tools/enrichment"
 import { registerLeadTools } from "./tools/leads"
 import { registerLeadsListTools } from "./tools/leads-lists"
+import { registerPrompts } from "./prompts"
 import { registerSearchTools } from "./tools/search"
 
 export class HunterChatGPTMCP extends McpAgent {
@@ -78,7 +80,7 @@ export class HunterChatGPTMCP extends McpAgent {
       {
         title: "Discover Companies",
         description:
-          "Use this to find companies matching a search query expressed in natural language.\nCompanies can be filtered by headquarters location, industry, size, type, and technologies used.\nThe results include the name and domain name of each company, along with how many email addresses Hunter has found for that company.\nThe top 100 results are returned by default, but you can paginate through the results using the 'offset' parameter.\nThe total number of results matching the query is also provided (in 'meta'.'results'): if there are a few (less than 10) or too many (more than 1,000) results, interact with the user to refine their query.\nThis tool is read-only and does not use any credits.",
+          "Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). Follow up with Domain-Search to find contacts at these companies.",
         inputSchema: {
           query: z
             .string()
@@ -130,7 +132,7 @@ export class HunterChatGPTMCP extends McpAgent {
       {
         title: "Enrich Company",
         description:
-          "Use this to enrich a company domain with additional information, such as industry, size, location, and technologies used. If the user asks about any domain, enrichment is the way to go. If no domain is specified, only a company name, try assuming the domain and search for it.\nIMPORTANT: This tool does not process, store, or return any form of personal data (PII). It works exclusively with company-level information.\nThis tool can be used in combination of Discover to enrich company data.\nEach request to this tool consumes 0.2 credit.\nIf the response is a 402 Payment Required, inform the user that they have insufficient credits to perform the enrichment and then they should login to Hunter.io to upgrade their plan or purchase more credits.",
+          "Enrich a company domain with industry, size, location, technologies, funding, and social profiles. Does NOT return personal data (PII). Costs 1 enrichment credit — only charged if data is found. If you only have a company name, try assuming the domain. Follow up with Domain-Search to find contacts or Save-Company to save as a lead.",
         inputSchema: {
           domain: z.string().describe("Domain name of the company to enrich"),
         },
@@ -178,15 +180,21 @@ export class HunterChatGPTMCP extends McpAgent {
       "Save-Company",
       {
         title: "Save Company",
-        description:
-          "Use this to save a company into your Hunter Leads.\nYou need to provide the company's domain name.\nThis tool does not use any credits.",
+        description: "Save a company as a lead in your Hunter account. Free (no credits).",
         inputSchema: {
           domain: z.string().describe("Domain name of the company to save into your Hunter Leads"),
         },
         annotations: WRITE_ANNOTATIONS,
       },
       async ({ domain }: { domain: string }) => {
-        return callHunterApi({ path: "/leads/companies", apiKey, baseUrl, method: "POST", params: { domain } })
+        const result = await callHunterApi({
+          path: "/leads/companies",
+          apiKey,
+          baseUrl,
+          method: "POST",
+          params: { domain },
+        })
+        return withDeepLink(result, "/leads")
       },
     )
 
@@ -198,6 +206,7 @@ export class HunterChatGPTMCP extends McpAgent {
     registerLeadsListTools(this.server, apiKey, baseUrl)
     registerCustomAttributeTools(this.server, apiKey, baseUrl)
     registerCampaignTools(this.server, apiKey, baseUrl)
+    registerPrompts(this.server)
   }
 }
 

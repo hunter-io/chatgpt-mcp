@@ -6,18 +6,24 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   server.registerTool(
     "Domain-Search",
     {
-      description: "Get B2B Data from a provided domain name",
+      description:
+        "Get email addresses and contact data for a domain. Returns emails with names, positions, and confidence scores. Costs 1 search credit per 10 emails returned (rounded up) — only charged if emails are found. Use Email-Finder for a specific person, or this tool to browse all contacts.",
       inputSchema: {
         domain: z.string().describe("Domain name to find Data for"),
         limit: z.number().optional().describe("Maximum number of email addresses to return"),
         offset: z.number().optional().describe("Number of email addresses to skip"),
         type: z.enum(["personal", "generic"]).optional().describe("Type of email addresses to return"),
-        seniority: z.string().optional().describe("Filter by seniority level (e.g. junior, senior, executive)"),
+        seniority: z
+          .string()
+          .optional()
+          .describe(
+            "Filter by seniority level. Values: junior, senior, executive. Supports comma-separated multi-values (e.g. 'senior,executive')",
+          ),
         department: z
           .string()
           .optional()
           .describe(
-            "Filter by department (e.g. executive, it, finance, management, communication, education, legal, hr)",
+            "Filter by department. Values: executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations. Supports comma-separated multi-values (e.g. 'sales,marketing')",
           ),
         required_field: z
           .enum(["full_name", "position", "phone_number"])
@@ -41,7 +47,8 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   server.registerTool(
     "Email-Finder",
     {
-      description: "Find an email address for a given person and domain name",
+      description:
+        "Find a specific person's email address at a company. Provide full name and domain. Costs 1 search credit — only charged if an email is found. Follow up with Email-Verifier to check deliverability.",
       inputSchema: {
         full_name: z.string().describe("Full name of the person to find the email address for"),
         domain: z.string().describe("Domain name to find the person's email address for"),
@@ -56,7 +63,8 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   server.registerTool(
     "Email-Verifier",
     {
-      description: "Check the deliverability of a provided email address",
+      description:
+        "Check if an email address is deliverable. Returns status (valid, invalid, accept_all, etc.) and confidence score. Costs 1 verification credit — only charged for valid, invalid, or accept_all results. Follow up with Create-Lead or Upsert-Lead to save verified contacts.",
       inputSchema: { email: z.string().describe("Email address to verify") },
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -68,7 +76,8 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   server.registerTool(
     "Email-Count",
     {
-      description: "Get the number of email addresses found for a domain",
+      description:
+        "Get the number of email addresses Hunter has found for a domain. Free (no credits). Useful to check data availability before running a Domain-Search.",
       inputSchema: {
         domain: z.string().describe("Domain name to count email addresses for"),
         type: z.enum(["personal", "generic"]).optional().describe("Type of email addresses to count"),

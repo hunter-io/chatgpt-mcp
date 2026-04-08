@@ -1,5 +1,33 @@
 export const BASE_API_URL_PRODUCTION = "https://api.hunter.io/v2"
 export const BASE_API_URL_DEVELOPMENT = "http://localhost:3000/v2"
+export const HUNTER_BASE = "https://hunter.io"
+
+export interface McpTextResult {
+  [key: string]: unknown
+  content: { type: "text"; text: string }[]
+  isError?: boolean
+}
+
+export function withDeepLink(result: McpTextResult, path: string): McpTextResult {
+  if (result.isError) return result
+  const url = `${HUNTER_BASE}${path}`
+  const text = result.content[0]?.text ?? ""
+  return {
+    content: [{ type: "text" as const, text: `${text}\n\nView in Hunter: ${url}` }],
+  }
+}
+
+export function withDeepLinkFromId(result: McpTextResult, pathFn: (id: number) => string): McpTextResult {
+  try {
+    const raw = result.content[0]?.text ?? ""
+    const jsonText = raw.split("\n\nSource:")[0]
+    const id = JSON.parse(jsonText).data?.id
+    if (typeof id === "number" && id > 0) return withDeepLink(result, pathFn(id))
+  } catch (e) {
+    console.warn("withDeepLinkFromId: failed to extract ID", e)
+  }
+  return result
+}
 
 interface FormParamsMap {
   [key: string]: string | string[] | FormParamsMap
@@ -48,7 +76,7 @@ function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
   return result
 }
 
-export async function callHunterApi(options: CallOptions) {
+export async function callHunterApi(options: CallOptions): Promise<McpTextResult> {
   const isGet = !("method" in options)
   const method = isGet ? "GET" : options.method
 
@@ -93,11 +121,15 @@ export async function callHunterApi(options: CallOptions) {
   }
 
   if (response.status === 204) {
-    return { content: [{ type: "text" as const, text: "Success (no content)" }] }
+    return {
+      content: [{ type: "text" as const, text: "Success (no content)\n\nSource: Hunter.io (https://hunter.io)" }],
+    }
   }
 
   const json = await response.json()
-  return { content: [{ type: "text" as const, text: JSON.stringify(json) }] }
+  return {
+    content: [{ type: "text" as const, text: `${JSON.stringify(json)}\n\nSource: Hunter.io (https://hunter.io)` }],
+  }
 }
 
 export const READ_ONLY_ANNOTATIONS = {

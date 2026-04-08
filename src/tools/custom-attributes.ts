@@ -6,7 +6,7 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     "List-Custom-Attributes",
     {
-      description: "List all custom attributes for leads",
+      description: "List all custom attributes for leads. Free (no credits).",
       inputSchema: {},
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -18,7 +18,7 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     "Get-Custom-Attribute",
     {
-      description: "Get a single custom attribute by ID",
+      description: "Get a single custom attribute by ID. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the custom attribute to retrieve"),
       },
@@ -32,7 +32,7 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     "Create-Custom-Attribute",
     {
-      description: "Create a new custom attribute for leads",
+      description: "Create a new custom attribute for leads. Free (no credits).",
       inputSchema: {
         label: z.string().describe("Label for the new custom attribute"),
       },
@@ -52,7 +52,7 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     "Update-Custom-Attribute",
     {
-      description: "Rename an existing custom attribute",
+      description: "Rename an existing custom attribute. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the custom attribute to update"),
         label: z.string().describe("New label for the custom attribute"),
@@ -73,7 +73,7 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     "Delete-Custom-Attribute",
     {
-      description: "Delete a custom attribute by ID",
+      description: "Delete a custom attribute by ID. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the custom attribute to delete"),
       },

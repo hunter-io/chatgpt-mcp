@@ -5,7 +5,8 @@ export function registerAccountTools(server: McpServer, apiKey: string, baseUrl:
   server.registerTool(
     "Account",
     {
-      description: "Get information about the Hunter account (usage, credits, plan details)",
+      description:
+        "Get your Hunter account details: remaining credits (search, verification, enrichment), plan name, and team info. Free (no credits). Use to check remaining credits before running bulk operations.",
       inputSchema: {},
       annotations: READ_ONLY_ANNOTATIONS,
     },

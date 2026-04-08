@@ -1,6 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { callHunterApi, DESTRUCTIVE_ANNOTATIONS, READ_ONLY_ANNOTATIONS, WRITE_ANNOTATIONS } from "../helpers"
+import {
+  callHunterApi,
+  withDeepLink,
+  withDeepLinkFromId,
+  DESTRUCTIVE_ANNOTATIONS,
+  READ_ONLY_ANNOTATIONS,
+  WRITE_ANNOTATIONS,
+} from "../helpers"
 
 const leadFieldsSchema = {
   email: z.string().optional().describe("Email address of the lead"),
@@ -35,7 +42,8 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     "List-Leads",
     {
-      description: "List leads in your Hunter account with optional filters",
+      description:
+        "List leads in your Hunter account with optional filters. Free (no credits). Returns up to 100 leads per page — use offset to paginate.",
       inputSchema: {
         offset: z.number().optional().describe("Number of leads to skip"),
         limit: z.number().optional().describe("Maximum number of leads to return (max 100)"),
@@ -63,7 +71,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     "Get-Lead",
     {
-      description: "Get a single lead by ID",
+      description: "Get a single lead by ID. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the lead to retrieve"),
       },
@@ -77,7 +85,8 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     "Create-Lead",
     {
-      description: "Create a new lead in your Hunter account",
+      description:
+        "Create a new lead in your Hunter account. Free (no credits). Provide at least an email address. Use leads_list_id to add directly to a list.",
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().describe("Email address of the lead (required)"),
@@ -85,20 +94,21 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       annotations: WRITE_ANNOTATIONS,
     },
     async (fields) => {
-      return callHunterApi({
+      const result = await callHunterApi({
         path: "/leads",
         apiKey,
         baseUrl,
         method: "POST",
         params: buildLeadParams(fields),
       })
+      return withDeepLinkFromId(result, (id) => `/leads/${id}`)
     },
   )
 
   server.registerTool(
     "Update-Lead",
     {
-      description: "Update an existing lead by ID",
+      description: "Update an existing lead by ID. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the lead to update"),
         ...leadFieldsSchema,
@@ -106,20 +116,21 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       annotations: WRITE_ANNOTATIONS,
     },
     async ({ id, ...fields }) => {
-      return callHunterApi({
+      const result = await callHunterApi({
         path: `/leads/${id}`,
         apiKey,
         baseUrl,
         method: "PUT",
         params: buildLeadParams(fields),
       })
+      return withDeepLink(result, `/leads/${id}`)
     },
   )
 
   server.registerTool(
     "Delete-Lead",
     {
-      description: "Delete a lead by ID",
+      description: "Delete a lead by ID. Free (no credits).",
       inputSchema: {
         id: z.number().describe("ID of the lead to delete"),
       },
@@ -134,7 +145,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
     "Upsert-Lead",
     {
       description:
-        "Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created.",
+        "Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over Create-Lead when you may have duplicates.",
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().describe("Email address of the lead (used to match existing leads)"),
@@ -142,20 +153,21 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       annotations: WRITE_ANNOTATIONS,
     },
     async (fields) => {
-      return callHunterApi({
+      const result = await callHunterApi({
         path: "/leads",
         apiKey,
         baseUrl,
         method: "PUT",
         params: buildLeadParams(fields),
       })
+      return withDeepLinkFromId(result, (id) => `/leads/${id}`)
     },
   )
 
   server.registerTool(
     "Lead-Exists",
     {
-      description: "Check if a lead with a given email address exists",
+      description: "Check if a lead with a given email address exists. Free (no credits).",
       inputSchema: {
         email: z.string().describe("Email address to check"),
       },
