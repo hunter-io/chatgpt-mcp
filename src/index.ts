@@ -3,6 +3,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import companyComponent from "../bundle/company.html.ts"
 import discoverComponent from "../bundle/discover.html.ts"
+import {
+  BASE_API_URL_DEVELOPMENT,
+  BASE_API_URL_PRODUCTION,
+  READ_ONLY_ANNOTATIONS,
+  WRITE_ANNOTATIONS,
+  callHunterApi,
+} from "./helpers"
+import { registerAccountTools } from "./tools/account"
+import { registerCampaignTools } from "./tools/campaigns"
+import { registerCustomAttributeTools } from "./tools/custom-attributes"
+import { registerEnrichmentTools } from "./tools/enrichment"
+import { registerLeadTools } from "./tools/leads"
+import { registerLeadsListTools } from "./tools/leads-lists"
+import { registerSearchTools } from "./tools/search"
 
 export class HunterChatGPTMCP extends McpAgent {
   // Type assertion needed: `agents` pins @modelcontextprotocol/sdk@1.26.0 while
@@ -10,15 +24,14 @@ export class HunterChatGPTMCP extends McpAgent {
   // separate copies, causing a nominal type mismatch.
   server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "1.0.0",
+    version: "2.0.0",
   }) as any
 
   async init() {
-    let BASE_API_URL = "https://api.hunter.io/v2"
-    if (this.props?.environment === "development") {
-      BASE_API_URL = "http://localhost:3000/v2"
-    }
+    const baseUrl = this.props?.environment === "development" ? BASE_API_URL_DEVELOPMENT : BASE_API_URL_PRODUCTION
+    const apiKey = this.props!.apiKey as string
 
+    // --- ChatGPT widget resources ---
     this.server.registerResource("company-widget", "ui://widget/company-widget.html", {}, async () => ({
       contents: [
         {
@@ -59,8 +72,9 @@ export class HunterChatGPTMCP extends McpAgent {
       ],
     }))
 
+    // --- ChatGPT-specific tools with widget metadata ---
     this.server.registerTool(
-      "discover",
+      "Discover",
       {
         title: "Discover Companies",
         description:
@@ -70,7 +84,7 @@ export class HunterChatGPTMCP extends McpAgent {
             .string()
             .describe("Your search query. Example: 'software companies in San Francisco with more than 50 employees'"),
         },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+        annotations: READ_ONLY_ANNOTATIONS,
         _meta: {
           "openai/outputTemplate": "ui://widget/discover-widget.html",
           "openai/toolInvocation/invoking": "Rendering the results",
@@ -78,36 +92,41 @@ export class HunterChatGPTMCP extends McpAgent {
         },
       },
       async ({ query }: { query: string }) => {
-        const apiKey = this.props!.apiKey as string
-        const params = new URLSearchParams({ query: query })
-        const url = `${BASE_API_URL}/discover?${params.toString()}`
+        const params = new URLSearchParams({ query })
+        const url = `${baseUrl}/discover?${params.toString()}`
 
-        try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "X-SOURCE": "hunter-chatgpt",
-              Authorization: `Bearer ${apiKey}`,
-            },
-          })
-          if (!response.ok) {
-            throw new Error(`Response status: ${response.status}`)
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "X-SOURCE": "hunter-chatgpt",
+            Authorization: `Bearer ${apiKey}`,
+          },
+        })
+
+        if (!response.ok) {
+          let errorText: string
+          try {
+            const errorJson = await response.json()
+            errorText = JSON.stringify(errorJson)
+          } catch {
+            errorText = `HTTP ${response.status}`
           }
-
-          const json: any = await response.json()
-
           return {
-            structuredContent: json,
-            content: [{ type: "text", text: JSON.stringify(json) }],
+            content: [{ type: "text" as const, text: errorText }],
+            isError: true,
           }
-        } catch (error) {
-          throw new Error(error instanceof Error ? error.message : String(error), { cause: error })
+        }
+
+        const json: any = await response.json()
+        return {
+          structuredContent: json,
+          content: [{ type: "text" as const, text: JSON.stringify(json) }],
         }
       },
     )
 
     this.server.registerTool(
-      "enrich",
+      "Company-Enrichment",
       {
         title: "Enrich Company",
         description:
@@ -115,7 +134,7 @@ export class HunterChatGPTMCP extends McpAgent {
         inputSchema: {
           domain: z.string().describe("Domain name of the company to enrich"),
         },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+        annotations: READ_ONLY_ANNOTATIONS,
         _meta: {
           "openai/outputTemplate": "ui://widget/company-widget.html",
           "openai/toolInvocation/invoking": "Enrichment in progress",
@@ -123,34 +142,40 @@ export class HunterChatGPTMCP extends McpAgent {
         },
       },
       async ({ domain }: { domain: string }) => {
-        const apiKey = this.props!.apiKey as string
-        const params = new URLSearchParams({ domain: domain })
-        const url = `${BASE_API_URL}/companies/find?${params.toString()}`
-        try {
-          const response = await fetch(url, {
-            headers: {
-              "X-SOURCE": "hunter-chatgpt",
-              Authorization: `Bearer ${apiKey}`,
-            },
-          })
-          if (!response.ok) {
-            throw new Error(`Response status: ${response.status}`)
+        const params = new URLSearchParams({ domain })
+        const url = `${baseUrl}/companies/find?${params.toString()}`
+
+        const response = await fetch(url, {
+          headers: {
+            "X-SOURCE": "hunter-chatgpt",
+            Authorization: `Bearer ${apiKey}`,
+          },
+        })
+
+        if (!response.ok) {
+          let errorText: string
+          try {
+            const errorJson = await response.json()
+            errorText = JSON.stringify(errorJson)
+          } catch {
+            errorText = `HTTP ${response.status}`
           }
-
-          const json: any = await response.json()
-
           return {
-            structuredContent: json.data,
-            content: [],
+            content: [{ type: "text" as const, text: errorText }],
+            isError: true,
           }
-        } catch (error) {
-          throw new Error(error instanceof Error ? error.message : String(error), { cause: error })
+        }
+
+        const json: any = await response.json()
+        return {
+          structuredContent: json.data,
+          content: [],
         }
       },
     )
 
     this.server.registerTool(
-      "save",
+      "Save-Company",
       {
         title: "Save Company",
         description:
@@ -158,34 +183,21 @@ export class HunterChatGPTMCP extends McpAgent {
         inputSchema: {
           domain: z.string().describe("Domain name of the company to save into your Hunter Leads"),
         },
-        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+        annotations: WRITE_ANNOTATIONS,
       },
       async ({ domain }: { domain: string }) => {
-        const apiKey = this.props!.apiKey as string
-        const params = new URLSearchParams({ domain: domain })
-        const url = `${BASE_API_URL}/leads/companies?${params.toString()}`
-        try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "X-SOURCE": "hunter-chatgpt",
-              Authorization: `Bearer ${apiKey}`,
-            },
-          })
-          if (!response.ok) {
-            throw new Error(`Response status: ${response.status}`)
-          }
-
-          const json: any = await response.json()
-
-          return {
-            content: [{ type: "text", text: JSON.stringify(json) }],
-          }
-        } catch (error) {
-          throw new Error(error instanceof Error ? error.message : String(error), { cause: error })
-        }
+        return callHunterApi({ path: "/leads/companies", apiKey, baseUrl, method: "POST", params: { domain } })
       },
     )
+
+    // --- Shared tools from modules ---
+    registerSearchTools(this.server, apiKey, baseUrl)
+    registerEnrichmentTools(this.server, apiKey, baseUrl)
+    registerAccountTools(this.server, apiKey, baseUrl)
+    registerLeadTools(this.server, apiKey, baseUrl)
+    registerLeadsListTools(this.server, apiKey, baseUrl)
+    registerCustomAttributeTools(this.server, apiKey, baseUrl)
+    registerCampaignTools(this.server, apiKey, baseUrl)
   }
 }
 
