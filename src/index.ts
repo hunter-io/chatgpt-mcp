@@ -41,6 +41,7 @@ export class HunterChatGPTMCP extends McpAgent {
           mimeType: "text/html+skybridge",
           text: `${companyComponent}`.trim(),
           _meta: {
+            "openai/widgetDomain": "https://chatgpt.hunter.io",
             "openai/widgetAccessible": true,
             "openai/widgetPrefersBorder": true,
             "openai/widgetCSP": {
@@ -61,6 +62,7 @@ export class HunterChatGPTMCP extends McpAgent {
           mimeType: "text/html+skybridge",
           text: `${discoverComponent}`.trim(),
           _meta: {
+            "openai/widgetDomain": "https://chatgpt.hunter.io",
             "openai/widgetAccessible": true,
             "openai/widgetPrefersBorder": true,
             "openai/widgetCSP": {
