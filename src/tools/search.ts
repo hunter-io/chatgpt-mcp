@@ -1,6 +1,33 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { READ_ONLY_ANNOTATIONS, TOOL_NAMES, buildNextAction, callHunterApi, desc, embedNextAction } from "../helpers"
+import {
+  READ_ONLY_ANNOTATIONS,
+  TOOL_NAMES,
+  buildNextAction,
+  callHunterApi,
+  desc,
+  embedNextAction,
+  parseHunterApiData,
+} from "../helpers"
+
+interface DomainSearchData {
+  emails?: Array<{ value?: string }>
+}
+
+interface EmailVerifierData {
+  status?: string
+  email?: string
+}
+
+function firstEmailValue(data: DomainSearchData | null): string | null {
+  if (!data || !Array.isArray(data.emails)) return null
+  for (const entry of data.emails) {
+    if (entry && typeof entry.value === "string" && entry.value.length > 0) {
+      return entry.value
+    }
+  }
+  return null
+}
 
 export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
@@ -41,12 +68,26 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       if (required_field) params.required_field = required_field
       const result = await callHunterApi({ path: "/domain-search", apiKey, baseUrl, params })
       if (result.isError) return result
+
+      const email = firstEmailValue(parseHunterApiData<DomainSearchData>(result))
+      if (!email) {
+        return embedNextAction(
+          result,
+          buildNextAction({
+            kind: "complete",
+            summary: `No contacts found for ${domain}.`,
+          }),
+        )
+      }
+
       return embedNextAction(
         result,
         buildNextAction({
           kind: "call_tool",
           tool: TOOL_NAMES.emailVerifier,
-          reason: "Verify deliverability of the contacts you intend to save.",
+          reason: "Verify deliverability before saving.",
+          suggestedArgs: { email },
+          requiresConfirmation: true,
         }),
       )
     },
@@ -74,8 +115,31 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       inputSchema: { email: z.string().describe("Email address to verify") },
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async ({ email: _email }) => {
-      return callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email: _email } })
+    async ({ email }) => {
+      const result = await callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } })
+      if (result.isError) return result
+
+      const status = parseHunterApiData<EmailVerifierData>(result)?.status
+
+      if (status === "valid") {
+        return embedNextAction(
+          result,
+          buildNextAction({
+            kind: "call_tool",
+            tool: TOOL_NAMES.upsertLead,
+            reason: "Save the verified contact.",
+            suggestedArgs: { email },
+          }),
+        )
+      }
+
+      return embedNextAction(
+        result,
+        buildNextAction({
+          kind: "complete",
+          summary: status ? `Email is ${status} — not saving.` : "Email verification status unavailable — not saving.",
+        }),
+      )
     },
   )
 

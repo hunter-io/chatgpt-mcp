@@ -112,6 +112,37 @@ export function withDeepLinkFromId(result: McpTextResult, pathFn: (id: number) =
   return result
 }
 
+/**
+ * Parses the full top-level response from a callHunterApi result. Mirrors
+ * the extraction pattern used by `withDeepLinkFromId` — content[0].text is
+ * JSON with a `\n\nSource: ...` suffix appended.
+ *
+ * Use this when you need fields outside `.data` (e.g., `.meta.count`,
+ * `.data.message`). For `.data`-only access prefer `parseHunterApiData<T>`.
+ *
+ * Returns null on parse failure or when the result is an error. The generic
+ * T is unchecked at runtime — callers are responsible for defensive narrowing.
+ */
+export function parseHunterApiResponse<T>(result: McpTextResult): T | null {
+  if (result.isError) return null
+  try {
+    const raw = result.content[0]?.text ?? ""
+    const jsonText = raw.split("\n\nSource:")[0]
+    return JSON.parse(jsonText) as T
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Parses the `.data` payload out of a callHunterApi result. Convenience
+ * wrapper around `parseHunterApiResponse`.
+ */
+export function parseHunterApiData<T>(result: McpTextResult): T | null {
+  const response = parseHunterApiResponse<{ data?: T }>(result)
+  return response?.data ?? null
+}
+
 interface FormParamsMap {
   [key: string]: string | string[] | FormParamsMap
 }
@@ -124,6 +155,7 @@ interface GetOptions {
   apiKey: string
   baseUrl: string
   params?: QueryParams
+  signal?: AbortSignal
 }
 
 interface MutateOptions {
@@ -132,6 +164,7 @@ interface MutateOptions {
   baseUrl: string
   method: "POST" | "PUT" | "DELETE"
   params?: FormParams
+  signal?: AbortSignal
 }
 
 type CallOptions = GetOptions | MutateOptions
@@ -187,7 +220,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     headers["Content-Type"] = "application/x-www-form-urlencoded"
   }
 
-  const response = await fetch(url, { method, headers, body })
+  const response = await fetch(url, { method, headers, body, signal: options.signal })
 
   if (!response.ok) {
     let errorText: string
@@ -215,6 +248,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   }
 }
 
+// NEXT_ACTION_START
 // ─── NextAction chaining (Pillar 1) ────────────────────────────────────────
 //
 // Mirrors openai/openai-apps-sdk-examples/cards_against_ai_server_node — the
@@ -227,16 +261,33 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 // Description prose reinforces with "CRITICAL: if nextAction.kind === 'call_tool',
 // call the indicated tool immediately."
 //
-// See docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 1).
+// This region (between NEXT_ACTION_START / NEXT_ACTION_END markers) must be
+// BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and remote-mcp/src/helpers.ts
+// — enforced by scripts/check-tool-names-aligned.mjs.
+//
+// See docs/plans/2026-04-29-feat-chatgpt-mcp-confirmation-gates-plan.md (Phase 1).
+
+/**
+ * Tools whose chained `nextAction` may carry a `pendingToolCall` for hard
+ * confirmation. Currently only `Start-Campaign` (sends real emails — Phase 4).
+ * Narrowing the type prevents future emissions from steering the model into
+ * arbitrary tools under cover of an `ask_user` question.
+ */
+export type ConfirmableToolName = typeof TOOL_NAMES.startCampaign
 
 /**
  * The chaining hint a tool emits to tell the model what to do next.
  *
  * - `call_tool`: chain into another tool. `tool` is the registered ToolName
  *   (compile-time check). `reason` is constants only — never untrusted API
- *   data (prompt-injection guard).
+ *   data (prompt-injection guard). `requiresConfirmation: true` is a
+ *   model-prompting signal (advisory; not a documented OpenAI Apps SDK field).
  * - `ask_user`: stop and wait for user input. Used for destructive ops and
- *   ambiguous next steps where the model shouldn't auto-pick.
+ *   ambiguous next steps where the model shouldn't auto-pick. When
+ *   `pendingToolCall` is present, the model should relay `question` to the
+ *   user, then on confirmation re-issue `pendingToolCall.tool` with
+ *   `pendingToolCall.args`. The receiving tool inspects `args.confirmed`
+ *   to distinguish a confirmed re-issue from a fresh direct call.
  * - `complete`: terminal step, summarise and stop.
  */
 export type NextAction =
@@ -247,14 +298,19 @@ export type NextAction =
       suggestedArgs?: Readonly<Record<string, unknown>>
       requiresConfirmation?: boolean
     }
-  | { kind: "ask_user"; question: string }
+  | {
+      kind: "ask_user"
+      question: string
+      pendingToolCall?: { tool: ConfirmableToolName; args: Readonly<Record<string, unknown>> }
+    }
   | { kind: "complete"; summary: string }
 
 const REASON_MAX_LENGTH = 200
+const QUESTION_MAX_LENGTH = 300
 const SUGGESTED_ARGS_MAX_BYTES = 1024
 
 /**
- * Truncates `reason` at 200 chars to keep chained-flow token cost bounded.
+ * Truncates `reason`/`question` to keep chained-flow token cost bounded.
  * The discriminated union enforces shape at compile time — no runtime throws.
  */
 export function buildNextAction(input: NextAction): NextAction {
@@ -262,18 +318,25 @@ export function buildNextAction(input: NextAction): NextAction {
     return {
       kind: "call_tool",
       tool: input.tool,
-      reason: truncateReason(input.reason),
+      reason: truncate(input.reason, REASON_MAX_LENGTH, "reason"),
       ...(input.suggestedArgs !== undefined && { suggestedArgs: input.suggestedArgs }),
       ...(input.requiresConfirmation && { requiresConfirmation: true }),
+    }
+  }
+  if (input.kind === "ask_user") {
+    return {
+      kind: "ask_user",
+      question: truncate(input.question, QUESTION_MAX_LENGTH, "question"),
+      ...(input.pendingToolCall !== undefined && { pendingToolCall: input.pendingToolCall }),
     }
   }
   return input
 }
 
-function truncateReason(reason: string): string {
-  if (reason.length <= REASON_MAX_LENGTH) return reason
-  console.warn(`buildNextAction: reason truncated from ${reason.length} to ${REASON_MAX_LENGTH} chars`)
-  return reason.slice(0, REASON_MAX_LENGTH - 3) + "..."
+function truncate(value: string, max: number, label: string): string {
+  if (value.length <= max) return value
+  console.warn(`buildNextAction: ${label} truncated from ${value.length} to ${max} chars`)
+  return value.slice(0, max - 3) + "..."
 }
 
 /**
@@ -283,9 +346,9 @@ function truncateReason(reason: string): string {
  *
  * Single helper means the two locations can never drift apart.
  *
- * If the serialised payload exceeds 1KB (e.g., bloated suggestedArgs),
- * skips embedding and returns the result unchanged — the chain becomes
- * advisory rather than blowing up token budget.
+ * If the serialised payload exceeds 1KB (e.g., bloated suggestedArgs or
+ * pendingToolCall.args), skips embedding and returns the result unchanged —
+ * the chain becomes advisory rather than blowing up token budget.
  */
 export function embedNextAction(result: McpTextResult, nextAction: NextAction): McpTextResult {
   if (result.isError) return result
@@ -318,6 +381,33 @@ export const READ_ONLY_ANNOTATIONS = {
   openWorldHint: true,
 } as const
 
+/**
+ * Paid tools — flag `destructiveHint: true` so ChatGPT host UI surfaces a
+ * confirmation prompt before invocation.
+ *
+ * IMPORTANT: `readOnlyHint` is `false` even though paid tools only read from
+ * the Hunter API. Per the MCP spec, `destructiveHint` is "meaningful only
+ * when readOnlyHint is false" — clients honoring the spec ignore
+ * `destructiveHint` whenever `readOnlyHint: true` and may auto-approve the
+ * tool as safe. To actually trigger the host UI prompt, the tool must
+ * advertise that it modifies environment state.
+ *
+ * Defensible semantically: paid tools deduct credits from the user's
+ * account, which is a billing-state modification. The user's credit balance
+ * is environment state, even if no Hunter resource is mutated.
+ *
+ * The semantic stretch on "destructive" ("usually means delete-or-overwrite")
+ * is intentional: per OpenAI Apps SDK submission guidelines, destructive-
+ * style friction is the documented primitive for credit-consuming actions.
+ * Empirical verification required (plan Phase 1.5) — Feb 2026 community
+ * reports document intermittent ChatGPT ignoring of MCP annotations.
+ */
+export const PAID_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
+} as const
+
 export const WRITE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
@@ -329,3 +419,4 @@ export const DESTRUCTIVE_ANNOTATIONS = {
   destructiveHint: true,
   openWorldHint: true,
 } as const
+// NEXT_ACTION_END
