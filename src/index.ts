@@ -7,17 +7,23 @@ import {
   BASE_API_URL_DEVELOPMENT,
   BASE_API_URL_PRODUCTION,
   READ_ONLY_ANNOTATIONS,
+  TOOL_NAMES,
   WRITE_ANNOTATIONS,
+  buildNextAction,
   callHunterApi,
+  desc,
+  embedNextAction,
   withDeepLink,
 } from "./helpers"
+import { registerPrompts } from "./prompts"
+import { CAPABILITIES_RECOVERY_MD, CAPABILITIES_RECOVERY_URI } from "./resources/capabilities-recovery"
 import { registerAccountTools } from "./tools/account"
 import { registerCampaignTools } from "./tools/campaigns"
 import { registerCustomAttributeTools } from "./tools/custom-attributes"
 import { registerEnrichmentTools } from "./tools/enrichment"
 import { registerLeadTools } from "./tools/leads"
 import { registerLeadsListTools } from "./tools/leads-lists"
-import { registerPrompts } from "./prompts"
+import { registerProspectingTool } from "./tools/prospecting"
 import { registerSearchTools } from "./tools/search"
 
 export class HunterChatGPTMCP extends McpAgent {
@@ -28,6 +34,27 @@ export class HunterChatGPTMCP extends McpAgent {
     name: "Hunter ChatGPT",
     version: "2.0.0",
   }) as any
+
+  // Guard against the agents framework clobbering the stored API key when the
+  // Durable Object wakes from hibernation. The framework calls updateProps()
+  // with whatever props arrive in the current request; if those props lack an
+  // apiKey (e.g. because a proxy stripped the header, or a non-standard client
+  // didn't resend it), the stored key would be overwritten with undefined and
+  // every subsequent tool call would send "Authorization: Bearer undefined" → 401.
+  //
+  // Mirrors remote-mcp/src/index.ts:onStart — the same risk exists here.
+  async onStart(props?: Record<string, unknown>) {
+    if (props && !props.apiKey) {
+      try {
+        const stored = (await this.ctx.storage.get("props")) as Record<string, unknown> | undefined
+        if (stored?.apiKey) props.apiKey = stored.apiKey
+      } catch {
+        // Storage read can fail on first-ever init — that's fine,
+        // the API key will come from ctx.props on the initial request.
+      }
+    }
+    return super.onStart(props)
+  }
 
   async init() {
     const baseUrl = this.props?.environment === "development" ? BASE_API_URL_DEVELOPMENT : BASE_API_URL_PRODUCTION
@@ -78,11 +105,9 @@ export class HunterChatGPTMCP extends McpAgent {
 
     // --- ChatGPT-specific tools with widget metadata ---
     this.server.registerTool(
-      "Discover",
+      TOOL_NAMES.discover,
       {
-        title: "Discover Companies",
-        description:
-          "Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). Follow up with Domain-Search to find contacts at these companies.",
+        description: desc`Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). CRITICAL: never auto-pick the top result for a follow-up search — emit nextAction.kind === "ask_user" and let the user select which company to investigate. The top Discover hit is not necessarily the best semantic match.`,
         inputSchema: {
           query: z
             .string()
@@ -122,19 +147,25 @@ export class HunterChatGPTMCP extends McpAgent {
         }
 
         const json: any = await response.json()
-        return {
+        const result = {
           structuredContent: json,
           content: [{ type: "text" as const, text: JSON.stringify(json) }],
         }
+        return embedNextAction(
+          result,
+          buildNextAction({
+            kind: "ask_user",
+            question:
+              "I found matching companies. Which one(s) should I find contacts for? You can also refine the search.",
+          }),
+        )
       },
     )
 
     this.server.registerTool(
-      "Company-Enrichment",
+      TOOL_NAMES.companyEnrichment,
       {
-        title: "Enrich Company",
-        description:
-          "Enrich a company domain with industry, size, location, technologies, funding, and social profiles. Does NOT return personal data (PII). Costs 1 enrichment credit — only charged if data is found. If you only have a company name, try assuming the domain. Follow up with Domain-Search to find contacts or Save-Company to save as a lead.",
+        description: desc`Enrich a company domain with industry, size, location, technologies, funding, and social profiles. Does NOT return personal data (PII). Costs 1 enrichment credit — only charged if data is found. If you only have a company name, try assuming the domain. Follow up with ${TOOL_NAMES.domainSearch} to find contacts or ${TOOL_NAMES.saveCompany} to save as a lead.`,
         inputSchema: {
           domain: z.string().describe("Domain name of the company to enrich"),
         },
@@ -171,17 +202,23 @@ export class HunterChatGPTMCP extends McpAgent {
         }
 
         const json: any = await response.json()
-        return {
-          structuredContent: json.data,
-          content: [],
-        }
+        return embedNextAction(
+          {
+            structuredContent: json.data,
+            content: [],
+          },
+          buildNextAction({
+            kind: "ask_user",
+            question:
+              "Save this company as a lead, find contacts at this domain, or both? (Multiple equally-valid next steps — let the user choose.)",
+          }),
+        )
       },
     )
 
     this.server.registerTool(
-      "Save-Company",
+      TOOL_NAMES.saveCompany,
       {
-        title: "Save Company",
         description: "Save a company as a lead in your Hunter account. Free (no credits).",
         inputSchema: {
           domain: z.string().describe("Domain name of the company to save into your Hunter Leads"),
@@ -208,7 +245,27 @@ export class HunterChatGPTMCP extends McpAgent {
     registerLeadsListTools(this.server, apiKey, baseUrl)
     registerCustomAttributeTools(this.server, apiKey, baseUrl)
     registerCampaignTools(this.server, apiKey, baseUrl)
+    registerProspectingTool(this.server)
     registerPrompts(this.server)
+
+    // Capability recovery resource — see docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 5).
+    this.server.registerResource(
+      "capabilities-recovery",
+      CAPABILITIES_RECOVERY_URI,
+      {
+        description: "How to translate ambiguous user intent into Hunter API filter values.",
+        mimeType: "text/markdown",
+      },
+      async () => ({
+        contents: [
+          {
+            uri: CAPABILITIES_RECOVERY_URI,
+            mimeType: "text/markdown",
+            text: CAPABILITIES_RECOVERY_MD,
+          },
+        ],
+      }),
+    )
   }
 }
 

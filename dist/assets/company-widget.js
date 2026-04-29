@@ -8528,7 +8528,7 @@ function Fe() {
 		if (e?.callTool) {
 			i(!0);
 			try {
-				await e.callTool("save", { domain: c.domain }), o(!0);
+				await e.callTool("Save-Company", { domain: c.domain }), o(!0);
 			} catch (e) {
 				throw Error(e instanceof Error ? e.message : String(e), { cause: e });
 			} finally {

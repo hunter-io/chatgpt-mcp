@@ -147,7 +147,7 @@ function App() {
 
     setIsSaving(true)
     try {
-      await openai.callTool("save", { domain: company.domain })
+      await openai.callTool("Save-Company", { domain: company.domain })
       setIsSaved(true)
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : String(error), { cause: error })

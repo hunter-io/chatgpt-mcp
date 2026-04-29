@@ -8508,7 +8508,7 @@ function Me({ company: e }) {
 		if (t?.callTool) {
 			o(!0);
 			try {
-				await t.callTool("save", { domain: e.domain }), c(!0);
+				await t.callTool("Save-Company", { domain: e.domain }), c(!0);
 			} catch (e) {
 				throw Error(e instanceof Error ? e.message : String(e), { cause: e });
 			} finally {

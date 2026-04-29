@@ -1,13 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { callHunterApi, READ_ONLY_ANNOTATIONS } from "../helpers"
+import { READ_ONLY_ANNOTATIONS, TOOL_NAMES, buildNextAction, callHunterApi, desc, embedNextAction } from "../helpers"
 
 export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
-    "Domain-Search",
+    TOOL_NAMES.domainSearch,
     {
-      description:
-        "Get email addresses and contact data for a domain. Returns emails with names, positions, and confidence scores. Costs 1 search credit per 10 emails returned (rounded up) — only charged if emails are found. Use Email-Finder for a specific person, or this tool to browse all contacts.",
+      description: desc`Get email addresses and contact data for a domain. Returns emails with names, positions, and confidence scores. Costs 1 search credit per 10 emails returned (rounded up) — only charged if emails are found. Use ${TOOL_NAMES.emailFinder} for a specific person, or this tool to browse all contacts. CRITICAL: when the user wants verified contacts, the response will include nextAction.kind === "call_tool" pointing to ${TOOL_NAMES.emailVerifier} — call it immediately on the first valid email found.`,
       inputSchema: {
         domain: z.string().describe("Domain name to find Data for"),
         limit: z.number().optional().describe("Maximum number of email addresses to return"),
@@ -40,15 +39,23 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       if (seniority) params.seniority = seniority
       if (department) params.department = department
       if (required_field) params.required_field = required_field
-      return callHunterApi({ path: "/domain-search", apiKey, baseUrl, params })
+      const result = await callHunterApi({ path: "/domain-search", apiKey, baseUrl, params })
+      if (result.isError) return result
+      return embedNextAction(
+        result,
+        buildNextAction({
+          kind: "call_tool",
+          tool: TOOL_NAMES.emailVerifier,
+          reason: "Verify deliverability of the contacts you intend to save.",
+        }),
+      )
     },
   )
 
   server.registerTool(
-    "Email-Finder",
+    TOOL_NAMES.emailFinder,
     {
-      description:
-        "Find a specific person's email address at a company. Provide full name and domain. Costs 1 search credit — only charged if an email is found. Follow up with Email-Verifier to check deliverability.",
+      description: desc`Find a specific person's email address at a company. Provide full name and domain. Costs 1 search credit — only charged if an email is found. Follow up with ${TOOL_NAMES.emailVerifier} to check deliverability.`,
       inputSchema: {
         full_name: z.string().describe("Full name of the person to find the email address for"),
         domain: z.string().describe("Domain name to find the person's email address for"),
@@ -61,23 +68,21 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   )
 
   server.registerTool(
-    "Email-Verifier",
+    TOOL_NAMES.emailVerifier,
     {
-      description:
-        "Check if an email address is deliverable. Returns status (valid, invalid, accept_all, etc.) and confidence score. Costs 1 verification credit — only charged for valid, invalid, or accept_all results. Follow up with Create-Lead or Upsert-Lead to save verified contacts.",
+      description: desc`Check if an email address is deliverable. Returns status (valid, invalid, accept_all, etc.) and confidence score. Costs 1 verification credit — only charged for valid, invalid, or accept_all results. CRITICAL: when status is "valid", call ${TOOL_NAMES.upsertLead} immediately with the same email to save the verified contact. For any other status, stop here.`,
       inputSchema: { email: z.string().describe("Email address to verify") },
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async ({ email }) => {
-      return callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } })
+    async ({ email: _email }) => {
+      return callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email: _email } })
     },
   )
 
   server.registerTool(
-    "Email-Count",
+    TOOL_NAMES.emailCount,
     {
-      description:
-        "Get the number of email addresses Hunter has found for a domain. Free (no credits). Useful to check data availability before running a Domain-Search.",
+      description: desc`Get the number of email addresses Hunter has found for a domain. Free (no credits). Useful to check data availability before running a ${TOOL_NAMES.domainSearch}.`,
       inputSchema: {
         domain: z.string().describe("Domain name to count email addresses for"),
         type: z.enum(["personal", "generic"]).optional().describe("Type of email addresses to count"),

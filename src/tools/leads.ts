@@ -1,12 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
-  callHunterApi,
-  withDeepLink,
-  withDeepLinkFromId,
   DESTRUCTIVE_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
+  TOOL_NAMES,
   WRITE_ANNOTATIONS,
+  buildNextAction,
+  callHunterApi,
+  desc,
+  embedNextAction,
+  withDeepLink,
+  withDeepLinkFromId,
 } from "../helpers"
 
 const leadFieldsSchema = {
@@ -142,10 +146,9 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Upsert-Lead",
+    TOOL_NAMES.upsertLead,
     {
-      description:
-        "Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over Create-Lead when you may have duplicates.",
+      description: desc`Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over ${TOOL_NAMES.createLead} when you may have duplicates. Terminal step in the prospecting chain — emits nextAction.kind === "complete".`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().describe("Email address of the lead (used to match existing leads)"),
@@ -160,7 +163,9 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
         method: "PUT",
         params: buildLeadParams(fields),
       })
-      return withDeepLinkFromId(result, (id) => `/leads/${id}`)
+      const linked = withDeepLinkFromId(result, (id) => `/leads/${id}`)
+      if (linked.isError) return linked
+      return embedNextAction(linked, buildNextAction({ kind: "complete", summary: "Lead saved to Hunter." }))
     },
   )
 
