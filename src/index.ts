@@ -107,7 +107,7 @@ export class HunterChatGPTMCP extends McpAgent {
     this.server.registerTool(
       TOOL_NAMES.discover,
       {
-        description: desc`Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). CRITICAL: never auto-pick the top result for a follow-up search — emit nextAction.kind === "ask_user" and let the user select which company to investigate. The top Discover hit is not necessarily the best semantic match.`,
+        description: desc`Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). CRITICAL: never auto-pick the top result for a follow-up search — emit nextAction.kind === "ask_user" and let the user select which company to investigate. The top Discover hit is not necessarily the best semantic match. The response includes \`meta.permalink\` — a link to the same query on hunter.io that the user can open to see all results with the inferred filters applied; surface it as "See all results on Hunter" when relevant.`,
         inputSchema: {
           query: z
             .string()
