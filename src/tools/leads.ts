@@ -7,8 +7,11 @@ import {
   WRITE_ANNOTATIONS,
   buildNextAction,
   callHunterApi,
+  carryLoopFilters,
   desc,
   embedNextAction,
+  loopRecoveryAction,
+  pendingCompaniesSchema,
   withDeepLink,
   withDeepLinkFromId,
 } from "../helpers"
@@ -148,14 +151,27 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.upsertLead,
     {
-      description: desc`Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over ${TOOL_NAMES.createLead} when you may have duplicates. Terminal step in the prospecting chain — emits nextAction.kind === "complete".`,
+      description: desc`Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over ${TOOL_NAMES.createLead} when you may have duplicates. Terminal step in the single-company prospecting chain — emits nextAction.kind === "complete". CRITICAL: when called with 'pending_companies' (multi-company loop mode), the response chains directly to ${TOOL_NAMES.domainSearch} for the next pending company after the save, instead of completing — so the entire prospecting loop runs without between-company gates.`,
       inputSchema: {
         ...leadFieldsSchema,
-        email: z.string().describe("Email address of the lead (used to match existing leads)"),
+        email: z.string().email().max(254).describe("Email address of the lead (used to match existing leads)"),
+        pending_companies: pendingCompaniesSchema,
+        // Domain-Search filter carry: not used by Upsert-Lead itself, only
+        // forwarded to the next chained Domain-Search call so filters survive
+        // the full multi-company loop. Field names mirror Domain-Search's so
+        // the chained suggestedArgs spread cleanly across the loop.
+        limit: z.number().optional().describe("Loop carry: forwarded from Domain-Search."),
+        type: z.enum(["personal", "generic"]).optional().describe("Loop carry: forwarded from Domain-Search."),
+        seniority: z.string().optional().describe("Loop carry: forwarded from Domain-Search."),
+        department: z.string().optional().describe("Loop carry: forwarded from Domain-Search."),
+        required_field: z
+          .enum(["full_name", "position", "phone_number"])
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search."),
       },
       annotations: WRITE_ANNOTATIONS,
     },
-    async (fields) => {
+    async ({ pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
       const result = await callHunterApi({
         path: "/leads",
         apiKey,
@@ -164,8 +180,39 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
         params: buildLeadParams(fields),
       })
       const linked = withDeepLinkFromId(result, (id) => `/leads/${id}`)
-      if (linked.isError) return linked
-      return embedNextAction(linked, buildNextAction({ kind: "complete", summary: "Lead saved to Hunter." }))
+      if (linked.isError) {
+        if (pending_companies !== undefined && pending_companies.length > 0) {
+          return loopRecoveryAction(linked, pending_companies, "Lead save failed")
+        }
+        return linked
+      }
+
+      if (pending_companies !== undefined && pending_companies.length > 0) {
+        const [next, ...rest] = pending_companies
+        const filterCarry = carryLoopFilters({ limit, type, seniority, department, required_field })
+        return embedNextAction(
+          linked,
+          buildNextAction({
+            kind: "call_tool",
+            tool: TOOL_NAMES.domainSearch,
+            reason: "Lead saved; continuing loop with next picked company.",
+            suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
+          }),
+        )
+      }
+
+      // Reachable when pending_companies is undefined (single-call mode) OR an empty
+      // array (last hop in a loop — non-empty was handled above). The flag below
+      // distinguishes the two so the loop's terminal save reads as "loop complete"
+      // rather than the single-call summary.
+      const isLastLoopHop = pending_companies !== undefined
+      return embedNextAction(
+        linked,
+        buildNextAction({
+          kind: "complete",
+          summary: isLastLoopHop ? "Lead saved. Multi-company loop complete." : "Lead saved to Hunter.",
+        }),
+      )
     },
   )
 

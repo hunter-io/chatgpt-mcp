@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 export const BASE_API_URL_PRODUCTION = "https://api.hunter.io/v2"
 export const BASE_API_URL_DEVELOPMENT = "http://localhost:3000/v2"
 export const HUNTER_BASE = "https://hunter.io"
@@ -236,13 +238,54 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     }
   }
 
-  if (response.status === 204) {
+  // Detect 2xx responses with no body. Cloudflare Workers commonly omits
+  // `content-length` for chunked-transfer responses, so header sniffing is
+  // unreliable; reading the body once and branching on its length is both
+  // simpler and defensive against missing/lying headers. Hunter's Rails API
+  // returns 202 Accepted with an empty body (e.g. `Delete-Leads-List` on
+  // lists with >10 leads triggers an async `scheduled_destroy`); 204 is the
+  // canonical no-content case. Wrapping in try/catch protects against
+  // mid-request cancellation (Worker abort, client disconnect) — without it,
+  // `response.text()` rejects and throws out of the tool handler uncaught.
+  let text: string
+  try {
+    text = await response.text()
+  } catch (e) {
     return {
-      content: [{ type: "text" as const, text: "Success (no content)\n\nSource: Hunter.io (https://hunter.io)" }],
+      content: [
+        {
+          type: "text" as const,
+          text: `Failed to read response body from Hunter: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      ],
+      isError: true,
+    }
+  }
+  if (text.length === 0) {
+    const message =
+      response.status === 202 ? "Accepted — operation scheduled for asynchronous completion." : "Success (no content)."
+    return {
+      content: [{ type: "text" as const, text: `${message}\n\nSource: Hunter.io (https://hunter.io)` }],
     }
   }
 
-  const json = await response.json()
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    // 2xx with non-JSON body. A misconfigured proxy / edge could serve HTML
+    // or plain text with a 200 status; surface as an error so downstream
+    // tools don't silently treat malformed responses as success.
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Unexpected non-JSON response from Hunter (status ${response.status}): ${text.slice(0, 200)}`,
+        },
+      ],
+      isError: true,
+    }
+  }
   return {
     content: [{ type: "text" as const, text: `${JSON.stringify(json)}\n\nSource: Hunter.io (https://hunter.io)` }],
   }
@@ -346,31 +389,71 @@ function truncate(value: string, max: number, label: string): string {
  *
  * Single helper means the two locations can never drift apart.
  *
- * If the serialised payload exceeds 1KB (e.g., bloated suggestedArgs or
- * pendingToolCall.args), skips embedding and returns the result unchanged —
- * the chain becomes advisory rather than blowing up token budget.
+ * If the serialised payload exceeds the byte cap (e.g., bloated suggestedArgs
+ * or a long pending_companies array of IDN domains), embeds a generic
+ * ask_user fallback so the model gets a visible "I can't auto-continue"
+ * signal instead of guessing why the loop terminated.
+ *
+ * `evenOnError: true` allows callers to embed a recovery nextAction (e.g., a
+ * skip/retry/stop ask_user) on a `result.isError` path. Default is false —
+ * error results normally don't get chained next-actions because the caller
+ * has bigger problems than continuing the chain.
  */
-export function embedNextAction(result: McpTextResult, nextAction: NextAction): McpTextResult {
-  if (result.isError) return result
-  const serialised = JSON.stringify(nextAction)
-  if (serialised.length > SUGGESTED_ARGS_MAX_BYTES) {
-    console.warn(
-      `embedNextAction: payload ${serialised.length} bytes exceeds ${SUGGESTED_ARGS_MAX_BYTES} cap — skipping embed`,
-    )
-    return result
-  }
-  return {
+export function embedNextAction(
+  result: McpTextResult,
+  nextAction: NextAction,
+  opts?: { evenOnError?: boolean },
+): McpTextResult {
+  if (result.isError && !opts?.evenOnError) return result
+  const append = (action: NextAction): McpTextResult => ({
     ...result,
     content: [
       ...result.content,
       {
         type: "text" as const,
-        text: serialised,
+        text: JSON.stringify(action),
         annotations: { audience: ["assistant"] },
       },
     ],
-    structuredContent: { ...result.structuredContent, nextAction },
+    structuredContent: { ...result.structuredContent, nextAction: action },
+  })
+  const byteSize = new TextEncoder().encode(JSON.stringify(nextAction)).byteLength
+  if (byteSize > SUGGESTED_ARGS_MAX_BYTES) {
+    console.warn(
+      `embedNextAction: payload ${byteSize} bytes exceeds ${SUGGESTED_ARGS_MAX_BYTES} cap — emitting fallback ask_user`,
+    )
+    return append(buildOverCapFallback(nextAction))
   }
+  return append(nextAction)
+}
+
+/**
+ * Builds a recovery `ask_user` when `embedNextAction`'s byte cap is hit. If the
+ * truncated action carried `pending_companies` (the multi-company loop carry),
+ * the fallback names the cause and remaining count so the agent has actionable
+ * continuation data instead of a generic "too large" message.
+ */
+function buildOverCapFallback(nextAction: NextAction): NextAction {
+  if (nextAction.kind === "call_tool") {
+    const args = nextAction.suggestedArgs as { domain?: unknown; pending_companies?: unknown } | undefined
+    if (Array.isArray(args?.pending_companies)) {
+      // When suggestedArgs carries `domain`, the next call is a Domain-Search
+      // for that domain — `pending_companies` is the slice AFTER it, so the
+      // total remaining count is `length + 1`. When `domain` is absent (chain
+      // to Email-Verifier or Upsert-Lead with `email` instead), the array
+      // already holds every remaining domain, so no +1.
+      const hasNextDomain = typeof args.domain === "string"
+      const remaining = args.pending_companies.length + (hasNextDomain ? 1 : 0)
+      return buildNextAction({
+        kind: "ask_user",
+        question: `The pending companies list is too large to chain automatically (${remaining} domains remain). Tell me which to process next, or say 'stop' to end the loop.`,
+      })
+    }
+  }
+  return buildNextAction({
+    kind: "ask_user",
+    question: "The next chained step is too large to embed automatically. Please tell me how to proceed.",
+  })
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -420,3 +503,113 @@ export const DESTRUCTIVE_ANNOTATIONS = {
   openWorldHint: true,
 } as const
 // NEXT_ACTION_END
+
+/**
+ * RFC 1035-shaped hostname regex used to validate the primary `domain` input
+ * on Domain-Search / Email-Finder / Email-Count and every element of
+ * `pending_companies`. Rejects non-domain payloads (control chars, newlines,
+ * free-form prose, "ignore prior instructions" strings) so they can't ride
+ * into chained `suggestedArgs` and reflect into the model-only content block.
+ * Matches punycode (`xn--*`) for IDN; UTF-8 IDNs must be encoded by the caller.
+ */
+export const DOMAIN_REGEX = /^([a-z0-9-]+\.)+[a-z]{2,}$/i
+
+/**
+ * Domain-shaped string with a 253-char cap (RFC 1035). Use for any tool input
+ * whose value is later interpolated into chained next-action questions or
+ * suggestedArgs — without this, an attacker controlling the input could
+ * inject control chars / newlines into the assistant-only content block.
+ */
+export const domainStringSchema = z.string().regex(DOMAIN_REGEX, "must be a valid domain").max(253)
+
+/**
+ * Shared schema for the multi-company loop carry, used by Domain-Search,
+ * Email-Verifier, and Upsert-Lead. Three defenses baked in:
+ *
+ *   - `.max(20)` bounds the credit-spend blast radius. Without a cap, a
+ *     prompt-injection that coerces the model into seeding a 100-entry array
+ *     would silently spend ~100 verification credits inside the chain (the
+ *     loop drops `requiresConfirmation: true` on Email-Verifier because
+ *     populating the array IS the user's authorization). 20 is a generous
+ *     ceiling for legitimate prospecting picks.
+ *
+ *   - Each element validated by `DOMAIN_REGEX` so non-domain payloads can't
+ *     flow through chained suggestedArgs.
+ *
+ *   - `.transform()` lowercases each entry and dedupes via Set. Hunter's API
+ *     treats domains case-insensitively, so `["Stripe.com", "stripe.com"]`
+ *     would otherwise burn two verification credits on the same lead. The
+ *     transform fires on every entry point (DS, EV, US) so the dedup
+ *     guarantee survives even when a model invokes EV/US directly without
+ *     going through DS's handler.
+ */
+export const PENDING_COMPANIES_MAX = 20
+export const pendingCompaniesSchema = z
+  .array(domainStringSchema)
+  .max(PENDING_COMPANIES_MAX, `Multi-company loop is capped at ${PENDING_COMPANIES_MAX} picks per chain.`)
+  .transform((arr) => Array.from(new Set(arr.map((d) => d.toLowerCase()))))
+  .optional()
+  .describe(
+    desc`Multi-company loop carry (capped at 20 domains). On the first ${TOOL_NAMES.domainSearch} call, set this to the array of remaining picked domains — the response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave undefined for single-call usage.`,
+  )
+
+/**
+ * Builds an `ask_user` recovery next-action for an in-loop tool failure (Hunter
+ * API error mid-chain). Used by Domain-Search, Email-Verifier, and Upsert-Lead
+ * handlers — each emits the same skip/retry/stop prompt, just with a different
+ * failure context. The next pending domain is named explicitly so the agent's
+ * "skip" option is concrete (per agent-native review).
+ *
+ * Caller MUST verify `pending_companies?.length > 0` before invoking — the
+ * helper assumes there's a next domain to advance to.
+ */
+export function loopRecoveryAction(
+  result: McpTextResult,
+  pending_companies: readonly string[],
+  failureContext: string,
+): McpTextResult {
+  const remaining = pending_companies.length
+  const noun = remaining === 1 ? "company" : "companies"
+  const nextDomain = pending_companies[0]
+  return embedNextAction(
+    result,
+    buildNextAction({
+      kind: "ask_user",
+      question: `${failureContext}. ${remaining} ${noun} remain in the loop (next: ${nextDomain}). Skip and continue, retry, or stop?`,
+    }),
+    { evenOnError: true },
+  )
+}
+
+/**
+ * Domain-Search filter args that should travel along the multi-company loop
+ * chain so the next Domain-Search call applies the same filters as the first
+ * (e.g. `seniority`, `department`). Without this carry, "find marketing
+ * executives at companies X, Y, Z" would filter at X but run an unfiltered
+ * search at Y and Z. Email-Verifier and Upsert-Lead accept these as carry-only
+ * fields (ignored for their own API calls; only forwarded in chained
+ * suggestedArgs). `offset` is intentionally NOT carried — each company starts
+ * a fresh page-1 search.
+ */
+export interface LoopFilters {
+  limit?: number
+  type?: "personal" | "generic"
+  seniority?: string
+  department?: string
+  required_field?: "full_name" | "position" | "phone_number"
+}
+
+/**
+ * Picks the loop-filter fields out of an args object and returns them as a
+ * plain record suitable for spreading into chained `suggestedArgs`. Undefined
+ * fields are dropped so the chained payload stays minimal.
+ */
+export function carryLoopFilters(args: LoopFilters): Record<string, string | number> {
+  const out: Record<string, string | number> = {}
+  if (args.limit !== undefined) out.limit = args.limit
+  if (args.type) out.type = args.type
+  if (args.seniority) out.seniority = args.seniority
+  if (args.department) out.department = args.department
+  if (args.required_field) out.required_field = args.required_field
+  return out
+}

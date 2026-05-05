@@ -37,6 +37,15 @@ export function registerProspectingTool(server: McpServer) {
       // arg and can reference it from there; re-emitting in suggestedArgs would
       // give an attacker a higher-leverage injection vector inside the model-only
       // content block. See docs/plans/...-readiness-plan.md (Pillar 1 security).
+      // TODO(HUN-19560 remote-mcp parity): once `pending_companies` ships in
+      // remote-mcp's Domain-Search / Email-Verifier / Upsert-Lead, update the
+      // Domain-Search plan reason and directive #1 below to instruct the agent
+      // to seed the loop primitive ("call Domain-Search ONCE with the FIRST
+      // picked domain and pending_companies = [rest]") instead of the current
+      // prose-only "loop across EVERY chosen company". chatgpt-mcp already
+      // carries the primitive end-to-end; this file is byte-aligned across both
+      // MCPs (whole-file gate in scripts/check-tool-names-aligned.mjs), so the
+      // update must be paired with the remote-mcp implementation.
       const plan = [
         {
           tool: TOOL_NAMES.discover,
