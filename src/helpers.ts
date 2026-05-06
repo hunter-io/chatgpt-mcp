@@ -350,7 +350,12 @@ export type NextAction =
 
 const REASON_MAX_LENGTH = 200
 const QUESTION_MAX_LENGTH = 300
-const SUGGESTED_ARGS_MAX_BYTES = 1024
+// Sized to fit a fully-loaded multi-company chain: 50-domain pending_companies
+// (~25 chars/domain × 50 = 1250 + JSON quoting/comma overhead ~200) plus the
+// rest of a call_tool nextAction (kind/tool/reason/domain/filterCarry/etc, ~250
+// bytes). 2KB leaves comfortable headroom for IDN-encoded domains while still
+// bounding token cost (≈500 tokens per call, amortised across the loop).
+const SUGGESTED_ARGS_MAX_BYTES = 2048
 
 /**
  * Truncates `reason`/`question` to keep chained-flow token cost bounded.
@@ -526,12 +531,15 @@ export const domainStringSchema = z.string().regex(DOMAIN_REGEX, "must be a vali
  * Shared schema for the multi-company loop carry, used by Domain-Search,
  * Email-Verifier, and Upsert-Lead. Three defenses baked in:
  *
- *   - `.max(20)` bounds the credit-spend blast radius. Without a cap, a
- *     prompt-injection that coerces the model into seeding a 100-entry array
- *     would silently spend ~100 verification credits inside the chain (the
- *     loop drops `requiresConfirmation: true` on Email-Verifier because
- *     populating the array IS the user's authorization). 20 is a generous
- *     ceiling for legitimate prospecting picks.
+ *   - `.max(50)` bounds the credit-spend blast radius. Without a cap, a
+ *     prompt-injection that coerces the model into seeding a 200-entry array
+ *     would silently spend that many verification credits inside the chain
+ *     (the loop drops `requiresConfirmation: true` on Email-Verifier because
+ *     populating the array IS the user's authorization). 50 is a generous
+ *     ceiling for legitimate prospecting picks — typical briefs are 5-20,
+ *     longer ones (30-50) come up for B2B list-building. Beyond 50 the
+ *     synchronous chain runtime (~5-10s/iter × 50 ≈ 4-8 min) becomes
+ *     user-hostile anyway, so the cap aligns with UX boundaries.
  *
  *   - Each element validated by `DOMAIN_REGEX` so non-domain payloads can't
  *     flow through chained suggestedArgs.
@@ -543,14 +551,14 @@ export const domainStringSchema = z.string().regex(DOMAIN_REGEX, "must be a vali
  *     guarantee survives even when a model invokes EV/US directly without
  *     going through DS's handler.
  */
-export const PENDING_COMPANIES_MAX = 20
+export const PENDING_COMPANIES_MAX = 50
 export const pendingCompaniesSchema = z
   .array(domainStringSchema)
   .max(PENDING_COMPANIES_MAX, `Multi-company loop is capped at ${PENDING_COMPANIES_MAX} picks per chain.`)
   .transform((arr) => Array.from(new Set(arr.map((d) => d.toLowerCase()))))
   .optional()
   .describe(
-    desc`Multi-company loop carry (capped at 20 domains). On the first ${TOOL_NAMES.domainSearch} call, set this to the array of remaining picked domains — the response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave undefined for single-call usage.`,
+    desc`Multi-company loop carry (capped at 50 domains). When the user has picked 2+ companies, set this on the first ${TOOL_NAMES.domainSearch} call to the array of REMAINING picks (everything except the first picked domain that goes in the 'domain' arg). The response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave UNDEFINED for single-call usage and for prospecting flows where the user picked exactly ONE company (single-company mode preserves the confirmation gate on Email-Verifier).`,
   )
 
 /**
