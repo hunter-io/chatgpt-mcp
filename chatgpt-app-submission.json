@@ -16,7 +16,7 @@
     "subtitle": "Find, verify, and manage B2B leads from ChatGPT.",
     "short_description": "Hunter helps you find companies, discover professional email addresses, verify deliverability, enrich contacts and companies, save leads, and prepare campaign recipients directly from ChatGPT.",
     "long_description": "Hunter brings Hunter.io's B2B prospecting workflows into ChatGPT. Users can describe the companies or contacts they want, discover matching companies, search domains for relevant contacts, verify email addresses, enrich people or companies, save leads and lead lists, and prepare recipients for existing Hunter campaigns. The app uses Hunter as the authoritative source for company, contact, verification, lead, and campaign data, and links users back to Hunter.io for account management, leads, lists, and campaign configuration.",
-    "category": "Productivity",
+    "category": "PRODUCTIVITY",
     "secondary_categories": [
       "Sales",
       "Business"
