@@ -101,9 +101,8 @@
     "data_source_statement": "Hunter.io is the authoritative source for company, contact, email verification, lead, list, account, and campaign data returned by this app.",
     "credit_disclosure": "Some Hunter API operations consume Hunter credits when data is found. The tool descriptions disclose expected credit costs for search, verification, and enrichment operations."
   },
-  "tools": [
-    {
-      "name": "Discover",
+  "tools": {
+    "Discover": {
       "purpose": "Find companies matching a natural-language query and render the top results in the Discover widget.",
       "annotations": {
         "readOnlyHint": true,
@@ -112,8 +111,7 @@
       },
       "justification": "Reads company discovery results from Hunter and does not modify Hunter resources. It calls an external Hunter service, so openWorldHint is true."
     },
-    {
-      "name": "Domain-Search",
+    "Domain-Search": {
       "purpose": "Return email addresses and contact data for a company domain, with filters for contact type, seniority, department, and required fields.",
       "annotations": {
         "readOnlyHint": true,
@@ -122,8 +120,7 @@
       },
       "justification": "Retrieves Hunter contact data for an external domain. It does not create, update, or delete resources, but it queries Hunter's external API and may consume search credits according to Hunter's billing rules."
     },
-    {
-      "name": "Email-Finder",
+    "Email-Finder": {
       "purpose": "Find a specific person's professional email address at a company.",
       "annotations": {
         "readOnlyHint": true,
@@ -132,8 +129,7 @@
       },
       "justification": "Looks up data from Hunter and does not change resources. It calls an external service and may consume search credits if an email is found."
     },
-    {
-      "name": "Email-Verifier",
+    "Email-Verifier": {
       "purpose": "Check whether an email address appears deliverable and return Hunter verification status details.",
       "annotations": {
         "readOnlyHint": true,
@@ -142,8 +138,7 @@
       },
       "justification": "Performs an external verification lookup without modifying Hunter lead resources. It may consume a verification credit."
     },
-    {
-      "name": "Email-Count",
+    "Email-Count": {
       "purpose": "Count known email addresses for a domain, including personal and generic counts.",
       "annotations": {
         "readOnlyHint": true,
@@ -152,8 +147,7 @@
       },
       "justification": "Reads aggregate counts from Hunter and does not modify resources."
     },
-    {
-      "name": "Person-Enrichment",
+    "Person-Enrichment": {
       "purpose": "Enrich a person from an email address with Hunter profile, company, social, location, and phone data where available.",
       "annotations": {
         "readOnlyHint": true,
@@ -162,8 +156,7 @@
       },
       "justification": "Reads enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found."
     },
-    {
-      "name": "Company-Enrichment",
+    "Company-Enrichment": {
       "purpose": "Enrich a company domain with industry, size, location, technologies, funding, and social profile data, rendered in the Company widget.",
       "annotations": {
         "readOnlyHint": true,
@@ -172,8 +165,7 @@
       },
       "justification": "Reads company enrichment data from Hunter and does not modify resources. It may consume an enrichment credit if data is found."
     },
-    {
-      "name": "Combined-Enrichment",
+    "Combined-Enrichment": {
       "purpose": "Enrich a person and their company in one request using an email address or LinkedIn handle.",
       "annotations": {
         "readOnlyHint": true,
@@ -182,8 +174,7 @@
       },
       "justification": "Reads combined enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found."
     },
-    {
-      "name": "Account",
+    "Account": {
       "purpose": "Return Hunter account details such as remaining credits, plan name, and team information.",
       "annotations": {
         "readOnlyHint": true,
@@ -192,8 +183,7 @@
       },
       "justification": "Reads the authenticated user's Hunter account status and does not modify resources."
     },
-    {
-      "name": "List-Leads",
+    "List-Leads": {
       "purpose": "List leads from the authenticated Hunter account, optionally filtered by list or pagination parameters.",
       "annotations": {
         "readOnlyHint": true,
@@ -202,8 +192,7 @@
       },
       "justification": "Retrieves private Hunter lead records without changing them."
     },
-    {
-      "name": "Get-Lead",
+    "Get-Lead": {
       "purpose": "Retrieve a single Hunter lead by ID.",
       "annotations": {
         "readOnlyHint": true,
@@ -212,8 +201,7 @@
       },
       "justification": "Reads a lead record and does not modify resources."
     },
-    {
-      "name": "Create-Lead",
+    "Create-Lead": {
       "purpose": "Create a new lead in the user's Hunter account.",
       "annotations": {
         "readOnlyHint": false,
@@ -222,8 +210,7 @@
       },
       "justification": "Creates a Hunter lead, changing the user's Hunter account state."
     },
-    {
-      "name": "Update-Lead",
+    "Update-Lead": {
       "purpose": "Update an existing Hunter lead by ID.",
       "annotations": {
         "readOnlyHint": false,
@@ -232,8 +219,7 @@
       },
       "justification": "Modifies an existing Hunter lead, changing account data."
     },
-    {
-      "name": "Delete-Lead",
+    "Delete-Lead": {
       "purpose": "Delete a Hunter lead by ID.",
       "annotations": {
         "readOnlyHint": false,
@@ -242,8 +228,7 @@
       },
       "justification": "Deletes lead data from the user's Hunter account and should require destructive-action caution."
     },
-    {
-      "name": "Upsert-Lead",
+    "Upsert-Lead": {
       "purpose": "Create or update a Hunter lead by email address, avoiding duplicates when possible.",
       "annotations": {
         "readOnlyHint": false,
@@ -252,8 +237,7 @@
       },
       "justification": "Creates or updates lead data in the user's Hunter account."
     },
-    {
-      "name": "Lead-Exists",
+    "Lead-Exists": {
       "purpose": "Check whether a Hunter lead exists for a given email address.",
       "annotations": {
         "readOnlyHint": true,
@@ -262,8 +246,7 @@
       },
       "justification": "Reads lead existence state without modification."
     },
-    {
-      "name": "Save-Company",
+    "Save-Company": {
       "purpose": "Save a company domain as a lead/company record in Hunter.",
       "annotations": {
         "readOnlyHint": false,
@@ -272,8 +255,7 @@
       },
       "justification": "Creates a saved company/lead entry in the user's Hunter account."
     },
-    {
-      "name": "List-Leads-Lists",
+    "List-Leads-Lists": {
       "purpose": "List all Hunter leads lists in the authenticated account.",
       "annotations": {
         "readOnlyHint": true,
@@ -282,8 +264,7 @@
       },
       "justification": "Reads leads list metadata without modification."
     },
-    {
-      "name": "Get-Leads-List",
+    "Get-Leads-List": {
       "purpose": "Retrieve a Hunter leads list by ID.",
       "annotations": {
         "readOnlyHint": true,
@@ -292,8 +273,7 @@
       },
       "justification": "Reads a leads list without modification."
     },
-    {
-      "name": "Create-Leads-List",
+    "Create-Leads-List": {
       "purpose": "Create a new Hunter leads list.",
       "annotations": {
         "readOnlyHint": false,
@@ -302,8 +282,7 @@
       },
       "justification": "Creates a new list in the user's Hunter account."
     },
-    {
-      "name": "Update-Leads-List",
+    "Update-Leads-List": {
       "purpose": "Rename an existing Hunter leads list.",
       "annotations": {
         "readOnlyHint": false,
@@ -312,8 +291,7 @@
       },
       "justification": "Modifies leads list metadata in the user's Hunter account."
     },
-    {
-      "name": "Delete-Leads-List",
+    "Delete-Leads-List": {
       "purpose": "Delete a Hunter leads list by ID.",
       "annotations": {
         "readOnlyHint": false,
@@ -322,8 +300,7 @@
       },
       "justification": "Deletes a list from the user's Hunter account and should require destructive-action caution."
     },
-    {
-      "name": "Merge-Leads-Lists",
+    "Merge-Leads-Lists": {
       "purpose": "Merge one Hunter leads list into another.",
       "annotations": {
         "readOnlyHint": false,
@@ -332,8 +309,7 @@
       },
       "justification": "Combines lists and removes or changes the source list organization, so it should be treated as destructive."
     },
-    {
-      "name": "List-Custom-Attributes",
+    "List-Custom-Attributes": {
       "purpose": "List custom lead attributes in the user's Hunter account.",
       "annotations": {
         "readOnlyHint": true,
@@ -342,8 +318,7 @@
       },
       "justification": "Reads custom attribute metadata without modification."
     },
-    {
-      "name": "Get-Custom-Attribute",
+    "Get-Custom-Attribute": {
       "purpose": "Retrieve a single Hunter lead custom attribute by ID.",
       "annotations": {
         "readOnlyHint": true,
@@ -352,8 +327,7 @@
       },
       "justification": "Reads custom attribute metadata without modification."
     },
-    {
-      "name": "Create-Custom-Attribute",
+    "Create-Custom-Attribute": {
       "purpose": "Create a custom attribute for Hunter leads.",
       "annotations": {
         "readOnlyHint": false,
@@ -362,8 +336,7 @@
       },
       "justification": "Creates a new custom attribute in the user's Hunter account."
     },
-    {
-      "name": "Update-Custom-Attribute",
+    "Update-Custom-Attribute": {
       "purpose": "Rename an existing Hunter lead custom attribute.",
       "annotations": {
         "readOnlyHint": false,
@@ -372,8 +345,7 @@
       },
       "justification": "Modifies custom attribute metadata in the user's Hunter account."
     },
-    {
-      "name": "Delete-Custom-Attribute",
+    "Delete-Custom-Attribute": {
       "purpose": "Delete a Hunter lead custom attribute by ID.",
       "annotations": {
         "readOnlyHint": false,
@@ -382,8 +354,7 @@
       },
       "justification": "Deletes custom attribute metadata and should require destructive-action caution."
     },
-    {
-      "name": "List-Campaigns",
+    "List-Campaigns": {
       "purpose": "List campaigns in the user's Hunter account.",
       "annotations": {
         "readOnlyHint": true,
@@ -392,8 +363,7 @@
       },
       "justification": "Reads campaign metadata without modification."
     },
-    {
-      "name": "List-Campaign-Recipients",
+    "List-Campaign-Recipients": {
       "purpose": "List recipients in a Hunter campaign.",
       "annotations": {
         "readOnlyHint": true,
@@ -402,8 +372,7 @@
       },
       "justification": "Reads campaign recipient data without modification."
     },
-    {
-      "name": "Add-Campaign-Recipients",
+    "Add-Campaign-Recipients": {
       "purpose": "Add recipients to an existing Hunter campaign by email address or lead ID.",
       "annotations": {
         "readOnlyHint": false,
@@ -412,8 +381,7 @@
       },
       "justification": "Changes campaign recipient state by adding people to a campaign. It does not send emails by itself."
     },
-    {
-      "name": "Remove-Campaign-Recipients",
+    "Remove-Campaign-Recipients": {
       "purpose": "Remove recipients from a Hunter campaign by email address.",
       "annotations": {
         "readOnlyHint": false,
@@ -422,8 +390,7 @@
       },
       "justification": "Removes campaign recipients and should require destructive-action caution."
     },
-    {
-      "name": "Start-Campaign",
+    "Start-Campaign": {
       "purpose": "Start a Hunter campaign after explicit user confirmation, causing real emails to be sent to configured recipients.",
       "annotations": {
         "readOnlyHint": false,
@@ -432,8 +399,7 @@
       },
       "justification": "Can send real outbound emails to external recipients and is irreversible once started. The implementation includes a confirmation gate before the POST /start request."
     },
-    {
-      "name": "Prospecting",
+    "Prospecting": {
       "purpose": "Plan an end-to-end prospecting workflow from a natural-language brief and emit the first next action for ChatGPT to execute.",
       "annotations": {
         "readOnlyHint": true,
@@ -442,7 +408,7 @@
       },
       "justification": "Coordinator tool only returns a plan and next action. It does not itself modify Hunter data; subsequent tools may read, spend credits, or write data according to their annotations."
     }
-  ],
+  },
   "prompts": [
     {
       "name": "prospect",
