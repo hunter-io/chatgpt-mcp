@@ -9,6 +9,7 @@ import {
   parseHunterApiResponse,
   withDeepLink,
   DESTRUCTIVE_ANNOTATIONS,
+  EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
   WRITE_ANNOTATIONS,
 } from "../helpers"
@@ -152,7 +153,7 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
             "Set to true ONLY after the user has explicitly confirmed in chat that real emails should be sent. The first invocation (without confirmed) returns an ask_user nextAction; the second invocation (with confirmed: true) actually starts the campaign.",
           ),
       },
-      annotations: WRITE_ANNOTATIONS,
+      annotations: EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
     },
     async ({ campaign_id, confirmed }) => {
       if (!confirmed) {

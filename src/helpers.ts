@@ -499,12 +499,24 @@ export const PAID_TOOL_ANNOTATIONS = {
 export const WRITE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
-  openWorldHint: true,
+  openWorldHint: false,
 } as const
 
 export const DESTRUCTIVE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
+  openWorldHint: false,
+} as const
+
+/**
+ * Writes that have effects beyond the user's Hunter workspace — e.g.
+ * `Start-Campaign` triggers real outbound emails to external recipients.
+ * `openWorldHint: true` keeps the open-world safety treatment for those
+ * external side effects, while bounded-write tools use WRITE_ANNOTATIONS.
+ */
+export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
   openWorldHint: true,
 } as const
 // NEXT_ACTION_END
