@@ -15,6 +15,14 @@ import {
   withDeepLink,
   withDeepLinkFromId,
 } from "../helpers"
+import {
+  buildResponseSchema,
+  mutationAckSchema,
+  nullableNumber,
+  nullableString,
+  paginationMetaSchema,
+  verificationSchema,
+} from "../schemas/common"
 
 const leadFieldsSchema = {
   email: z.string().optional().describe("Email address of the lead"),
@@ -32,8 +40,65 @@ const leadFieldsSchema = {
   twitter: z.string().optional().describe("Twitter/X handle"),
   notes: z.string().optional().describe("Notes about the lead"),
   source: z.string().optional().describe("Source of the lead"),
-  leads_list_id: z.number().optional().describe("ID of the leads list to add the lead to"),
+  leads_list_id: z.number().int().positive().optional().describe("ID of the leads list to add the lead to"),
 }
+
+// Hunter lead shape — covers fields the model and the UI both reason about.
+// `.loose()` on the leaf because (a) `_lead.jbuilder` emits user-defined
+// custom-attribute values as FLAT sibling keys via `json.set! slug, value`
+// (so they must flow through unenumerated), and (b) the jbuilder may add
+// fields over time. `leads_list` fields are all nullable because the
+// jbuilder unconditionally emits the block via safe-nav for orphan leads
+// (lead with zero leads_list_memberships) — see HUN-19943 review.
+const leadSchema = z
+  .object({
+    id: z.number().int().positive(),
+    email: z.string(),
+    first_name: nullableString().optional(),
+    last_name: nullableString().optional(),
+    position: nullableString().optional(),
+    company: nullableString().optional(),
+    company_industry: nullableString().optional(),
+    company_size: nullableString().optional(),
+    company_type: nullableString().optional(),
+    website: nullableString().optional(),
+    country_code: nullableString().optional(),
+    linkedin_url: nullableString().optional(),
+    phone_number: nullableString().optional(),
+    twitter: nullableString().optional(),
+    notes: nullableString().optional(),
+    source: nullableString().optional(),
+    leads_list: z
+      .object({
+        id: nullableNumber().optional(),
+        name: nullableString().optional(),
+        leads_count: nullableNumber().optional(),
+      })
+      .optional(),
+    verification: verificationSchema.optional(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .loose()
+
+// List response from /v2/leads — { data: { leads: [...] }, meta: { count, total } }
+const listLeadsDataSchema = z.object({ leads: z.array(leadSchema) }).loose()
+
+const listLeadsOutputSchema = buildResponseSchema(listLeadsDataSchema, paginationMetaSchema)
+const singleLeadOutputSchema = buildResponseSchema(leadSchema)
+// Lead-Exists envelope: the controller emits `{ id, leads_list_id,
+// leads_list_name }` (all nullable when no lead matches). There is no `exists`
+// field — callers should derive existence from `data.id != null`. See
+// app/controllers/api/leads/exist_controller.rb#show.
+const leadExistsOutputSchema = buildResponseSchema(
+  z
+    .object({
+      id: nullableNumber().optional(),
+      leads_list_id: nullableNumber().optional(),
+      leads_list_name: nullableString().optional(),
+    })
+    .loose(),
+)
 
 function buildLeadParams(fields: Record<string, unknown>): Record<string, string> {
   const params: Record<string, string> = {}
@@ -47,19 +112,20 @@ function buildLeadParams(fields: Record<string, unknown>): Record<string, string
 
 export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
-    "List-Leads",
+    TOOL_NAMES.listLeads,
     {
       description:
         "List leads in your Hunter account with optional filters. Free (no credits). Returns up to 100 leads per page — use offset to paginate.",
       inputSchema: {
-        offset: z.number().optional().describe("Number of leads to skip"),
-        limit: z.number().optional().describe("Maximum number of leads to return (max 100)"),
-        leads_list_id: z.number().optional().describe("Filter leads by list ID"),
+        offset: z.number().int().nonnegative().optional().describe("Number of leads to skip"),
+        limit: z.number().int().positive().max(100).optional().describe("Maximum number of leads to return (max 100)"),
+        leads_list_id: z.number().int().positive().optional().describe("Filter leads by list ID"),
         email: z.string().optional().describe("Filter leads by email address"),
         first_name: z.string().optional().describe("Filter leads by first name"),
         last_name: z.string().optional().describe("Filter leads by last name"),
         company: z.string().optional().describe("Filter leads by company name"),
       },
+      outputSchema: listLeadsOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ offset, limit, leads_list_id, email, first_name, last_name, company }) => {
@@ -76,12 +142,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Get-Lead",
+    TOOL_NAMES.getLead,
     {
       description: "Get a single lead by ID. Free (no credits).",
       inputSchema: {
-        id: z.number().describe("ID of the lead to retrieve"),
+        id: z.number().int().positive().describe("ID of the lead to retrieve"),
       },
+      outputSchema: singleLeadOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ id }) => {
@@ -90,14 +157,15 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Create-Lead",
+    TOOL_NAMES.createLead,
     {
       description:
         "Create a new lead in your Hunter account. Free (no credits). Provide at least an email address. Use leads_list_id to add directly to a list.",
       inputSchema: {
         ...leadFieldsSchema,
-        email: z.string().describe("Email address of the lead (required)"),
+        email: z.string().email().max(254).describe("Email address of the lead (required)"),
       },
+      outputSchema: singleLeadOutputSchema.shape,
       annotations: WRITE_ANNOTATIONS,
     },
     async (fields) => {
@@ -113,13 +181,14 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Update-Lead",
+    TOOL_NAMES.updateLead,
     {
       description: "Update an existing lead by ID. Free (no credits).",
       inputSchema: {
-        id: z.number().describe("ID of the lead to update"),
+        id: z.number().int().positive().describe("ID of the lead to update"),
         ...leadFieldsSchema,
       },
+      outputSchema: singleLeadOutputSchema.shape,
       annotations: WRITE_ANNOTATIONS,
     },
     async ({ id, ...fields }) => {
@@ -135,12 +204,14 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Delete-Lead",
+    TOOL_NAMES.deleteLead,
     {
       description: "Delete a lead by ID. Free (no credits).",
       inputSchema: {
-        id: z.number().describe("ID of the lead to delete"),
+        id: z.number().int().positive().describe("ID of the lead to delete"),
       },
+      // Hunter returns 204 No Content — callHunterApi synthesises mutationAckSchema.
+      outputSchema: mutationAckSchema.shape,
       annotations: DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
@@ -169,6 +240,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .optional()
           .describe("Loop carry: forwarded from Domain-Search."),
       },
+      outputSchema: singleLeadOutputSchema.shape,
       annotations: WRITE_ANNOTATIONS,
     },
     async ({ pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
@@ -217,12 +289,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   )
 
   server.registerTool(
-    "Lead-Exists",
+    TOOL_NAMES.leadExists,
     {
       description: "Check if a lead with a given email address exists. Free (no credits).",
       inputSchema: {
-        email: z.string().describe("Email address to check"),
+        email: z.string().email().max(254).describe("Email address to check"),
       },
+      outputSchema: leadExistsOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ email }) => {

@@ -1,5 +1,18 @@
 import { z } from "zod"
 
+import type { HunterError } from "./schemas/common"
+
+// Bearer / api_key scrub for upstream error bodies. Defined here (not in
+// `schemas/common.ts`) to avoid a runtime circular import — `schemas/common`
+// imports `TOOL_NAMES` from this module; a reverse value-import would
+// evaluate the schema with TOOL_NAMES still undefined. See HUN-19943 todos/019.
+const BEARER_RE = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi
+const API_KEY_RE = /api[_-]?key=[^\s&]+/gi
+
+export function sanitizeUpstreamMessage(value: string, max = 200): string {
+  return value.replace(BEARER_RE, "Bearer [REDACTED]").replace(API_KEY_RE, "api_key=[REDACTED]").slice(0, max)
+}
+
 export const BASE_API_URL_PRODUCTION = "https://api.hunter.io/v2"
 export const BASE_API_URL_DEVELOPMENT = "http://localhost:3000/v2"
 export const HUNTER_BASE = "https://hunter.io"
@@ -84,6 +97,15 @@ export function desc(strings: TemplateStringsArray, ...values: (string | ToolNam
  * CallToolResult type for forward compatibility. We keep it but also declare
  * the canonical fields explicitly — typos on those still fail type-check;
  * only fields we don't explicitly model fall through the index hatch.
+ *
+ * Note: HUN-19943 todos/015 evaluated a discriminated `McpSuccessResult |
+ * McpErrorResult` union for compile-time narrowing on `isError`. It rippled
+ * through byte-aligned `embedNextAction` and SDK index-signature constraints
+ * in ways that produced more cost than benefit (handlers already narrow at
+ * runtime via `if (result.isError) return result`, and `callHunterApi`
+ * guarantees the typed `structuredContent.error` envelope on every error
+ * path). Deferred until the byte-aligned region is decoupled or the SDK's
+ * CallToolResult type loosens.
  */
 export interface McpTextResult {
   [key: string]: unknown
@@ -98,16 +120,33 @@ export function withDeepLink(result: McpTextResult, path: string): McpTextResult
   const url = `${HUNTER_BASE}${path}`
   const text = result.content[0]?.text ?? ""
   return {
-    content: [{ type: "text" as const, text: `${text}\n\nView in Hunter: ${url}` }],
+    ...result,
+    // `audience: ["user"]` so hosts route human-readable narration distinctly
+    // from the JSON envelope in structuredContent (HUN-19943 todos/013).
+    content: [
+      { type: "text" as const, text: `${text}\n\nView in Hunter: ${url}`, annotations: { audience: ["user"] } },
+    ],
+    structuredContent: { ...result.structuredContent, viewInHunter: url },
   }
 }
 
 export function withDeepLinkFromId(result: McpTextResult, pathFn: (id: number) => string): McpTextResult {
+  // Prefer the structuredContent.data.id path — it's typed and trustworthy.
+  // Fall back to the legacy text-content JSON parse for tools that haven't
+  // migrated yet (HUN-19943 Phase 3 batches still in progress).
+  //
+  // `Number.isSafeInteger` rejects NaN / Infinity / non-integer / values past
+  // 2^53 — all of which would otherwise generate malformed deep-link URLs
+  // (e.g. https://hunter.io/leads/Infinity). See todos/014.
+  const data = (result.structuredContent as { data?: { id?: unknown } } | undefined)?.data
+  if (data && Number.isSafeInteger(data.id) && (data.id as number) > 0) {
+    return withDeepLink(result, pathFn(data.id as number))
+  }
   try {
     const raw = result.content[0]?.text ?? ""
     const jsonText = raw.split("\n\nSource:")[0]
     const id = JSON.parse(jsonText).data?.id
-    if (typeof id === "number" && id > 0) return withDeepLink(result, pathFn(id))
+    if (Number.isSafeInteger(id) && id > 0) return withDeepLink(result, pathFn(id))
   } catch (e) {
     console.warn("withDeepLinkFromId: failed to extract ID", e)
   }
@@ -194,6 +233,106 @@ function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
   return result
 }
 
+/**
+ * Maps Hunter API HTTP status + body to a typed `errorSchema` envelope. Even
+ * though the MCP SDK skips validation when `isError: true`, the agent needs
+ * typed recovery information (retryable? retry_after? which field?) to plan
+ * the next step without regex over prose. See HUN-19943 plan, agent-native
+ * review.
+ */
+function mapHunterError(status: number, retryAfter: string | null, body: string): HunterError {
+  // Defensive parse — Hunter's Rails API returns
+  // { errors: [{ id, code, details }] } but proxies / 5xx pages may return
+  // plain text.
+  let parsedDetails: string | undefined
+  let parsedField: string | undefined
+  try {
+    const parsed = JSON.parse(body) as { errors?: Array<{ details?: string; code?: string; id?: string }> }
+    const first = parsed.errors?.[0]
+    parsedDetails = first?.details
+    // Hunter's `id` (e.g. "invalid_argument") sometimes encodes the offending
+    // field; not authoritative, but a useful hint for the agent.
+    if (first?.id && first.id !== "invalid_argument") parsedField = first.id
+  } catch {
+    // body wasn't JSON; that's fine
+  }
+
+  // Scrub Bearer/api_key patterns out of the upstream body before echoing it
+  // into `errorSchema.message` and `content[0].text` (HUN-19943 todos/019).
+  // `||` (not `??`) so empty-string `details` and empty `body` fall through to
+  // the HTTP status fallback. With `??`, `parsedDetails === ""` would short-
+  // circuit and produce a useless empty message; `body` is always defined so
+  // the final fallback was unreachable.
+  const rawMessage = parsedDetails || body || `HTTP ${status}`
+  const message = sanitizeUpstreamMessage(rawMessage)
+
+  if (status === 429) {
+    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+    return {
+      code: "rate_limited",
+      retryable: true,
+      ...(Number.isFinite(seconds) && seconds >= 0 && { retry_after_seconds: seconds }),
+      message,
+    }
+  }
+  if (status === 402) {
+    return { code: "quota_exceeded", retryable: false, message }
+  }
+  if (status === 401 || status === 403) {
+    return { code: "unauthorized", retryable: false, message }
+  }
+  if (status === 404) {
+    return { code: "not_found", retryable: false, message }
+  }
+  if (status === 422) {
+    return {
+      code: "invalid_input",
+      retryable: false,
+      ...(parsedField && { field: parsedField }),
+      message,
+    }
+  }
+  if (status >= 500) {
+    return { code: "upstream_error", retryable: true, message }
+  }
+  return { code: "validation", retryable: false, message }
+}
+
+/**
+ * Defense-in-depth: only the MCP server may set chain-control fields on
+ * structuredContent. If Hunter's Rails API ever returns a record carrying
+ * `nextAction`, `pendingToolCall`, or `viewInHunter` — at ANY depth — strip
+ * it and log so an attacker controlling a scraped record can't steer the
+ * chain through the `embedNextAction` / `withDeepLink` merges. See
+ * HUN-19943 todos/016.
+ *
+ * Walks objects and arrays recursively. Returns a structurally-shared copy
+ * with sanitized keys; non-objects pass through unchanged.
+ */
+const INJECTED_FIELD_NAMES = new Set(["nextAction", "pendingToolCall", "viewInHunter"])
+
+function stripInjectedFields(parsed: unknown): unknown {
+  if (parsed == null || typeof parsed !== "object") return parsed
+  return stripInjectedFieldsInner(parsed, "")
+}
+
+function stripInjectedFieldsInner(value: unknown, path: string): unknown {
+  if (value == null || typeof value !== "object") return value
+  if (Array.isArray(value)) {
+    return value.map((item, i) => stripInjectedFieldsInner(item, `${path}[${i}]`))
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (INJECTED_FIELD_NAMES.has(key)) {
+      const at = path ? `${path}.${key}` : key
+      console.warn(`callHunterApi: stripped injected \`${at}\` from Hunter response`)
+      continue
+    }
+    out[key] = stripInjectedFieldsInner(val, path ? `${path}.${key}` : key)
+  }
+  return out
+}
+
 export async function callHunterApi(options: CallOptions): Promise<McpTextResult> {
   const isGet = !("method" in options)
   const method = isGet ? "GET" : options.method
@@ -227,13 +366,24 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   if (!response.ok) {
     let errorText: string
     try {
-      const errorJson = await response.json()
-      errorText = JSON.stringify(errorJson)
+      // Read as raw text so non-JSON 5xx bodies (Cloudflare proxy HTML, plain
+      // text upstream errors) reach `mapHunterError`'s defensive parser
+      // intact. `mapHunterError` JSON.parses defensively in a try/catch, so
+      // passing raw text is strictly compatible. Mirrors remote-mcp.
+      errorText = await response.text()
     } catch {
       errorText = `HTTP ${response.status}`
     }
+    const error = mapHunterError(response.status, response.headers.get("retry-after"), errorText)
     return {
-      content: [{ type: "text" as const, text: errorText }],
+      // `audience: ["user"]` so hosts route human-readable error narration
+      // distinct from the typed envelope in structuredContent.error
+      // (HUN-19943 todos/013). Same posture as success-path content blocks.
+      // Use `error.message` (sanitized via `sanitizeUpstreamMessage` inside
+      // `mapHunterError`) instead of raw `errorText` so Bearer / api_key
+      // patterns never reach the user-visible content block.
+      content: [{ type: "text" as const, text: error.message, annotations: { audience: ["user"] } }],
+      structuredContent: { error },
       isError: true,
     }
   }
@@ -251,13 +401,12 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   try {
     text = await response.text()
   } catch (e) {
+    const message = `Failed to read response body from Hunter: ${e instanceof Error ? e.message : String(e)}`
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Failed to read response body from Hunter: ${e instanceof Error ? e.message : String(e)}`,
-        },
-      ],
+      content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+      structuredContent: {
+        error: { code: "upstream_error" as const, retryable: true, message },
+      },
       isError: true,
     }
   }
@@ -265,7 +414,21 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     const message =
       response.status === 202 ? "Accepted — operation scheduled for asynchronous completion." : "Success (no content)."
     return {
-      content: [{ type: "text" as const, text: `${message}\n\nSource: Hunter.io (https://hunter.io)` }],
+      content: [
+        {
+          type: "text" as const,
+          text: `${message}\n\nSource: Hunter.io (https://hunter.io)`,
+          annotations: { audience: ["user"] },
+        },
+      ],
+      // mutationAckSchema-shaped envelope so delete-style tools' outputSchema
+      // validates on 202/204 success.
+      structuredContent: {
+        kind: "ack" as const,
+        ok: true as const,
+        status: response.status,
+        message,
+      },
     }
   }
 
@@ -276,18 +439,29 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     // 2xx with non-JSON body. A misconfigured proxy / edge could serve HTML
     // or plain text with a 200 status; surface as an error so downstream
     // tools don't silently treat malformed responses as success.
+    const message = `Unexpected non-JSON response from Hunter (status ${response.status}): ${text.slice(0, 200)}`
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Unexpected non-JSON response from Hunter (status ${response.status}): ${text.slice(0, 200)}`,
-        },
-      ],
+      content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+      structuredContent: {
+        error: { code: "upstream_error" as const, retryable: false, message },
+      },
       isError: true,
     }
   }
+  // Strip any attacker-injected `nextAction` keys (security defense-in-depth).
+  const sanitized = stripInjectedFields(json) as Record<string, unknown>
   return {
-    content: [{ type: "text" as const, text: `${JSON.stringify(json)}\n\nSource: Hunter.io (https://hunter.io)` }],
+    // `audience: ["user"]` tags the JSON-envelope text block so hosts can route
+    // it distinctly from the assistant-only nextAction blocks emitted by
+    // `embedNextAction` (which use `audience: ["assistant"]`). HUN-19943 todos/013.
+    content: [
+      {
+        type: "text" as const,
+        text: `${JSON.stringify(sanitized)}\n\nSource: Hunter.io (https://hunter.io)`,
+        annotations: { audience: ["user"] },
+      },
+    ],
+    structuredContent: sanitized,
   }
 }
 
@@ -496,27 +670,38 @@ export const PAID_TOOL_ANNOTATIONS = {
   openWorldHint: true,
 } as const
 
+/**
+ * Bounded writes against the user's Hunter workspace via Hunter's external
+ * SaaS API. `openWorldHint: true` reflects the external surface (see HUN-19943
+ * — OpenAI Apps SDK guidance treats `openWorldHint` as "interacts with
+ * external systems, accounts, public platforms").
+ */
 export const WRITE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
-  openWorldHint: false,
-} as const
-
-export const DESTRUCTIVE_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  openWorldHint: false,
+  openWorldHint: true,
 } as const
 
 /**
- * Writes that have effects beyond the user's Hunter workspace — e.g.
- * `Start-Campaign` triggers real outbound emails to external recipients.
- * `openWorldHint: true` keeps the open-world safety treatment for those
- * external side effects, while bounded-write tools use WRITE_ANNOTATIONS.
+ * Destructive mutations against Hunter resources. `destructiveHint: true`
+ * triggers the OpenAI host's confirmation prompt; `openWorldHint: true`
+ * matches the external SaaS surface (see HUN-19943).
+ */
+export const DESTRUCTIVE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
+} as const
+
+/**
+ * Writes with effects beyond the user's Hunter workspace — `Start-Campaign`
+ * triggers real outbound email to external recipients. `destructiveHint: true`
+ * so the host surfaces a confirmation prompt; outbound emails cannot be
+ * recalled and the action is effectively irreversible (see HUN-19943).
  */
 export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
   readOnlyHint: false,
-  destructiveHint: false,
+  destructiveHint: true,
   openWorldHint: true,
 } as const
 // NEXT_ACTION_END

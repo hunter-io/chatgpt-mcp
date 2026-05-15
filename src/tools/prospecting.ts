@@ -16,6 +16,24 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import { READ_ONLY_ANNOTATIONS, TOOL_NAMES, buildNextAction, desc } from "../helpers"
 import { CAPABILITIES_RECOVERY_URI } from "../resources/capabilities-recovery"
+import { nextActionSchema } from "../schemas/common"
+
+// Synthetic coordinator payload: { plan, nextAction, directives }. Unlike every
+// other tool, this is NOT a Hunter API response — Prospecting emits a plan +
+// first step + session-level directives entirely client-side. The outputSchema
+// reflects exactly that shape so the SDK validator passes.
+const prospectingOutputSchema = z
+  .object({
+    plan: z.array(
+      z.object({
+        tool: z.enum(TOOL_NAMES),
+        reason: z.string(),
+      }),
+    ),
+    nextAction: nextActionSchema,
+    directives: z.array(z.string()),
+  })
+  .loose()
 
 export function registerProspectingTool(server: McpServer) {
   server.registerTool(
@@ -29,6 +47,7 @@ export function registerProspectingTool(server: McpServer) {
             "Natural-language prospecting brief, e.g. 'Find 20 marketing leads at fintech companies in Berlin'.",
           ),
       },
+      outputSchema: prospectingOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ query: _query }) => {
@@ -90,7 +109,9 @@ export function registerProspectingTool(server: McpServer) {
 
       return {
         content: [
-          { type: "text" as const, text: summary },
+          // `audience: ["user"]` distinguishes the human-readable summary from
+          // the assistant-only directive payload below (HUN-19943 todos/013).
+          { type: "text" as const, text: summary, annotations: { audience: ["user"] } },
           {
             type: "text" as const,
             text: JSON.stringify({ plan, nextAction: firstStep, directives }),

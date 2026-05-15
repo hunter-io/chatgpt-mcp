@@ -13,6 +13,8 @@
 		"start": "wrangler dev",
 		"cf-typegen": "wrangler types",
 		"type-check": "tsc --noEmit",
+		"test": "vitest run -c vitest.unit.config.mts",
+		"test:watch": "vitest -c vitest.unit.config.mts",
 		"dev:widgets": "vite",
 		"build:widgets": "rm -rf dist/assets && pnpm run build:widgets:company && pnpm run build:widgets:discover",
 		"build:widgets:company": "WIDGET_ENTRY=company-widget vite build",
@@ -38,6 +40,7 @@
 		"tailwindcss": "^4.2.4",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.11",
+		"vitest": "^3.1.0",
 		"wrangler": "^4.88.0"
 	},
 	"overrides": {

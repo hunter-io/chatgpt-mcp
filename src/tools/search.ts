@@ -13,6 +13,13 @@ import {
   parseHunterApiData,
   pendingCompaniesSchema,
 } from "../helpers"
+import {
+  buildResponseSchema,
+  nullableNumber,
+  nullableString,
+  paginationMetaSchema,
+  verificationSchema,
+} from "../schemas/common"
 
 interface DomainSearchData {
   emails?: Array<{ value?: string }>
@@ -22,6 +29,97 @@ interface EmailVerifierData {
   status?: string
   email?: string
 }
+
+// ─── Output schemas (co-located with handlers) ───────────────────────────────
+
+// Hunter domain-search emit shape from app/app/views/api/domain_search/.
+// .loose() at envelope level; leaf is strict.
+const emailEntrySchema = z
+  .object({
+    value: z.string(),
+    type: z.string().optional(),
+    confidence: z.number().int().min(0).max(100).optional(),
+    first_name: nullableString().optional(),
+    last_name: nullableString().optional(),
+    position: nullableString().optional(),
+    seniority: nullableString().optional(),
+    department: nullableString().optional(),
+    linkedin: nullableString().optional(),
+    twitter: nullableString().optional(),
+    phone_number: nullableString().optional(),
+    verification: verificationSchema.optional(),
+    sources: z.array(z.unknown()).optional(),
+  })
+  .loose()
+
+const domainSearchDataSchema = z
+  .object({
+    domain: z.string(),
+    disposable: z.boolean().optional(),
+    webmail: z.boolean().optional(),
+    accept_all: z.boolean().optional(),
+    pattern: nullableString().optional(),
+    organization: nullableString().optional(),
+    country: nullableString().optional(),
+    state: nullableString().optional(),
+    emails: z.array(emailEntrySchema),
+  })
+  .loose()
+
+// `app/views/api/email_finder/show.json.jbuilder` emits `linkedin_url` (not
+// `linkedin` like Domain-Search's emailEntrySchema). The Ruby attribute
+// `@result.linkedin` is incidental — the wire key is what matters.
+const emailFinderDataSchema = z
+  .object({
+    first_name: nullableString().optional(),
+    last_name: nullableString().optional(),
+    email: nullableString(),
+    score: nullableNumber(),
+    domain: z.string().optional(),
+    accept_all: z.boolean().optional(),
+    position: nullableString().optional(),
+    twitter: nullableString().optional(),
+    linkedin_url: nullableString().optional(),
+    phone_number: nullableString().optional(),
+    company: nullableString().optional(),
+    sources: z.array(z.unknown()).optional(),
+    verification: verificationSchema.optional(),
+  })
+  .loose()
+
+const emailVerifierDataSchema = z
+  .object({
+    status: z.string(),
+    result: z.string().optional(),
+    score: nullableNumber(),
+    email: z.string(),
+    regexp: z.union([z.boolean(), z.null()]).optional(),
+    gibberish: z.union([z.boolean(), z.null()]).optional(),
+    disposable: z.union([z.boolean(), z.null()]).optional(),
+    webmail: z.union([z.boolean(), z.null()]).optional(),
+    mx_records: z.union([z.boolean(), z.null()]).optional(),
+    smtp_server: z.union([z.boolean(), z.null()]).optional(),
+    smtp_check: z.union([z.boolean(), z.null()]).optional(),
+    accept_all: z.union([z.boolean(), z.null()]).optional(),
+    block: z.union([z.boolean(), z.null()]).optional(),
+    sources: z.array(z.unknown()).optional(),
+  })
+  .loose()
+
+const emailCountDataSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    personal_emails: z.number().int().nonnegative().optional(),
+    generic_emails: z.number().int().nonnegative().optional(),
+    department: z.object({}).loose().optional(),
+    seniority: z.object({}).loose().optional(),
+  })
+  .loose()
+
+const domainSearchOutputSchema = buildResponseSchema(domainSearchDataSchema, paginationMetaSchema)
+const emailFinderOutputSchema = buildResponseSchema(emailFinderDataSchema)
+const emailVerifierOutputSchema = buildResponseSchema(emailVerifierDataSchema)
+const emailCountOutputSchema = buildResponseSchema(emailCountDataSchema)
 
 function firstEmailValue(data: DomainSearchData | null): string | null {
   if (!data || !Array.isArray(data.emails)) return null
@@ -61,6 +159,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .describe("Only return results where this field has a value"),
         pending_companies: pendingCompaniesSchema,
       },
+      outputSchema: domainSearchOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ domain, limit, offset, type, seniority, department, required_field, pending_companies }) => {
@@ -155,9 +254,10 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     {
       description: desc`Find a specific person's email address at a company. Provide full name and domain. Costs 1 search credit — only charged if an email is found. Follow up with ${TOOL_NAMES.emailVerifier} to check deliverability.`,
       inputSchema: {
-        full_name: z.string().describe("Full name of the person to find the email address for"),
-        domain: z.string().describe("Domain name to find the person's email address for"),
+        full_name: z.string().min(1).max(200).describe("Full name of the person to find the email address for"),
+        domain: domainStringSchema.describe("Domain name to find the person's email address for"),
       },
+      outputSchema: emailFinderOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ full_name, domain }) => {
@@ -183,6 +283,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .optional()
           .describe("Loop carry: forwarded from Domain-Search."),
       },
+      outputSchema: emailVerifierOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ email, pending_companies, limit, type, seniority, department, required_field }) => {
@@ -259,9 +360,10 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     {
       description: desc`Get the number of email addresses Hunter has found for a domain. Free (no credits). Useful to check data availability before running a ${TOOL_NAMES.domainSearch}.`,
       inputSchema: {
-        domain: z.string().describe("Domain name to count email addresses for"),
+        domain: domainStringSchema.describe("Domain name to count email addresses for"),
         type: z.enum(["personal", "generic"]).optional().describe("Type of email addresses to count"),
       },
+      outputSchema: emailCountOutputSchema.shape,
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ domain, type }) => {
