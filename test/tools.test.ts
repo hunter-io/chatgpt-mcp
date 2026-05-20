@@ -362,7 +362,11 @@ describe("HUN-19943 todos/022: headless prospecting chain advances via structure
     const dsHandler = registeredTools.get("Domain-Search")!.handler
     const dsResult = await dsHandler({ domain: "a.com", pending_companies: ["b.com"] })
     expect(dsResult.isError).toBeUndefined()
-    const dsNext = (dsResult.structuredContent as { nextAction: { kind: string; tool: string; suggestedArgs: { email: string; pending_companies: string[] } } }).nextAction
+    const dsNext = (
+      dsResult.structuredContent as {
+        nextAction: { kind: string; tool: string; suggestedArgs: { email: string; pending_companies: string[] } }
+      }
+    ).nextAction
     expect(dsNext.kind).toBe("call_tool")
     expect(dsNext.tool).toBe("Email-Verifier")
     expect(dsNext.suggestedArgs.email).toBe("user@a.com")
@@ -374,14 +378,17 @@ describe("HUN-19943 todos/022: headless prospecting chain advances via structure
       "fetch",
       vi.fn().mockResolvedValueOnce({
         ok: true,
-        text: () =>
-          Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com", score: 90 } })),
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com", score: 90 } })),
       }),
     )
     const evHandler = registeredTools.get("Email-Verifier")!.handler
     const evResult = await evHandler(dsNext.suggestedArgs)
     expect(evResult.isError).toBeUndefined()
-    const evNext = (evResult.structuredContent as { nextAction: { kind: string; tool: string; suggestedArgs: { email: string; pending_companies: string[] } } }).nextAction
+    const evNext = (
+      evResult.structuredContent as {
+        nextAction: { kind: string; tool: string; suggestedArgs: { email: string; pending_companies: string[] } }
+      }
+    ).nextAction
     expect(evNext.kind).toBe("call_tool")
     expect(evNext.tool).toBe("Upsert-Lead")
     expect(evNext.suggestedArgs.email).toBe("user@a.com")
@@ -399,7 +406,11 @@ describe("HUN-19943 todos/022: headless prospecting chain advances via structure
     const usHandler = registeredTools.get("Upsert-Lead")!.handler
     const usResult = await usHandler(evNext.suggestedArgs)
     expect(usResult.isError).toBeUndefined()
-    const usNext = (usResult.structuredContent as { nextAction: { kind: string; tool: string; suggestedArgs: { domain: string; pending_companies: string[] } } }).nextAction
+    const usNext = (
+      usResult.structuredContent as {
+        nextAction: { kind: string; tool: string; suggestedArgs: { domain: string; pending_companies: string[] } }
+      }
+    ).nextAction
     expect(usNext.kind).toBe("call_tool")
     expect(usNext.tool).toBe("Domain-Search")
     expect(usNext.suggestedArgs.domain).toBe("b.com")
@@ -411,8 +422,7 @@ describe("HUN-19943 todos/022: headless prospecting chain advances via structure
       "fetch",
       vi.fn().mockResolvedValueOnce({
         ok: true,
-        text: () =>
-          Promise.resolve(JSON.stringify({ data: { domain: "c.com", emails: [] } })),
+        text: () => Promise.resolve(JSON.stringify({ data: { domain: "c.com", emails: [] } })),
       }),
     )
     const dsHandler = registeredTools.get("Domain-Search")!.handler
