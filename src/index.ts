@@ -6,13 +6,13 @@ import discoverComponent from "../bundle/discover.html.ts"
 import {
   BASE_API_URL_DEVELOPMENT,
   BASE_API_URL_PRODUCTION,
+  BILLABLE_LOOKUP_ANNOTATIONS,
   type McpTextResult,
-  READ_ONLY_ANNOTATIONS,
+  PRIVATE_WRITE_ANNOTATIONS,
+  READ_ONLY_PUBLIC_ANNOTATIONS,
   TOOL_NAMES,
-  WRITE_ANNOTATIONS,
   buildNextAction,
   callHunterApi,
-  desc,
   embedNextAction,
   withDeepLink,
 } from "./helpers"
@@ -123,7 +123,7 @@ export class HunterChatGPTMCP extends McpAgent {
   // separate copies, causing a nominal type mismatch.
   server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "2.1.0",
+    version: "2.2.0",
   }) as any
 
   // Guard against the agents framework clobbering the stored API key when the
@@ -167,7 +167,7 @@ export class HunterChatGPTMCP extends McpAgent {
               resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
             },
             "openai/widgetDescription":
-              "Display all available data for the specified company via the UI. When this widget is shown, the UI is the primary source of truth. Outside of the widget, the assistant will suggest next steps, provide high-level information on funding (if any), and share a small set of generic email addresses, including a link to the company profile on Hunter.io. Other than that, the assistant must not add any narrative, interpretation, recommendations, or descriptive text alongside the widget.",
+              "Displays a company's profile (industry, size, location, technologies, funding, social profiles) as a card.",
           },
         },
       ],
@@ -188,7 +188,7 @@ export class HunterChatGPTMCP extends McpAgent {
               resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
             },
             "openai/widgetDescription":
-              "Displays the top 5 results and a link to see all the results. You don't have to repeat the results; instead, suggest follow-up actions.",
+              "Displays the top 5 matching companies with a link to view the full result set.",
           },
         },
       ],
@@ -198,7 +198,8 @@ export class HunterChatGPTMCP extends McpAgent {
     this.server.registerTool(
       TOOL_NAMES.discover,
       {
-        description: desc`Find companies matching a natural language search query. Filter by location, industry, size, type, and technologies. Returns top 100 results by default — use 'offset' to paginate. Free (no credits). CRITICAL: never auto-pick the top result for a follow-up search — emit nextAction.kind === "ask_user" and let the user select which company to investigate. The top Discover hit is not necessarily the best semantic match. The response includes \`meta.permalink\` — a link to the same query on hunter.io that the user can open to see all results with the inferred filters applied; surface it as "See all results on Hunter" when relevant. CRITICAL: when the user picks more than one company for follow-up, call ${TOOL_NAMES.domainSearch} ONCE with the FIRST picked domain and pass \`pending_companies\` as the array of remaining picked domains. The chain auto-threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} per company and continues to the next picked company without between-company confirmation gates. You only need to seed the loop on this first call.`,
+        description:
+          "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call.",
         inputSchema: {
           query: z
             .string()
@@ -207,7 +208,7 @@ export class HunterChatGPTMCP extends McpAgent {
             .describe("Your search query. Example: 'software companies in San Francisco with more than 50 employees'"),
         },
         outputSchema: discoverOutputSchema.shape,
-        annotations: READ_ONLY_ANNOTATIONS,
+        annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
         _meta: {
           "openai/outputTemplate": "ui://widget/discover-widget.html",
           "openai/widgetAccessible": true,
@@ -244,12 +245,13 @@ export class HunterChatGPTMCP extends McpAgent {
     this.server.registerTool(
       TOOL_NAMES.companyEnrichment,
       {
-        description: desc`Enrich a company domain with industry, size, location, technologies, funding, and social profiles. Does NOT return personal data (PII). Costs 1 enrichment credit — only charged if data is found. If you only have a company name, try assuming the domain. Follow up with ${TOOL_NAMES.domainSearch} to find contacts or ${TOOL_NAMES.saveCompany} to save as a lead.`,
+        description:
+          "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found.",
         inputSchema: {
           domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
         },
         outputSchema: companyEnrichmentOutputSchema.shape,
-        annotations: READ_ONLY_ANNOTATIONS,
+        annotations: BILLABLE_LOOKUP_ANNOTATIONS,
         _meta: {
           "openai/outputTemplate": "ui://widget/company-widget.html",
           "openai/widgetAccessible": true,
@@ -291,12 +293,13 @@ export class HunterChatGPTMCP extends McpAgent {
     this.server.registerTool(
       TOOL_NAMES.saveCompany,
       {
-        description: "Save a company as a lead in your Hunter account. Free (no credits).",
+        description:
+          "Use this when the user wants to add a company as a lead in their Hunter account, identified by domain. Free to call.",
         inputSchema: {
           domain: z.string().min(1).max(253).describe("Domain name of the company to save into your Hunter Leads"),
         },
         outputSchema: saveCompanyOutputSchema.shape,
-        annotations: WRITE_ANNOTATIONS,
+        annotations: PRIVATE_WRITE_ANNOTATIONS,
       },
       async ({ domain }: { domain: string }) => {
         const result = await callHunterApi({

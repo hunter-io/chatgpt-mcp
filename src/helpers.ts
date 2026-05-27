@@ -30,7 +30,7 @@ export const HUNTER_BASE = "https://hunter.io"
 // See docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 0).
 export const TOOL_NAMES = {
   // search
-  discover: "Discover",
+  discover: "Find-Companies",
   domainSearch: "Domain-Search",
   emailFinder: "Email-Finder",
   emailVerifier: "Email-Verifier",
@@ -40,14 +40,15 @@ export const TOOL_NAMES = {
   companyEnrichment: "Company-Enrichment",
   combinedEnrichment: "Combined-Enrichment",
   // account
-  account: "Account",
+  account: "Get-Account-Details",
   // leads
   listLeads: "List-Leads",
   getLead: "Get-Lead",
   createLead: "Create-Lead",
   updateLead: "Update-Lead",
   deleteLead: "Delete-Lead",
-  upsertLead: "Upsert-Lead",
+  upsertLead: "Create-Or-Update-Lead",
+  createLeadIfMissing: "Create-Lead-If-Missing",
   leadExists: "Lead-Exists",
   saveCompany: "Save-Company",
   // leads lists
@@ -70,7 +71,7 @@ export const TOOL_NAMES = {
   removeCampaignRecipients: "Remove-Campaign-Recipients",
   startCampaign: "Start-Campaign",
   // coordinator
-  prospecting: "Prospecting",
+  prospecting: "Plan-Prospecting-Flow",
 } as const satisfies Record<string, string>
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES]
@@ -275,9 +276,31 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
       message,
     }
   }
+  // QUOTA_SCRUB_START
+  // HUN-20170: scrub the upstream upgrade/checkout CTA. Hunter's 402 response
+  // body includes copy like "Please log in to Hunter to upgrade your plan or
+  // purchase additional credits." OpenAI's app submission guidelines forbid
+  // selling subscriptions, tokens, or credits inside ChatGPT (including
+  // freemium upsells), so the user-facing message must be a neutral quota
+  // notice — the upstream message is logged once (sanitized) for operator
+  // triage and `parsedField` is surfaced on the envelope so the agent can
+  // distinguish which quota bucket tripped (search vs verification vs
+  // enrichment) without grepping prose.
+  //
+  // This block must be BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and
+  // remote-mcp/src/helpers.ts — enforced by scripts/check-tool-names-aligned.mjs.
   if (status === 402) {
-    return { code: "quota_exceeded", retryable: false, message }
+    console.warn(
+      `mapHunterError: scrubbed 402 quota response; upstream message: ${sanitizeUpstreamMessage(rawMessage)}`,
+    )
+    return {
+      code: "quota_exceeded",
+      retryable: false,
+      ...(parsedField && { field: parsedField }),
+      message: "Your monthly Hunter quota is exhausted. Quota resets at the start of your next billing cycle.",
+    }
   }
+  // QUOTA_SCRUB_END
   if (status === 401 || status === 403) {
     return { code: "unauthorized", retryable: false, message }
   }
@@ -475,8 +498,9 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 //   - structuredContent is machine-readable
 //   - the assistant-only block is JSON the model sees but the user does not
 //     (audience: ["assistant"])
-// Description prose reinforces with "CRITICAL: if nextAction.kind === 'call_tool',
-// call the indicated tool immediately."
+// The model honors the chained nextAction directly from structuredContent;
+// no special prose hint is needed in descriptions (HUN-20170 removed the
+// historical "CRITICAL:" prose to comply with OpenAI submission guidelines).
 //
 // This region (between NEXT_ACTION_START / NEXT_ACTION_END markers) must be
 // BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and remote-mcp/src/helpers.ts
@@ -637,38 +661,14 @@ function buildOverCapFallback(nextAction: NextAction): NextAction {
 
 // ───────────────────────────────────────────────────────────────────────────
 
-export const READ_ONLY_ANNOTATIONS = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  openWorldHint: true,
-} as const
-
-/**
- * Paid tools — flag `destructiveHint: true` so ChatGPT host UI surfaces a
- * confirmation prompt before invocation.
- *
- * IMPORTANT: `readOnlyHint` is `false` even though paid tools only read from
- * the Hunter API. Per the MCP spec, `destructiveHint` is "meaningful only
- * when readOnlyHint is false" — clients honoring the spec ignore
- * `destructiveHint` whenever `readOnlyHint: true` and may auto-approve the
- * tool as safe. To actually trigger the host UI prompt, the tool must
- * advertise that it modifies environment state.
- *
- * Defensible semantically: paid tools deduct credits from the user's
- * account, which is a billing-state modification. The user's credit balance
- * is environment state, even if no Hunter resource is mutated.
- *
- * The semantic stretch on "destructive" ("usually means delete-or-overwrite")
- * is intentional: per OpenAI Apps SDK submission guidelines, destructive-
- * style friction is the documented primitive for credit-consuming actions.
- * Empirical verification required (plan Phase 1.5) — Feb 2026 community
- * reports document intermittent ChatGPT ignoring of MCP annotations.
- */
-export const PAID_TOOL_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  openWorldHint: true,
-} as const
+// READ_ONLY_ANNOTATIONS and PAID_TOOL_ANNOTATIONS were removed in HUN-20170
+// (zero call sites after the Phase 4 matrix overhaul). Their replacements
+// live below the NEXT_ACTION_END marker:
+//   READ_ONLY_ANNOTATIONS  → READ_ONLY_PUBLIC_ANNOTATIONS or PRIVATE_READ_ANNOTATIONS
+//   PAID_TOOL_ANNOTATIONS  → BILLABLE_LOOKUP_ANNOTATIONS (drops destructiveHint
+//                            because credit spend isn't irreversible per OpenAI
+//                            submission guidance; bulk-spend protection moved
+//                            to Plan-Prospecting-Flow's upfront confirmation).
 
 /**
  * Bounded writes against the user's Hunter workspace via Hunter's external
@@ -705,6 +705,85 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
   openWorldHint: true,
 } as const
 // NEXT_ACTION_END
+
+// ─── Submission-aligned annotation constants (HUN-20170) ──────────────────
+//
+// Added 2026-05-27 to satisfy OpenAI Apps SDK's tighter annotation semantics
+// (https://developers.openai.com/apps-sdk/deploy/submission). These live
+// OUTSIDE the NEXT_ACTION region so they don't force byte-identical edits in
+// remote-mcp/src/helpers.ts.
+//
+// The five legacy constants above (READ_ONLY_*/PAID_TOOL_*/WRITE_*/DESTRUCTIVE_*/
+// EXTERNAL_SIDE_EFFECT_*) stay exported for backwards compatibility until a
+// follow-up PR migrates remaining callers.
+//
+// Matrix mapping:
+//   READ_ONLY_PUBLIC_ANNOTATIONS    → public-data lookups (Find-Companies, Email-Count)
+//   PRIVATE_READ_ANNOTATIONS         → private-workspace reads (Get-Account-Details,
+//                                       List/Get-Lead, Lead-Exists, lists, attributes,
+//                                       campaigns reads)
+//   BILLABLE_LOOKUP_ANNOTATIONS      → paid lookups (Domain-Search, Email-Finder,
+//                                       Email-Verifier, Person/Company/Combined-Enrichment)
+//   PRIVATE_WRITE_ANNOTATIONS        → private-workspace create-only writes (Create-Lead,
+//                                       Create-Lead-If-Missing, Save-Company, Create/Update
+//                                       lists & attributes)
+//   PRIVATE_DESTRUCTIVE_ANNOTATIONS  → private-workspace overwrite/delete/merge (Update-Lead,
+//                                       Create-Or-Update-Lead, Delete-Lead, Delete/Merge
+//                                       lists, Delete-Custom-Attribute)
+//   LOCAL_PLAN_ANNOTATIONS           → Plan-Prospecting-Flow (synthesizes a plan locally;
+//                                       no Hunter API call, no external effect)
+
+/** Public-data lookup tools that read from Hunter's hosted index of public-internet data. */
+export const READ_ONLY_PUBLIC_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: true,
+} as const
+
+/** Read-only access to the user's private Hunter workspace. */
+export const PRIVATE_READ_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const
+
+/**
+ * Paid lookup that may consume Hunter credits. State change without irreversible
+ * side effect. `readOnlyHint: false` is honest about the credit-balance mutation;
+ * `destructiveHint: false` because credits replenish on the plan cycle and no
+ * data is deleted/overwritten/sent. The Plan-Prospecting-Flow coordinator
+ * surfaces a single upfront credit-cost prompt for bulk flows.
+ */
+export const BILLABLE_LOOKUP_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: true,
+} as const
+
+/** Create-only writes to the user's private Hunter workspace. */
+export const PRIVATE_WRITE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const
+
+/**
+ * Overwrite/delete/merge operations on the user's private Hunter workspace.
+ * "Destructive" is the broader, accurate label (covers deletes + merges too,
+ * not just field overwrites).
+ */
+export const PRIVATE_DESTRUCTIVE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: false,
+} as const
+
+/** Local plan synthesis only; no Hunter API call. Used by Plan-Prospecting-Flow. */
+export const LOCAL_PLAN_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const
 
 /**
  * RFC 1035-shaped hostname regex used to validate the primary `domain` input
@@ -755,7 +834,7 @@ export const pendingCompaniesSchema = z
   .transform((arr) => Array.from(new Set(arr.map((d) => d.toLowerCase()))))
   .optional()
   .describe(
-    desc`Multi-company loop carry (capped at 50 domains). When the user has picked 2+ companies, set this on the first ${TOOL_NAMES.domainSearch} call to the array of REMAINING picks (everything except the first picked domain that goes in the 'domain' arg). The response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave UNDEFINED for single-call usage and for prospecting flows where the user picked exactly ONE company (single-company mode preserves the confirmation gate on Email-Verifier).`,
+    desc`Multi-company loop carry (capped at 50 domains). When the user has picked 2+ companies, set this on the first ${TOOL_NAMES.domainSearch} call to the array of REMAINING picks (everything except the first picked domain that goes in the 'domain' arg). The response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.createLeadIfMissing} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave UNDEFINED for single-call usage and for prospecting flows where the user picked exactly ONE company (single-company mode preserves the confirmation gate on Email-Verifier).`,
   )
 
 /**
@@ -817,4 +896,49 @@ export function carryLoopFilters(args: LoopFilters): Record<string, string | num
   if (args.department) out.department = args.department
   if (args.required_field) out.required_field = args.required_field
   return out
+}
+
+/**
+ * Shared terminal-step nextAction emitter for the multi-company prospecting
+ * loop. Used by `Create-Or-Update-Lead` and `Create-Lead-If-Missing` after a
+ * successful save (or already-existed no-op):
+ *
+ *   - If `pending_companies` is non-empty: chain into the next Domain-Search
+ *     with the filter-carry forwarded, so the loop advances to the next
+ *     selected company without a between-company confirmation gate.
+ *   - If `pending_companies` is `undefined` (single-call mode) OR an empty
+ *     array (last hop in a loop): emit `complete`. The flag distinguishes
+ *     the two so the user-facing summary reads correctly in each path.
+ *
+ * Extracted in HUN-20170 todo #103 to dedupe two near-identical blocks in
+ * leads.ts. Lives outside the NEXT_ACTION byte-aligned region so each MCP
+ * can adopt independently.
+ */
+export function chainOrComplete(
+  result: McpTextResult,
+  pending: readonly string[] | undefined,
+  filters: LoopFilters,
+  copy: { reason: string; loopCompleteSummary: string; singleCompleteSummary: string },
+): McpTextResult {
+  if (pending !== undefined && pending.length > 0) {
+    const [next, ...rest] = pending
+    const filterCarry = carryLoopFilters(filters)
+    return embedNextAction(
+      result,
+      buildNextAction({
+        kind: "call_tool",
+        tool: TOOL_NAMES.domainSearch,
+        reason: copy.reason,
+        suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
+      }),
+    )
+  }
+  const isLastLoopHop = pending !== undefined
+  return embedNextAction(
+    result,
+    buildNextAction({
+      kind: "complete",
+      summary: isLastLoopHop ? copy.loopCompleteSummary : copy.singleCompleteSummary,
+    }),
+  )
 }

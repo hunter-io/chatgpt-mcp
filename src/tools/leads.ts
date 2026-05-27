@@ -1,16 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
-  DESTRUCTIVE_ANNOTATIONS,
-  READ_ONLY_ANNOTATIONS,
+  chainOrComplete,
+  type McpTextResult,
+  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+  PRIVATE_READ_ANNOTATIONS,
+  PRIVATE_WRITE_ANNOTATIONS,
   TOOL_NAMES,
-  WRITE_ANNOTATIONS,
-  buildNextAction,
   callHunterApi,
-  carryLoopFilters,
   desc,
-  embedNextAction,
   loopRecoveryAction,
+  parseHunterApiData,
   pendingCompaniesSchema,
   withDeepLink,
   withDeepLinkFromId,
@@ -86,6 +86,12 @@ const listLeadsDataSchema = z.object({ leads: z.array(leadSchema) }).loose()
 
 const listLeadsOutputSchema = buildResponseSchema(listLeadsDataSchema, paginationMetaSchema)
 const singleLeadOutputSchema = buildResponseSchema(leadSchema)
+// Create-Lead-If-Missing extends the standard lead leaf with `alreadyExisted`
+// so callers can distinguish the create vs. no-op branches without parsing
+// the message text. The flag is omitted in the create path.
+const createLeadIfMissingOutputSchema = buildResponseSchema(
+  leadSchema.extend({ alreadyExisted: z.boolean().optional() }),
+)
 // Lead-Exists envelope: the controller emits `{ id, leads_list_id,
 // leads_list_name }` (all nullable when no lead matches). There is no `exists`
 // field — callers should derive existence from `data.id != null`. See
@@ -110,12 +116,37 @@ function buildLeadParams(fields: Record<string, unknown>): Record<string, string
   return params
 }
 
+/**
+ * For Create-Lead-If-Missing's already-existed branch: stamps
+ * `structuredContent.data.alreadyExisted = true` so the model can distinguish
+ * the no-op path from the create path without parsing message text, and
+ * prepends a clear user-visible "already exists" line to the first content
+ * block. Leaves error results untouched.
+ */
+function injectAlreadyExisted(result: McpTextResult, userMessage: string): McpTextResult {
+  if (result.isError) return result
+  const data = (result.structuredContent as { data?: Record<string, unknown> } | undefined)?.data ?? {}
+  const firstBlock = result.content[0]
+  const newContent =
+    firstBlock !== undefined
+      ? [{ ...firstBlock, text: `${userMessage}\n\n${firstBlock.text}` }, ...result.content.slice(1)]
+      : result.content
+  return {
+    ...result,
+    content: newContent,
+    structuredContent: {
+      ...result.structuredContent,
+      data: { ...data, alreadyExisted: true },
+    },
+  }
+}
+
 export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
     TOOL_NAMES.listLeads,
     {
       description:
-        "List leads in your Hunter account with optional filters. Free (no credits). Returns up to 100 leads per page — use offset to paginate.",
+        "Use this when the user wants to list leads from their Hunter account, with optional filters on email, name, company, or list. Returns up to 100 leads per page; use `offset` to paginate. Free to call.",
       inputSchema: {
         offset: z.number().int().nonnegative().optional().describe("Number of leads to skip"),
         limit: z.number().int().positive().max(100).optional().describe("Maximum number of leads to return (max 100)"),
@@ -126,7 +157,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
         company: z.string().optional().describe("Filter leads by company name"),
       },
       outputSchema: listLeadsOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ offset, limit, leads_list_id, email, first_name, last_name, company }) => {
       const params: Record<string, string> = {}
@@ -144,12 +175,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.getLead,
     {
-      description: "Get a single lead by ID. Free (no credits).",
+      description:
+        "Use this when the user wants to retrieve a single lead from their Hunter account by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the lead to retrieve"),
       },
       outputSchema: singleLeadOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({ path: `/leads/${id}`, apiKey, baseUrl })
@@ -160,13 +192,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
     TOOL_NAMES.createLead,
     {
       description:
-        "Create a new lead in your Hunter account. Free (no credits). Provide at least an email address. Use leads_list_id to add directly to a list.",
+        "Use this when the user wants to create a new lead in their Hunter account. Email is required; other fields are optional. Pass `leads_list_id` to add the lead directly to a list. Free to call.",
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the lead (required)"),
       },
       outputSchema: singleLeadOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async (fields) => {
       const result = await callHunterApi({
@@ -183,13 +215,14 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.updateLead,
     {
-      description: "Update an existing lead by ID. Free (no credits).",
+      description:
+        "Use this when the user wants to update fields on an existing lead identified by ID. Free to call. Updating a lead overwrites the supplied fields in place.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the lead to update"),
         ...leadFieldsSchema,
       },
       outputSchema: singleLeadOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, ...fields }) => {
       const result = await callHunterApi({
@@ -206,13 +239,14 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.deleteLead,
     {
-      description: "Delete a lead by ID. Free (no credits).",
+      description:
+        "Use this when the user wants to remove a lead from their Hunter account, identified by ID. Free to call. Deleting a lead cannot be undone from the API.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the lead to delete"),
       },
       // Hunter returns 204 No Content — callHunterApi synthesises mutationAckSchema.
       outputSchema: mutationAckSchema.shape,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({ path: `/leads/${id}`, apiKey, baseUrl, method: "DELETE" })
@@ -222,7 +256,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.upsertLead,
     {
-      description: desc`Create or update a lead by email address. If a lead with the email exists, it is updated; otherwise a new lead is created. Free (no credits). Preferred over ${TOOL_NAMES.createLead} when you may have duplicates. Terminal step in the single-company prospecting chain — emits nextAction.kind === "complete". CRITICAL: when called with 'pending_companies' (multi-company loop mode), the response chains directly to ${TOOL_NAMES.domainSearch} for the next pending company after the save, instead of completing — so the entire prospecting loop runs without between-company gates.`,
+      description: desc`Use this when the user explicitly wants to create a lead or overwrite an existing lead's fields by email. If a lead with the email exists, its fields are overwritten with the supplied values; otherwise a new lead is created. Free to call. Overwriting an existing lead's fields cannot be undone from the API. For save-without-overwrite semantics, use ${TOOL_NAMES.createLeadIfMissing} instead.`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the lead (used to match existing leads)"),
@@ -241,7 +275,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .describe("Loop carry: forwarded from Domain-Search."),
       },
       outputSchema: singleLeadOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
       const result = await callHunterApi({
@@ -259,31 +293,113 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
         return linked
       }
 
-      if (pending_companies !== undefined && pending_companies.length > 0) {
-        const [next, ...rest] = pending_companies
-        const filterCarry = carryLoopFilters({ limit, type, seniority, department, required_field })
-        return embedNextAction(
-          linked,
-          buildNextAction({
-            kind: "call_tool",
-            tool: TOOL_NAMES.domainSearch,
-            reason: "Lead saved; continuing loop with next picked company.",
-            suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
-          }),
-        )
+      return chainOrComplete(
+        linked,
+        pending_companies,
+        { limit, type, seniority, department, required_field },
+        {
+          reason: "Lead saved; continuing loop with next picked company.",
+          loopCompleteSummary: "Lead saved. Multi-company loop complete.",
+          singleCompleteSummary: "Lead saved to Hunter.",
+        },
+      )
+    },
+  )
+
+  server.registerTool(
+    TOOL_NAMES.createLeadIfMissing,
+    {
+      description: desc`Use this when the user wants to save a verified contact as a new lead without modifying any existing lead. If a lead with the email already exists, returns the existing record unchanged with \`alreadyExisted: true\` and reports "already exists; no changes made"; otherwise creates the lead with the supplied fields. Never overwrites, never moves to a list, never enriches existing records. Use ${TOOL_NAMES.upsertLead} instead when the user explicitly wants to overwrite an existing lead. Free (no credits).`,
+      inputSchema: {
+        ...leadFieldsSchema,
+        email: z.string().email().max(254).describe("Email address of the contact to save"),
+        pending_companies: pendingCompaniesSchema,
+        // Domain-Search filter carry: not used by Create-Lead-If-Missing itself,
+        // only forwarded to the next chained Domain-Search call so filters survive
+        // the full multi-company loop. Mirrors the Upsert-Lead carry pattern so
+        // chained suggestedArgs spread cleanly across the loop.
+        limit: z.number().optional().describe("Loop carry: forwarded from Domain-Search."),
+        type: z.enum(["personal", "generic"]).optional().describe("Loop carry: forwarded from Domain-Search."),
+        seniority: z.string().optional().describe("Loop carry: forwarded from Domain-Search."),
+        department: z.string().optional().describe("Loop carry: forwarded from Domain-Search."),
+        required_field: z
+          .enum(["full_name", "position", "phone_number"])
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search."),
+      },
+      outputSchema: createLeadIfMissingOutputSchema.shape,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
+    },
+    async ({ email, pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
+      // Pre-flight: does the lead already exist?
+      // We use /leads/exist (free, no credit cost) BEFORE POST /leads because
+      // Hunter's create controller (app/controllers/api/leads/create_controller.rb)
+      // reportedly enriches before validation, so a naive POST + catch-422 would
+      // burn an enrichment credit on every duplicate. Two cheap GETs beat one
+      // POST with hidden cost.
+      const existsResult = await callHunterApi({
+        path: "/leads/exist",
+        apiKey,
+        baseUrl,
+        params: { email },
+      })
+      if (existsResult.isError) {
+        if (pending_companies !== undefined && pending_companies.length > 0) {
+          return loopRecoveryAction(existsResult, pending_companies, `Existence check failed for ${email}`)
+        }
+        return existsResult
       }
 
-      // Reachable when pending_companies is undefined (single-call mode) OR an empty
-      // array (last hop in a loop — non-empty was handled above). The flag below
-      // distinguishes the two so the loop's terminal save reads as "loop complete"
-      // rather than the single-call summary.
-      const isLastLoopHop = pending_companies !== undefined
-      return embedNextAction(
-        linked,
-        buildNextAction({
-          kind: "complete",
-          summary: isLastLoopHop ? "Lead saved. Multi-company loop complete." : "Lead saved to Hunter.",
-        }),
+      const existing = parseHunterApiData<{ id?: number | null }>(existsResult)
+      let leadResult: McpTextResult
+
+      // Defense-in-depth: `parseHunterApiData` is a runtime-unchecked cast, so
+      // the id could in theory be a string, NaN, or negative integer if the
+      // upstream response shape changed. Guard with `Number.isSafeInteger > 0`
+      // before interpolating into a path, mirroring withDeepLinkFromId.
+      const existingId = existing?.id
+      if (typeof existingId === "number" && Number.isSafeInteger(existingId) && existingId > 0) {
+        // Already exists: fetch full record (free GET) and return unchanged.
+        const getResult = await callHunterApi({ path: `/leads/${existingId}`, apiKey, baseUrl })
+        if (getResult.isError) {
+          if (pending_companies !== undefined && pending_companies.length > 0) {
+            return loopRecoveryAction(getResult, pending_companies, `Fetch failed for existing lead ${existingId}`)
+          }
+          return getResult
+        }
+        leadResult = injectAlreadyExisted(
+          withDeepLink(getResult, `/leads/${existingId}`),
+          "Lead already exists; no changes made.",
+        )
+      } else {
+        // Doesn't exist: POST to create.
+        const created = await callHunterApi({
+          path: "/leads",
+          apiKey,
+          baseUrl,
+          method: "POST",
+          params: buildLeadParams({ email, ...fields }),
+        })
+        if (created.isError) {
+          if (pending_companies !== undefined && pending_companies.length > 0) {
+            return loopRecoveryAction(created, pending_companies, `Lead create failed for ${email}`)
+          }
+          return created
+        }
+        leadResult = withDeepLinkFromId(created, (id) => `/leads/${id}`)
+      }
+
+      // Loop continuation applies to BOTH branches (created AND alreadyExisted).
+      // Without this, the multi-company chain stops at the first duplicate email.
+      return chainOrComplete(
+        leadResult,
+        pending_companies,
+        { limit, type, seniority, department, required_field },
+        {
+          reason: "Lead saved or already existed; continuing with the next selected company.",
+          loopCompleteSummary: "Lead saved or already existed. Multi-company loop complete.",
+          singleCompleteSummary: "Lead saved or already existed.",
+        },
       )
     },
   )
@@ -291,12 +407,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.leadExists,
     {
-      description: "Check if a lead with a given email address exists. Free (no credits).",
+      description:
+        "Use this when the user wants to check whether a lead with a given email already exists in their Hunter account. Returns the lead ID and list info if present. Free to call.",
       inputSchema: {
         email: z.string().email().max(254).describe("Email address to check"),
       },
       outputSchema: leadExistsOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ email }) => {
       return callHunterApi({ path: "/leads/exist", apiKey, baseUrl, params: { email } })

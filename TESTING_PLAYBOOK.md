@@ -2,7 +2,7 @@
 
 > Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app)
 
-Manual test playbook for the Hunter ChatGPT app. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 34 tools.
+Manual test playbook for the Hunter ChatGPT app. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 35 tools.
 
 **How to use this doc:**
 - Run every prompt in **chatgpt.com** with the deployed Hunter app installed.
@@ -52,7 +52,7 @@ Find software companies in San Francisco with more than 50 employees
 ```
 
 **Expected tools fired:**
-- [ ] `Discover`
+- [ ] `Find-Companies`
 
 **Expected UI:**
 - [ ] Discover widget renders inline (not just a text list)
@@ -117,12 +117,12 @@ Find 10 marketing leads at SaaS companies in Berlin and save them to a new list 
 ```
 
 **Expected tools fired (in order):**
-- [ ] `Prospecting` (coordinator — emits plan + first nextAction)
-- [ ] `Discover` (then user picks companies)
+- [ ] `Plan-Prospecting-Flow` (coordinator — emits plan + first nextAction)
+- [ ] `Find-Companies` (then user picks companies)
 - [ ] `Domain-Search` (looped — once per chosen company, with `seniority` or `department` filters inferred from "marketing")
 - [ ] `Email-Verifier` (per email kept)
 - [ ] `Create-Leads-List` (one call, with name "Berlin SaaS Marketing")
-- [ ] `Upsert-Lead` (one call per saved contact, with `leads_list_id` set to the new list)
+- [ ] `Create-Or-Update-Lead` (one call per saved contact, with `leads_list_id` set to the new list)
 
 **Pass criteria:**
 - [ ] Discover returns relevant SaaS companies in Berlin
@@ -130,11 +130,11 @@ Find 10 marketing leads at SaaS companies in Berlin and save them to a new list 
 - [ ] After user picks, Domain-Search loops across **every** chosen company without re-asking "should I do all of them?"
 - [ ] `seniority`/`department` filters are passed to Domain-Search (e.g., `department=marketing`) — verify in network panel
 - [ ] Email-Verifier called only on emails the user wants to save
-- [ ] Only emails returning `status: "valid"` are saved via Upsert-Lead
+- [ ] Only emails returning `status: "valid"` are saved via Create-Or-Update-Lead
 - [ ] New list "Berlin SaaS Marketing" appears in hunter.io/leads with the correct count
 - [ ] Final assistant message includes a deep link to `https://hunter.io/leads?leads_list_id=<id>`
 - [ ] No fallback to web search / LinkedIn / pattern guessing — Hunter is the only source
-- [ ] Credits debited match expectation (≈20 credits for this flow: ~10 from `Domain-Search` + ~10 from `Email-Verifier`; `Discover`, `Create-Leads-List`, and `Upsert-Lead` are free)
+- [ ] Credits debited match expectation (≈20 credits for this flow: ~10 from `Domain-Search` + ~10 from `Email-Verifier`; `Find-Companies`, `Create-Leads-List`, and `Create-Or-Update-Lead` are free)
 
 **Screenshot(s):** `<!-- paste 2-3 screenshots: Discover widget, mid-loop status, final summary with deep link -->`
 
@@ -211,7 +211,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| A1 | `Account` | `How many Hunter credits do I have left?` | Returns plan name + remaining credits | ☐ | |
+| A1 | `Get-Account-Details` | `How many Hunter credits do I have left?` | Returns plan name + remaining credits | ☐ | |
 
 ### Search
 
@@ -324,7 +324,7 @@ Show me the next page of contacts at stripe.com
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.4 Duplicate dedup via Upsert-Lead
+### 3.4 Duplicate dedup via Create-Or-Update-Lead
 
 **Prompt:**
 
@@ -333,7 +333,7 @@ Save patrick@stripe.com to my Hunter leads with position "CEO".
 Then save patrick@stripe.com to my Hunter leads with position "Co-Founder".
 ```
 
-- [ ] Both calls use `Upsert-Lead` (not `Create-Lead`)
+- [ ] Both calls use `Create-Or-Update-Lead` (not `Create-Lead`)
 - [ ] Hunter dashboard shows ONE lead for that email, with position = "Co-Founder" (latest write wins)
 - [ ] No duplicate leads created
 
@@ -374,7 +374,7 @@ How many Hunter credits do I have?
 
 ### 3.7 Deep link sanity
 
-For each tool that returns a deep link (Save-Company, Create/Update/Upsert-Lead, Create/Update/Merge-Leads-List, Add/Remove-Campaign-Recipients, Start-Campaign), open the link and confirm:
+For each tool that returns a deep link (Save-Company, Create/Update/Create-Or-Update-Lead, Create/Update/Merge-Leads-List, Add/Remove-Campaign-Recipients, Start-Campaign), open the link and confirm:
 
 - [ ] Link opens hunter.io
 - [ ] Page shows the resource that was just created/modified
@@ -405,7 +405,7 @@ If the ChatGPT host surfaces the registered MCP prompts as slash commands or qui
 
 ### 3.10 Direct Discover → multi-company investigate (no Prospecting coordinator)
 
-**Goal:** Verify the model loops `Domain-Search` across every picked company and stays on Hunter tools when the user enters via direct `Discover` (bypassing the `Prospecting` coordinator). This is the most reviewer-realistic entry path: a natural prompt, no slash-command, no coordinator.
+**Goal:** Verify the model loops `Domain-Search` across every picked company and stays on Hunter tools when the user enters via direct `Find-Companies` (bypassing the `Plan-Prospecting-Flow` coordinator). This is the most reviewer-realistic entry path: a natural prompt, no slash-command, no coordinator.
 
 **Background:** A real review-prep session (2026-05-05) reproduced this failure: `Domain-Search` ran for company 1 only, the model fell back to a non-Hunter browse/fetch tool for company 2, and supplemented with ungrounded "public-looking" commentary. This test guards against regression after the Section 1 hardening lands.
 
@@ -420,7 +420,7 @@ Investigate the top two
 ```
 
 **Expected tools fired:**
-- [ ] `Discover` (after prompt 1)
+- [ ] `Find-Companies` (after prompt 1)
 - [ ] `Domain-Search` for picked company 1 (after prompt 2)
 - [ ] `Domain-Search` for picked company 2 (after prompt 2)
 - [ ] `Email-Verifier` whenever a Domain-Search response includes `nextAction.kind === "call_tool"` pointing to it
@@ -473,14 +473,14 @@ The 34 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Us
 
 | Group | Tools |
 |-------|-------|
-| Search | `Discover`, `Domain-Search`, `Email-Finder`, `Email-Verifier`, `Email-Count` |
+| Search | `Find-Companies`, `Domain-Search`, `Email-Finder`, `Email-Verifier`, `Email-Count` |
 | Enrichment | `Person-Enrichment`, `Company-Enrichment`, `Combined-Enrichment` |
-| Account | `Account` |
-| Leads | `List-Leads`, `Get-Lead`, `Create-Lead`, `Update-Lead`, `Delete-Lead`, `Upsert-Lead`, `Lead-Exists`, `Save-Company` |
+| Account | `Get-Account-Details` |
+| Leads | `List-Leads`, `Get-Lead`, `Create-Lead`, `Update-Lead`, `Delete-Lead`, `Create-Or-Update-Lead`, `Lead-Exists`, `Save-Company` |
 | Leads lists | `List-Leads-Lists`, `Get-Leads-List`, `Create-Leads-List`, `Update-Leads-List`, `Delete-Leads-List`, `Merge-Leads-Lists` |
 | Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
 | Campaigns | `List-Campaigns`, `List-Campaign-Recipients`, `Add-Campaign-Recipients`, `Remove-Campaign-Recipients`, `Start-Campaign` |
-| Coordinator | `Prospecting` |
+| Coordinator | `Plan-Prospecting-Flow` |
 | Named prompts | `prospect`, `build-list`, `campaign-prep` |
 | Widgets | `discover-widget`, `company-widget` |
-| Resources | `capabilities-recovery` (used implicitly by `Prospecting`) |
+| Resources | `capabilities-recovery` (used implicitly by `Plan-Prospecting-Flow`) |

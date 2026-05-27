@@ -22,15 +22,15 @@ export function registerPrompts(server: McpServer) {
             type: "text" as const,
             text: `Run a full B2B prospecting workflow for: "${query}"
 
-1. Use Discover to find companies matching the criteria (free).
+1. Use Find-Companies to find companies matching the criteria (free).
 2. For each company, use Domain-Search to find contacts. Use server-side filters (seniority, department) when the criteria mention roles or departments.
 3. Present the results and ask if I want to:
    a. Verify emails (1 verification credit each)
-   b. Save contacts to a new Hunter leads list (free)
+   b. Save verified contacts as leads via Create-Lead-If-Missing — this never overwrites an existing lead (free)
    c. Enrich companies for more details (1 enrichment credit each)
 4. After saving, provide the deep-link to view leads in Hunter.
 
-Credit costs: Discover is free. Domain-Search costs 1 search credit per 10 emails returned. Email-Verifier costs 1 verification credit each. Leads operations are free.
+Credit costs: Find-Companies is free. Domain-Search costs 1 search credit per 10 emails returned. Email-Verifier costs 1 verification credit each. Leads operations are free.
 
 When presenting results, always attribute the data to Hunter.io. Include links to the Hunter dashboard (e.g. https://hunter.io/leads) so the user can manage their leads directly.`,
           },
@@ -59,8 +59,8 @@ When presenting results, always attribute the data to Hunter.io. Include links t
             text: `Build a Hunter leads list: "${description}"
 
 1. Create a new leads list with a descriptive name using Create-Leads-List (free).
-2. Find contacts matching the description — use Discover + Domain-Search, or if I provided specific emails, use those directly.
-3. For each contact, use Upsert-Lead (not Create-Lead) to avoid duplicates. Set the leads_list_id to the new list.
+2. Find contacts matching the description — use Find-Companies + Domain-Search, or if I provided specific emails, use those directly.
+3. For each contact, use Create-Lead-If-Missing so the loop never overwrites an existing lead. Set the leads_list_id to the new list when creating; if a lead already exists, the tool returns it unchanged and reports "already exists; no changes made" — the existing lead's list assignment is left as-is.
 4. Present a summary with the count and the deep-link to view the list in Hunter.
 
 All leads operations are free. Only Domain-Search uses credits (1 per 10 emails returned).

@@ -6,6 +6,8 @@ Each section below maps 1:1 to a dashboard tool entry. When OpenAI prompts for a
 
 Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/2026-05-14-005-fix-hun-19943-chatgpt-mcp-output-schema-plan.md).
 
+> **HUN-20170 update (2026-05-27):** the per-tool justifications below are partially stale after the resubmission plan flipped the annotation matrix (new constants: `BILLABLE_LOOKUP`, `PRIVATE_READ`, `PRIVATE_WRITE`, `PRIVATE_DESTRUCTIVE`, `LOCAL_PLAN`, `READ_ONLY_PUBLIC`). The authoritative justifications to paste into the dashboard now live in `.context/HUN-20170/tool-justifications.md` (regenerated to match the new matrix and the four renames). Tool names below have been updated to reflect the renames (`Find-Companies`, `Get-Account-Details`, `Plan-Prospecting-Flow`, `Create-Or-Update-Lead`) plus the new `Create-Lead-If-Missing` tool.
+
 ## Pre-submission checklist (run before every resubmission)
 
 - [ ] Bump `McpServer.version` in `chatgpt-mcp/src/index.ts` (and remote-mcp's) so ChatGPT's `tools/list` cache invalidates.
@@ -32,7 +34,7 @@ Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/20
 
 ## Read-only tools
 
-### Discover
+### Find-Companies
 - **Description**: see `src/index.ts:108` (registered description string)
 - `readOnlyHint=true`: Read-only (paid)
 - `openWorldHint=true`: Read-only (paid)
@@ -82,7 +84,7 @@ Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/20
 - **Content summary template**: `Enriched person + company for {email or linkedin_handle}.`
 - **viewInHunter pattern**: none
 
-### Account
+### Get-Account-Details
 - **Description**: see `src/tools/account.ts`
 - All three: Read-only (free)
 - **Content summary template**: `Hunter account: {plan_name}, searches {requests.searches.available} available.`
@@ -142,10 +144,10 @@ Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/20
 - **Content summary template**: `Campaign {campaign_id}: {recipients.length} recipients (total {meta.total}).`
 - **viewInHunter pattern**: none
 
-### Prospecting
+### Plan-Prospecting-Flow
 - **Description**: see `src/tools/prospecting.ts` (TOOL_NAMES.prospecting)
 - All three: Read-only (free) — emits a plan only; sub-tools charge their own credits when called
-- **Content summary template**: `Prospecting plan ready: 4 steps. Starting with Discover.`
+- **Content summary template**: `Prospecting plan ready: 4 steps. Starting with Find-Companies.`
 - **viewInHunter pattern**: none
 
 ---
@@ -172,7 +174,7 @@ Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/20
 - **Content summary template**: `Lead {id} updated. View at /leads/{id}.`
 - **viewInHunter pattern**: `https://hunter.io/leads/{id}`
 
-### Upsert-Lead
+### Create-Or-Update-Lead
 - **Description**: see `src/tools/leads.ts` (TOOL_NAMES.upsertLead)
 - All three: Bounded write
 - **Content summary template**: `Lead {email} saved (id {id}). View at /leads/{id}.`
@@ -264,7 +266,7 @@ Authored for HUN-19943 (third app-review attempt). See [the plan](/docs/plans/20
 
 ## Notes for OpenAI reviewers
 
-- **Annotation correctness**: Every tool except `Account`, `Email-Count`, list/get tools for leads/leads-lists/custom-attributes/campaigns, and `Prospecting` interacts with the external Hunter SaaS in some way — either reading from `api.hunter.io` or writing to it. `openWorldHint: true` reflects that surface throughout.
+- **Annotation correctness**: Every tool except `Get-Account-Details`, `Email-Count`, list/get tools for leads/leads-lists/custom-attributes/campaigns, and `Plan-Prospecting-Flow` interacts with the external Hunter SaaS in some way — either reading from `api.hunter.io` or writing to it. After HUN-20170 the openWorld flag is more selective: it stays true only for public-data lookups, paid lookups, campaign-recipient mutations, and Start-Campaign; private workspace tools are openWorld=false.
 - **Paid read tools**: The tool description for every credit-consuming read tool (Domain-Search, Email-Finder, Email-Verifier, Person-Enrichment, Company-Enrichment, Combined-Enrichment) includes an explicit "Costs 1 X credit — only charged if data is found" clause so the user understands the cost before the model invokes.
 - **Destructive friction**: `Start-Campaign` has both `destructiveHint: true` AND a server-side `confirmed: false` short-circuit that emits an `ask_user` with a strict `pendingToolCall`. The host confirmation prompt and the in-code gate are belt-and-suspenders — even if the host UI ever stops surfacing the prompt (e.g. on mobile), the server will not POST `/campaigns/:id/start` without `confirmed: true`.
-- **Widget tools**: `Discover` and `Company-Enrichment` are widget-backed via `openai/outputTemplate`. Both also carry `openai/widgetAccessible: true` per the Pizzaz canonical pattern so the widget iframes can call other tools (e.g. `Save-Company` from the company widget).
+- **Widget tools**: `Find-Companies` and `Company-Enrichment` are widget-backed via `openai/outputTemplate`. Both also carry `openai/widgetAccessible: true` per the Pizzaz canonical pattern so the widget iframes can call other tools (e.g. `Save-Company` from the company widget).

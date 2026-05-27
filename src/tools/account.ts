@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { callHunterApi, READ_ONLY_ANNOTATIONS, TOOL_NAMES } from "../helpers"
+import { callHunterApi, PRIVATE_READ_ANNOTATIONS, TOOL_NAMES } from "../helpers"
 import { buildResponseSchema } from "../schemas/common"
 
 // Hunter account exposes per-product credit buckets under `requests` (typed
@@ -56,10 +56,10 @@ export function registerAccountTools(server: McpServer, apiKey: string, baseUrl:
     TOOL_NAMES.account,
     {
       description:
-        "Get your Hunter account details: remaining credits (search, verification, enrichment), plan name, and team info. Free (no credits). Use to check remaining credits before running bulk operations.",
+        "Use this when the user asks about their Hunter account, plan, team, or remaining credits. Returns plan name, team info, and per-product credit balances (search, verification, enrichment). Free to call.",
       inputSchema: {},
       outputSchema: accountOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async () => {
       return callHunterApi({ path: "/account", apiKey, baseUrl })

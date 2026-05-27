@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { READ_ONLY_ANNOTATIONS, TOOL_NAMES, callHunterApi, desc } from "../helpers"
+import { BILLABLE_LOOKUP_ANNOTATIONS, TOOL_NAMES, callHunterApi } from "../helpers"
 import { buildResponseSchema, nullableString } from "../schemas/common"
 
 // Hunter enrichment shapes are wide and evolving (Clearbit-style); declare the
@@ -60,10 +60,11 @@ export function registerEnrichmentTools(server: McpServer, apiKey: string, baseU
   server.registerTool(
     TOOL_NAMES.personEnrichment,
     {
-      description: desc`Enrich a person from their email address — name, title, company, social profiles, location, phone. Costs 1 enrichment credit — only charged if data is found. Use ${TOOL_NAMES.upsertLead} to save enriched data to your leads.`,
+      description:
+        "Use this when the user wants to look up a person by email address and see their name, job title, employer, location, phone number, and social profiles. Costs 1 enrichment credit, only charged when data is found.",
       inputSchema: { email: z.string().email().max(254).describe("Email address to enrich") },
       outputSchema: personEnrichmentOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
     },
     async ({ email }) => {
       return callHunterApi({ path: "/people/find", apiKey, baseUrl, params: { email } })
@@ -73,7 +74,8 @@ export function registerEnrichmentTools(server: McpServer, apiKey: string, baseU
   server.registerTool(
     TOOL_NAMES.combinedEnrichment,
     {
-      description: desc`Enrich a person and their company in a single request using email or LinkedIn handle. Costs 1 enrichment credit — only charged if person or company data is found. More efficient than calling ${TOOL_NAMES.personEnrichment} and ${TOOL_NAMES.companyEnrichment} separately. Use ${TOOL_NAMES.upsertLead} to save enriched data.`,
+      description:
+        "Use this when the user provides an email address or LinkedIn handle and wants both the person's profile and their company's profile in a single response. Costs 1 enrichment credit, only charged when data is found.",
       inputSchema: {
         email: z.string().email().max(254).optional().describe("Email address of the person to enrich"),
         linkedin_handle: z
@@ -84,7 +86,7 @@ export function registerEnrichmentTools(server: McpServer, apiKey: string, baseU
           .describe("LinkedIn handle of the person to enrich (e.g. john-doe-123)"),
       },
       outputSchema: combinedEnrichmentOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
     },
     async ({ email, linkedin_handle }) => {
       const params: Record<string, string> = {}

@@ -2,10 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
   callHunterApi,
-  DESTRUCTIVE_ANNOTATIONS,
-  READ_ONLY_ANNOTATIONS,
+  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+  PRIVATE_READ_ANNOTATIONS,
+  PRIVATE_WRITE_ANNOTATIONS,
   TOOL_NAMES,
-  WRITE_ANNOTATIONS,
 } from "../helpers"
 import { buildResponseSchema, mutationAckSchema, paginationMetaSchema } from "../schemas/common"
 
@@ -34,10 +34,11 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     TOOL_NAMES.listCustomAttributes,
     {
-      description: "List all custom attributes for leads. Free (no credits).",
+      description:
+        "Use this when the user wants to list all custom attributes defined on leads in their Hunter account. Free to call.",
       inputSchema: {},
       outputSchema: listOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async () => {
       return callHunterApi({ path: "/leads_custom_attributes", apiKey, baseUrl })
@@ -47,12 +48,12 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     TOOL_NAMES.getCustomAttribute,
     {
-      description: "Get a single custom attribute by ID. Free (no credits).",
+      description: "Use this when the user wants to retrieve a single custom-attribute definition by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the custom attribute to retrieve"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({ path: `/leads_custom_attributes/${id}`, apiKey, baseUrl })
@@ -62,12 +63,13 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     TOOL_NAMES.createCustomAttribute,
     {
-      description: "Create a new custom attribute for leads. Free (no credits).",
+      description:
+        "Use this when the user wants to define a new custom attribute on leads, identified by label. Free to call.",
       inputSchema: {
         label: z.string().min(1).max(100).describe("Label for the new custom attribute"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ label }) => {
       return callHunterApi({
@@ -83,13 +85,14 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     TOOL_NAMES.updateCustomAttribute,
     {
-      description: "Rename an existing custom attribute. Free (no credits).",
+      description:
+        "Use this when the user wants to rename an existing custom-attribute definition, identified by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the custom attribute to update"),
         label: z.string().min(1).max(100).describe("New label for the custom attribute"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ id, label }) => {
       return callHunterApi({
@@ -105,14 +108,15 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
   server.registerTool(
     TOOL_NAMES.deleteCustomAttribute,
     {
-      description: "Delete a custom attribute by ID. Free (no credits).",
+      description:
+        "Use this when the user wants to permanently delete a custom-attribute definition, identified by ID. Per-lead values stored for the attribute are dropped and cannot be recovered. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the custom attribute to delete"),
       },
       // Hunter returns 204 No Content — callHunterApi synthesises
       // mutationAckSchema-shaped structuredContent so outputSchema validates.
       outputSchema: mutationAckSchema.shape,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({

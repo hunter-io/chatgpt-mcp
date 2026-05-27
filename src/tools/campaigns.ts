@@ -4,7 +4,7 @@ import {
   DESTRUCTIVE_ANNOTATIONS,
   EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
   type McpTextResult,
-  READ_ONLY_ANNOTATIONS,
+  PRIVATE_READ_ANNOTATIONS,
   TOOL_NAMES,
   WRITE_ANNOTATIONS,
   buildNextAction,
@@ -137,10 +137,10 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listCampaigns,
     {
       description:
-        "List all campaigns in your Hunter account. Free (no credits). Campaigns must be created in the Hunter UI (https://hunter.io/campaigns/new) — the API can only list, add/remove recipients, and start.",
+        "Use this when the user wants to list the campaigns in their Hunter account with name, status, and counts. Campaigns are created in the Hunter web UI; the API can list them, manage recipients, and start them. Free to call.",
       inputSchema: {},
       outputSchema: listCampaignsOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async () => {
       return callHunterApi({ path: "/campaigns", apiKey, baseUrl })
@@ -150,14 +150,15 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
   server.registerTool(
     TOOL_NAMES.listCampaignRecipients,
     {
-      description: "List recipients in a campaign. Free (no credits).",
+      description:
+        "Use this when the user wants to list the recipients of a campaign with per-recipient status. Free to call.",
       inputSchema: {
         campaign_id: z.number().int().positive().describe("ID of the campaign"),
         offset: z.number().int().nonnegative().optional().describe("Number of recipients to skip"),
         limit: z.number().int().positive().max(100).optional().describe("Maximum number of recipients to return"),
       },
       outputSchema: listRecipientsOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ campaign_id, offset, limit }) => {
       const params: Record<string, string> = {}
@@ -172,11 +173,20 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
+  // Add-Campaign-Recipients keeps `openWorldHint: true` (legacy WRITE_ANNOTATIONS)
+  // rather than dropping to PRIVATE_WRITE_ANNOTATIONS like Create-Lead and the
+  // other workspace writes. The distinction: a campaign recipient set is the
+  // staging surface for an outbound delivery — once `Start-Campaign` fires,
+  // every recipient added here triggers a real external email. Treating the
+  // recipient set as private-only would hide that the user's actions on this
+  // tool eventually push state to the public internet, even though the push
+  // itself happens via a different tool (Start-Campaign,
+  // EXTERNAL_SIDE_EFFECT_ANNOTATIONS). See HUN-20170 todo #102.
   server.registerTool(
     TOOL_NAMES.addCampaignRecipients,
     {
       description:
-        "Add recipients to a campaign by email addresses or lead IDs. Max 50 per request — batch larger lists. Free (no credits).",
+        "Use this when the user wants to add recipients to an existing campaign by email address or by lead ID. Up to 50 per call; batch larger sets across multiple calls. Adding a recipient does not send email on its own — sending requires Start-Campaign. Free to call.",
       inputSchema: {
         campaign_id: z.number().int().positive().describe("ID of the campaign"),
         emails: z
@@ -208,10 +218,16 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
+  // Remove-Campaign-Recipients keeps `openWorldHint: true` and
+  // `destructiveHint: true` (legacy DESTRUCTIVE_ANNOTATIONS) for the same
+  // staged-outbound reason as Add-Campaign-Recipients above: removal can
+  // cancel queued messages that were about to be delivered externally.
+  // Messages already sent cannot be recalled, hence destructive.
   server.registerTool(
     TOOL_NAMES.removeCampaignRecipients,
     {
-      description: "Remove recipients from a campaign by email addresses. Free (no credits).",
+      description:
+        "Use this when the user wants to remove recipients from a campaign by email address. Pending messages scheduled for the removed recipients are cancelled; messages already sent are not recalled. Free to call.",
       inputSchema: {
         campaign_id: z.number().int().positive().describe("ID of the campaign"),
         emails: z
@@ -239,7 +255,7 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.startCampaign,
     {
       description:
-        "Start a campaign to begin sending emails. WARNING: This sends real emails to all recipients. The campaign must have a subject, message body, and connected email account configured in the Hunter UI. Free (no credits). CRITICAL: the first call returns nextAction.kind === 'ask_user' with a pendingToolCall — relay the question to the user and do NOT auto-confirm. Only re-issue this tool with confirmed: true after the user has explicitly approved sending real emails.",
+        "Use this when the user wants to start an existing campaign, which begins sending real emails to its recipients. The campaign must have a subject, message body, and connected email account configured in the Hunter UI. Free to call. Starting a campaign sends real emails to recipients and requires an explicit user confirmation: the first call returns a confirmation prompt without sending, and only re-issuing with `confirmed: true` actually starts the campaign.",
       inputSchema: {
         campaign_id: z.number().int().positive().describe("ID of the campaign to start"),
         confirmed: z

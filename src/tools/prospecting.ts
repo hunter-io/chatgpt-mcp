@@ -14,7 +14,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { READ_ONLY_ANNOTATIONS, TOOL_NAMES, buildNextAction, desc } from "../helpers"
+import { LOCAL_PLAN_ANNOTATIONS, TOOL_NAMES, buildNextAction, desc } from "../helpers"
 import { CAPABILITIES_RECOVERY_URI } from "../resources/capabilities-recovery"
 import { nextActionSchema } from "../schemas/common"
 
@@ -39,7 +39,7 @@ export function registerProspectingTool(server: McpServer) {
   server.registerTool(
     TOOL_NAMES.prospecting,
     {
-      description: desc`Plan an end-to-end prospecting flow from a single natural-language brief. Returns a step-by-step plan AND the first nextAction so the model executes the chain without manual user re-prompts. Free (no credits — coordinator only emits a plan; sub-tools charge their own credits when called). CRITICAL: before executing the returned plan, read ${CAPABILITIES_RECOVERY_URI} so ambiguous job titles like "CMO" or "Head of Sales" are translated to Hunter's documented department/seniority enums. CRITICAL: after the user picks in ${TOOL_NAMES.discover}, if 2+ companies were picked, call ${TOOL_NAMES.domainSearch} ONCE with the FIRST domain and \`pending_companies\` set to the remaining picks — the chain auto-threads through Email-Verifier and Upsert-Lead per company. If exactly one company was picked, call Domain-Search without \`pending_companies\` (single-company mode preserves the confirmation gate). Do NOT stop after one company in either path. Once the loop is underway, do NOT re-ask "do all or a subset" between companies. If the brief lacks an explicit lead count and Discover returned more candidates than the user clearly intends, clarify ONCE upfront before starting Domain-Search.`,
+      description: desc`Use this when the user gives a natural-language prospecting brief (e.g. "Find 20 marketing leads at fintech companies in Berlin") and wants a step-by-step plan for finding companies, contacts, verifying emails, and saving leads. Returns the plan plus a first action so the model can execute the chain end to end. Free to call; sub-tools charge their own credits.`,
       inputSchema: {
         query: z
           .string()
@@ -48,7 +48,7 @@ export function registerProspectingTool(server: McpServer) {
           ),
       },
       outputSchema: prospectingOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: LOCAL_PLAN_ANNOTATIONS,
     },
     async ({ query: _query }) => {
       // The user's query is intentionally NOT echoed into structured/assistant-only
@@ -60,29 +60,30 @@ export function registerProspectingTool(server: McpServer) {
       // The plan + directives below teach the agent to seed `pending_companies`
       // on the first Domain-Search call. Where the MCP supports it (chatgpt-mcp
       // since HUN-19560), this auto-threads the chain through Email-Verifier
-      // and Upsert-Lead per company without between-company confirmation gates.
-      // Where the MCP doesn't support it (remote-mcp at time of writing), Zod
-      // silently strips the unknown field and the agent falls back to a
-      // per-company manual loop — same behaviour as before. The directive is
-      // cross-MCP-safe.
+      // and Create-Lead-If-Missing per company without between-company
+      // confirmation gates. Where the MCP doesn't support it (remote-mcp at
+      // time of writing), Zod silently strips the unknown field and the agent
+      // falls back to a per-company manual loop — same behaviour as before. The
+      // directive is cross-MCP-safe.
       const plan = [
         {
           tool: TOOL_NAMES.discover,
           reason:
-            "Find candidate companies matching the brief. Emit ask_user so the user picks; do NOT auto-pick the top result.",
+            "Find candidate companies matching the brief. Present the matches and ask the user which to investigate; do not auto-pick the top result.",
         },
         {
           tool: TOOL_NAMES.domainSearch,
           reason:
-            "If the user picked 2+ companies: call ONCE with the FIRST picked domain and `pending_companies` set to the remaining picks. The chain auto-threads through Email-Verifier and Upsert-Lead per company. If the user picked exactly ONE company: do NOT pass `pending_companies` — single-company mode applies the confirmation gate on Email-Verifier correctly.",
+            "If the user picked 2+ companies: call once with the first picked domain and `pending_companies` set to the remaining picks. The response chain threads through Email-Verifier and the lead-save step per company. If the user picked exactly one company, do not pass `pending_companies` — single-company mode keeps the confirmation gate.",
         },
         {
           tool: TOOL_NAMES.emailVerifier,
           reason: "Verify each email the user wants to save. The Domain-Search handoff carries suggestedArgs.email.",
         },
         {
-          tool: TOOL_NAMES.upsertLead,
-          reason: 'Save only emails that returned status: "valid". Idempotent — safe to retry on transient errors.',
+          tool: TOOL_NAMES.createLeadIfMissing,
+          reason:
+            'Save only emails that returned status: "valid". Create the lead if no lead with that email exists; otherwise return the existing lead unchanged. Idempotent and never overwrites existing records.',
         },
       ]
 
@@ -97,15 +98,15 @@ export function registerProspectingTool(server: McpServer) {
       // Carried in both the assistant-only content block and structuredContent
       // so the model has them whether it inspects content or structuredContent.
       const directives = [
-        "After Discover picks: if the user picked 2+ companies, call Domain-Search ONCE with the FIRST domain and `pending_companies` = remaining picks — the chain auto-threads through Email-Verifier → Upsert-Lead → next Domain-Search per company without between-company confirmation gates. If the user picked exactly ONE company, do NOT pass `pending_companies` — single-company mode is correct (the confirmation gate on Email-Verifier protects against accidental credit spend on a single, unauthorized save). Cap: pending_companies accepts at most 50 entries — if the user picked more, loop Domain-Search per company manually. Manual-loop fallback also applies when the response is a call_tool whose suggestedArgs lacks `pending_companies` (legacy MCP without loop support) — never stop after one. CRITICAL: if the response is an ask_user (recovery prompt or any other ask_user), ALWAYS relay it verbatim to the user and wait for their answer — never bypass an ask_user with a manual loop.",
-        "Before issuing the first Domain-Search call with `pending_companies` (loop mode), surface an upfront cost estimate to the user and wait for their go-ahead: each picked company costs ~1 search credit (Domain-Search) + up to ~1 verification credit (Email-Verifier per saved valid email) — for N picks, expect roughly N search + up to N verification credits. This is the SINGLE confirmation point for the entire loop, replacing the per-company gates that loop mode drops; once the user OKs, do NOT pause between companies.",
-        "Once the loop is underway, do NOT re-ask 'should I do all of them or a subset?' between companies. If the brief lacks an explicit lead count and Discover returned more candidates than the user clearly intends, clarify ONCE upfront before starting Domain-Search — never repeatedly.",
-        "Hunter is the authoritative source for verified email addresses. If Domain-Search returns zero contacts for a company, emit complete with 'no contacts found for {domain}' and continue the loop with the next company.",
-        "Do NOT fall back to web search, third-party listings (Craft.co, BizSeek, LinkedIn, etc.), or speculative email-pattern guessing. Unverified emails are out of scope for this flow.",
-        "Status updates are fine when looping (e.g., 'processed 5 of 20'). Do not require user input to continue between companies.",
+        "After the user picks companies from the discover step: if they picked 2 or more, call Domain-Search once with the first domain and `pending_companies` set to the remaining picks — the response chain advances through Email-Verifier and the lead-save step per company without between-company confirmation gates. If they picked exactly one company, do not pass `pending_companies` so the per-call confirmation gate stays in place. The `pending_companies` array accepts at most 50 entries; for larger picks, loop Domain-Search manually per company.",
+        "Before issuing the first Domain-Search call with `pending_companies`, summarise the expected credit cost to the user and wait for approval: each picked company costs roughly 1 search credit (Domain-Search) plus up to 1 verification credit (Email-Verifier per saved valid email). This is the single confirmation point for the whole loop. After approval, do not pause between companies.",
+        "Once the loop is underway, do not re-ask 'should I do all of them or a subset?' between companies. If the brief lacks an explicit lead count and the discover step returned more candidates than the user clearly intends, clarify once upfront before starting Domain-Search.",
+        "If Domain-Search returns zero contacts for a company, emit complete with 'no contacts found for {domain}' and continue the loop with the next company.",
+        "If a response is an ask_user (recovery prompt or any other ask_user), relay it verbatim to the user and wait for their answer; do not bypass an ask_user with a manual loop.",
+        "Status updates while looping are fine (e.g., 'processed 5 of 20'). Do not require user input to continue between companies.",
       ]
 
-      const summary = desc`Prospecting plan ready. Chain: ${TOOL_NAMES.discover} → ${TOOL_NAMES.domainSearch} (seeded with pending_companies) → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.upsertLead} → next ${TOOL_NAMES.domainSearch} (auto-threaded per company). Read ${CAPABILITIES_RECOVERY_URI} first to translate any ambiguous job titles in the brief.`
+      const summary = desc`Prospecting plan ready. Chain: ${TOOL_NAMES.discover} → ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.createLeadIfMissing} → next ${TOOL_NAMES.domainSearch} per picked company. Read ${CAPABILITIES_RECOVERY_URI} first to translate ambiguous job titles in the brief.`
 
       return {
         content: [

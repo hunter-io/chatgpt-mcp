@@ -9,7 +9,7 @@
 
 export const CAPABILITIES_RECOVERY_MD = `# Hunter Capability Recovery Patterns
 
-This resource documents how to translate ambiguous user intent into precise Hunter API filter values. **Read this BEFORE calling Discover or Domain-Search** when the user's request uses fuzzy job titles, role descriptions, or ambiguous criteria — Hunter does not match arbitrary free-text titles, only the documented enums.
+This resource documents how to translate ambiguous user intent into precise Hunter API filter values. **Read this BEFORE calling Find-Companies or Domain-Search** when the user's request uses fuzzy job titles, role descriptions, or ambiguous criteria — Hunter does not match arbitrary free-text titles, only the documented enums.
 
 ## Translating job titles → \`department\` + \`seniority\`
 
@@ -54,7 +54,7 @@ If the user gives a person's name but no domain, ask for the company before call
 
 ## Anti-patterns
 
-- **Do not auto-pick the top Discover result** — Hunter returns up to 100 companies; the top hit is not necessarily the best semantic match. Always emit \`nextAction.kind === "ask_user"\` after a raw Discover call.
+- **Do not auto-pick the top Find-Companies result** — Hunter returns up to 100 companies; the top hit is not necessarily the best semantic match. Always emit \`nextAction.kind === "ask_user"\` after a raw Find-Companies call.
 - **Do not call \`Email-Verifier\` on every email returned by Domain-Search** — only verify emails the user actually intends to save or contact. Bulk verification burns credits.
 - **Do not chain into \`Start-Campaign\` without explicit user confirmation** — \`Start-Campaign\` sends real emails. Always emit \`nextAction.kind === "ask_user"\` first.
 `

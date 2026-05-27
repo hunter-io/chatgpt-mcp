@@ -2,12 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
   callHunterApi,
-  DESTRUCTIVE_ANNOTATIONS,
-  READ_ONLY_ANNOTATIONS,
+  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+  PRIVATE_READ_ANNOTATIONS,
+  PRIVATE_WRITE_ANNOTATIONS,
   TOOL_NAMES,
   withDeepLink,
   withDeepLinkFromId,
-  WRITE_ANNOTATIONS,
 } from "../helpers"
 import { buildResponseSchema, hunterUrl, mutationAckSchema, paginationMetaSchema } from "../schemas/common"
 
@@ -51,13 +51,14 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
   server.registerTool(
     TOOL_NAMES.listLeadsLists,
     {
-      description: "List all leads lists in your Hunter account. Free (no credits).",
+      description:
+        "Use this when the user wants to list the leads lists in their Hunter account, with pagination. Free to call.",
       inputSchema: {
         offset: z.number().int().nonnegative().optional().describe("Number of lists to skip"),
         limit: z.number().int().positive().max(100).optional().describe("Maximum number of lists to return"),
       },
       outputSchema: listOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ offset, limit }) => {
       const params: Record<string, string> = {}
@@ -70,12 +71,13 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
   server.registerTool(
     TOOL_NAMES.getLeadsList,
     {
-      description: "Get a single leads list by ID. Free (no credits).",
+      description:
+        "Use this when the user wants to retrieve a single leads list (name, lead count, timestamps) by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to retrieve"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({ path: `/leads_lists/${id}`, apiKey, baseUrl })
@@ -85,12 +87,12 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
   server.registerTool(
     TOOL_NAMES.createLeadsList,
     {
-      description: "Create a new leads list. Free (no credits).",
+      description: "Use this when the user wants to create a new, empty leads list with the given name. Free to call.",
       inputSchema: {
         name: z.string().min(1).max(100).describe("Name of the new leads list"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ name }) => {
       const result = await callHunterApi({
@@ -107,13 +109,13 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
   server.registerTool(
     TOOL_NAMES.updateLeadsList,
     {
-      description: "Rename an existing leads list. Free (no credits).",
+      description: "Use this when the user wants to rename an existing leads list, identified by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to update"),
         name: z.string().min(1).max(100).describe("New name for the leads list"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ id, name }) => {
       const result = await callHunterApi({
@@ -131,13 +133,13 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     TOOL_NAMES.deleteLeadsList,
     {
       description:
-        "Delete a leads list by ID. Lists with more than 10 leads are deleted asynchronously (status 202). Free (no credits).",
+        "Use this when the user wants to permanently delete a leads list, identified by ID. Lists with more than 10 leads are scheduled for asynchronous deletion (HTTP 202). Free to call. Deleting a list cannot be undone from the API.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to delete"),
       },
       // 202 (async) and 204 (sync) both yield mutationAckSchema-shaped structuredContent.
       outputSchema: mutationAckSchema.shape,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       return callHunterApi({ path: `/leads_lists/${id}`, apiKey, baseUrl, method: "DELETE" })
@@ -148,7 +150,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     TOOL_NAMES.mergeLeadsLists,
     {
       description:
-        "Merge one leads list into another. All leads from the source list are moved to the destination list, and the source list is deleted. Free (no credits).",
+        "Use this when the user wants to move every lead from a source list into a destination list. The source list is permanently deleted after the move. Leads on the destination list are preserved. Free to call. Merging cannot be undone from the API.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the source leads list (will be merged and deleted)"),
         destination_leads_list_id: z
@@ -163,7 +165,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
       // deep link via withDeepLink, so use the extended schema that
       // declares the optional URL field.
       outputSchema: mergeAckOutputSchema.shape,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, destination_leads_list_id }) => {
       const result = await callHunterApi({
