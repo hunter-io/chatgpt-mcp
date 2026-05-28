@@ -52,28 +52,13 @@ vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
   },
 }))
 
-vi.mock("agents/mcp", () => ({
-  McpAgent: class MockMcpAgent {
-    props: Record<string, unknown> = {}
-    ctx = { storage: { get: async () => undefined, put: async () => undefined } }
-    server: any
-    async onStart() {
-      // no-op
-    }
-  },
-}))
+const { createServer } = await import("../src/index")
 
-const { HunterChatGPTMCP } = await import("../src/index")
-
-async function createInitializedMCP() {
-  const Ctor = HunterChatGPTMCP as unknown as new () => {
-    props: Record<string, unknown>
-    init(): Promise<void>
-  }
-  const instance = new Ctor()
-  instance.props = { apiKey: "test-api-key", environment: "production" }
-  await instance.init()
-  return instance
+// Side-effect helper: the mocked McpServer.registerTool populates the module-
+// level `registeredTools` map as `createServer` walks its tool list. Tests
+// inspect that map, not the server instance, so this returns void.
+function registerAllTools() {
+  createServer("test-api-key", "https://api.hunter.io/v2")
 }
 
 // All 35 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
@@ -121,7 +106,7 @@ describe("tool registration", () => {
     registeredTools.clear()
     registeredResources.clear()
     registeredPrompts.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it(`registers exactly ${ALL_TOOL_NAMES.length} tools`, () => {
@@ -143,7 +128,7 @@ describe("tool registration", () => {
 describe("HUN-19943: every tool declares an outputSchema", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it.each(ALL_TOOL_NAMES)("tool '%s' has outputSchema", (name) => {
@@ -157,7 +142,7 @@ describe("HUN-19943: every tool declares an outputSchema", () => {
 describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   // READ_ONLY_PUBLIC: public-data lookups (Hunter's hosted index of public-
@@ -277,7 +262,7 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
 describe("widget tools _meta", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it("Discover widget descriptor includes outputTemplate + widgetAccessible", () => {
@@ -373,7 +358,7 @@ describe("HUN-19943 todos/024: confirmable-tool widening guard", () => {
 describe("HUN-20170: headless prospecting chain advances via structuredContent.nextAction", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it("Domain-Search → Email-Verifier → Create-Lead-If-Missing → next Domain-Search threads pending_companies", async () => {
@@ -479,7 +464,7 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
 describe("HUN-20170: Create-Lead-If-Missing", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it("(a) creates a new lead when email doesn't exist", async () => {
@@ -525,9 +510,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
       .mockResolvedValueOnce({
         ok: true,
         text: () =>
-          Promise.resolve(
-            JSON.stringify({ data: { id: 99, email: "dup@example.com", first_name: "OriginalName" } }),
-          ),
+          Promise.resolve(JSON.stringify({ data: { id: 99, email: "dup@example.com", first_name: "OriginalName" } })),
       })
     vi.stubGlobal("fetch", fetchMock)
 
@@ -537,7 +520,8 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
     expect(result.isError).toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(2) // exist + GET, no POST
     expect(fetchMock.mock.calls[1]?.[0]).toContain("/leads/99")
-    const data = (result.structuredContent as { data: { id: number; first_name: string; alreadyExisted: boolean } }).data
+    const data = (result.structuredContent as { data: { id: number; first_name: string; alreadyExisted: boolean } })
+      .data
     expect(data.id).toBe(99)
     expect(data.first_name).toBe("OriginalName")
     expect(data.alreadyExisted).toBe(true)
@@ -751,7 +735,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
 describe("HUN-20170: 402 quota response scrubs the upstream upgrade CTA", () => {
   beforeEach(async () => {
     registeredTools.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it("returns a neutral quota message and never echoes the Hunter upgrade CTA", async () => {
@@ -824,21 +808,24 @@ describe("HUN-20170: slash prompts route saves to Create-Lead-If-Missing", () =>
     registeredTools.clear()
     registeredResources.clear()
     registeredPrompts.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it.each(["prospect", "build-list"])("'%s' prompt is registered", (name) => {
     expect(registeredPrompts.has(name)).toBe(true)
   })
 
-  it.each(["prospect", "build-list"])("'%s' prompt references Create-Lead-If-Missing for the save step", async (name) => {
-    const handler = registeredPrompts.get(name) as (args: { query?: string; description?: string }) => Promise<{
-      messages: { content: { text: string } }[]
-    }>
-    const result = await handler({ query: "test query", description: "test description" })
-    const text = result.messages[0]?.content.text ?? ""
-    expect(text).toContain("Create-Lead-If-Missing")
-  })
+  it.each(["prospect", "build-list"])(
+    "'%s' prompt references Create-Lead-If-Missing for the save step",
+    async (name) => {
+      const handler = registeredPrompts.get(name) as (args: { query?: string; description?: string }) => Promise<{
+        messages: { content: { text: string } }[]
+      }>
+      const result = await handler({ query: "test query", description: "test description" })
+      const text = result.messages[0]?.content.text ?? ""
+      expect(text).toContain("Create-Lead-If-Missing")
+    },
+  )
 
   it.each(["prospect", "build-list"])(
     "'%s' prompt does NOT instruct the model to use Create-Or-Update-Lead in the save step",
@@ -912,14 +899,16 @@ describe("HUN-20170: model-visible corpus contains no OpenAI-banned phrases", ()
     registeredTools.clear()
     registeredResources.clear()
     registeredPrompts.clear()
-    await createInitializedMCP()
+    registerAllTools()
   })
 
   it("no tool description contains a banned phrase", () => {
     for (const [name, tool] of registeredTools.entries()) {
       for (const { pattern, reason } of BANNED_PATTERNS) {
         if (pattern.test(tool.description)) {
-          throw new Error(`Tool "${name}" description matches banned pattern ${pattern} (${reason}): ${tool.description}`)
+          throw new Error(
+            `Tool "${name}" description matches banned pattern ${pattern} (${reason}): ${tool.description}`,
+          )
         }
       }
     }
@@ -927,9 +916,11 @@ describe("HUN-20170: model-visible corpus contains no OpenAI-banned phrases", ()
 
   it("no slash prompt body contains a banned phrase", async () => {
     for (const [name, handler] of registeredPrompts.entries()) {
-      const result = await (handler as (args: { query?: string; description?: string }) => Promise<{
-        messages: { content: { text: string } }[]
-      }>)({ query: "test query", description: "test description" })
+      const result = await (
+        handler as (args: { query?: string; description?: string }) => Promise<{
+          messages: { content: { text: string } }[]
+        }>
+      )({ query: "test query", description: "test description" })
       const text = result.messages[0]?.content.text ?? ""
       for (const { pattern, reason } of BANNED_PATTERNS) {
         if (pattern.test(text)) {

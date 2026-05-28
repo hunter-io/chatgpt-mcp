@@ -1,5 +1,5 @@
-import { McpAgent } from "agents/mcp"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { z } from "zod"
 import companyComponent from "../bundle/company.html.ts"
 import discoverComponent from "../bundle/discover.html.ts"
@@ -117,349 +117,318 @@ import { registerLeadsListTools } from "./tools/leads-lists"
 import { registerProspectingTool } from "./tools/prospecting"
 import { registerSearchTools } from "./tools/search"
 
-export class HunterChatGPTMCP extends McpAgent {
-  // Type assertion needed: `agents` pins @modelcontextprotocol/sdk@1.26.0 while
-  // the project uses ^1.27.1. The types are compatible at runtime but pnpm resolves
-  // separate copies, causing a nominal type mismatch.
-  server = new McpServer({
+export function createServer(apiKey: string, baseUrl: string): McpServer {
+  const server = new McpServer({
     name: "Hunter ChatGPT",
     version: "2.2.0",
-  }) as any
+  })
 
-  // Guard against the agents framework clobbering the stored API key when the
-  // Durable Object wakes from hibernation. The framework calls updateProps()
-  // with whatever props arrive in the current request; if those props lack an
-  // apiKey (e.g. because a proxy stripped the header, or a non-standard client
-  // didn't resend it), the stored key would be overwritten with undefined and
-  // every subsequent tool call would send "Authorization: Bearer undefined" → 401.
-  //
-  // Mirrors remote-mcp/src/index.ts:onStart — the same risk exists here.
-  async onStart(props?: Record<string, unknown>) {
-    if (props && !props.apiKey) {
-      try {
-        const stored = (await this.ctx.storage.get("props")) as Record<string, unknown> | undefined
-        if (stored?.apiKey) props.apiKey = stored.apiKey
-      } catch {
-        // Storage read can fail on first-ever init — that's fine,
-        // the API key will come from ctx.props on the initial request.
-      }
-    }
-    return super.onStart(props)
-  }
+  // --- ChatGPT widget resources ---
+  server.registerResource("company-widget", "ui://widget/company-widget.html", {}, async () => ({
+    contents: [
+      {
+        uri: "ui://widget/company-widget.html",
+        mimeType: "text/html+skybridge",
+        text: `${companyComponent}`.trim(),
+        _meta: {
+          "openai/widgetDomain": "https://chatgpt.hunter.io",
+          "openai/widgetAccessible": true,
+          "openai/widgetPrefersBorder": true,
+          "openai/widgetCSP": {
+            connect_domains: ["https://chatgpt.com", "https://hunter.io"],
+            resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
+          },
+          "openai/widgetDescription":
+            "Displays a company's profile (industry, size, location, technologies, funding, social profiles) as a card.",
+        },
+      },
+    ],
+  }))
 
-  async init() {
-    const baseUrl = this.props?.environment === "development" ? BASE_API_URL_DEVELOPMENT : BASE_API_URL_PRODUCTION
-    const apiKey = this.props!.apiKey as string
+  server.registerResource("discover-widget", "ui://widget/discover-widget.html", {}, async () => ({
+    contents: [
+      {
+        uri: "ui://widget/discover-widget.html",
+        mimeType: "text/html+skybridge",
+        text: `${discoverComponent}`.trim(),
+        _meta: {
+          "openai/widgetDomain": "https://chatgpt.hunter.io",
+          "openai/widgetAccessible": true,
+          "openai/widgetPrefersBorder": true,
+          "openai/widgetCSP": {
+            connect_domains: ["https://chatgpt.com", "https://hunter.io"],
+            resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
+          },
+          "openai/widgetDescription": "Displays the top 5 matching companies with a link to view the full result set.",
+        },
+      },
+    ],
+  }))
 
-    // --- ChatGPT widget resources ---
-    this.server.registerResource("company-widget", "ui://widget/company-widget.html", {}, async () => ({
+  // --- ChatGPT-specific tools with widget metadata ---
+  server.registerTool(
+    TOOL_NAMES.discover,
+    {
+      description:
+        "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call.",
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe("Your search query. Example: 'software companies in San Francisco with more than 50 employees'"),
+      },
+      outputSchema: discoverOutputSchema.shape,
+      annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
+      _meta: {
+        "openai/outputTemplate": "ui://widget/discover-widget.html",
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Rendering the results",
+        "openai/toolInvocation/invoked": "Results ready",
+      },
+    },
+    async ({ query }: { query: string }) => {
+      // Route through callHunterApi for typed errorSchema envelope on isError,
+      // mutationAck on empty bodies, and `stripInjectedFields` defense-in-depth
+      // (HUN-19943 todos/011). Query goes in the path because POST /discover
+      // takes it as a URL parameter, not a form body.
+      const search = new URLSearchParams({ query }).toString()
+      const result = await callHunterApi({ path: `/discover?${search}`, apiKey, baseUrl, method: "POST" })
+      // Widget contract: discover-widget.tsx renders the result list + a
+      // "See all on Hunter" link via meta.permalink. The widget is the sole
+      // visual; empty content[] prevents ChatGPT from rendering a raw JSON
+      // blob alongside it (same pattern as Company-Enrichment). The model
+      // reads from structuredContent for follow-up reasoning. On the isError
+      // path we preserve the original result so error narration in content[]
+      // is not wiped.
+      const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
+      return embedNextAction(
+        widgetResult,
+        buildNextAction({
+          kind: "ask_user",
+          question:
+            "I found matching companies. Which one(s) should I find contacts for? You can also refine the search.",
+        }),
+      )
+    },
+  )
+
+  server.registerTool(
+    TOOL_NAMES.companyEnrichment,
+    {
+      description:
+        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found.",
+      inputSchema: {
+        domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
+      },
+      outputSchema: companyEnrichmentOutputSchema.shape,
+      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
+      _meta: {
+        "openai/outputTemplate": "ui://widget/company-widget.html",
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Enrichment in progress",
+        "openai/toolInvocation/invoked": "Enrichment completed",
+      },
+    },
+    async ({ domain }: { domain: string }) => {
+      // Route through callHunterApi for typed errorSchema envelope on isError,
+      // mutationAck on empty bodies, and `stripInjectedFields` defense-in-depth
+      // (HUN-19943 todos/011). The company widget at src/company-widget.tsx:47
+      // reads either `toolOutput.data` OR `toolOutput` directly — the
+      // `{ data, meta }` envelope returned by callHunterApi triggers the `.data`
+      // branch, so widget rendering is preserved.
+      const result = await callHunterApi({
+        path: "/companies/find",
+        apiKey,
+        baseUrl,
+        params: { domain },
+      })
+      // Widget contract: the company widget at src/company-widget.tsx is the sole
+      // visual source of truth — empty content[] prevents ChatGPT from rendering
+      // a raw JSON blob alongside the rendered widget. structuredContent.data is
+      // what the widget reads. See chatgpt-mcp/docs/dashboard.md. On the isError
+      // path we preserve the original result so error narration in content[] is
+      // not wiped.
+      const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
+      return embedNextAction(
+        widgetResult,
+        buildNextAction({
+          kind: "ask_user",
+          question:
+            "Save this company as a lead, find contacts at this domain, or both? (Multiple equally-valid next steps — let the user choose.)",
+        }),
+      )
+    },
+  )
+
+  server.registerTool(
+    TOOL_NAMES.saveCompany,
+    {
+      description:
+        "Use this when the user wants to add a company as a lead in their Hunter account, identified by domain. Free to call.",
+      inputSchema: {
+        domain: z.string().min(1).max(253).describe("Domain name of the company to save into your Hunter Leads"),
+      },
+      outputSchema: saveCompanyOutputSchema.shape,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
+    },
+    async ({ domain }: { domain: string }) => {
+      const result = await callHunterApi({
+        path: "/leads/companies",
+        apiKey,
+        baseUrl,
+        method: "POST",
+        params: { domain },
+      })
+      return withDeepLink(result, "/leads")
+    },
+  )
+
+  // --- Shared tools from modules ---
+  registerSearchTools(server, apiKey, baseUrl)
+  registerEnrichmentTools(server, apiKey, baseUrl)
+  registerAccountTools(server, apiKey, baseUrl)
+  registerLeadTools(server, apiKey, baseUrl)
+  registerLeadsListTools(server, apiKey, baseUrl)
+  registerCustomAttributeTools(server, apiKey, baseUrl)
+  registerCampaignTools(server, apiKey, baseUrl)
+  registerProspectingTool(server)
+  registerPrompts(server)
+
+  // Capability recovery resource — see docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 5).
+  server.registerResource(
+    "capabilities-recovery",
+    CAPABILITIES_RECOVERY_URI,
+    {
+      description: "How to translate ambiguous user intent into Hunter API filter values.",
+      mimeType: "text/markdown",
+    },
+    async () => ({
       contents: [
         {
-          uri: "ui://widget/company-widget.html",
-          mimeType: "text/html+skybridge",
-          text: `${companyComponent}`.trim(),
-          _meta: {
-            "openai/widgetDomain": "https://chatgpt.hunter.io",
-            "openai/widgetAccessible": true,
-            "openai/widgetPrefersBorder": true,
-            "openai/widgetCSP": {
-              connect_domains: ["https://chatgpt.com", "https://hunter.io"],
-              resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
-            },
-            "openai/widgetDescription":
-              "Displays a company's profile (industry, size, location, technologies, funding, social profiles) as a card.",
-          },
+          uri: CAPABILITIES_RECOVERY_URI,
+          mimeType: "text/markdown",
+          text: CAPABILITIES_RECOVERY_MD,
         },
       ],
-    }))
+    }),
+  )
 
-    this.server.registerResource("discover-widget", "ui://widget/discover-widget.html", {}, async () => ({
-      contents: [
-        {
-          uri: "ui://widget/discover-widget.html",
-          mimeType: "text/html+skybridge",
-          text: `${discoverComponent}`.trim(),
-          _meta: {
-            "openai/widgetDomain": "https://chatgpt.hunter.io",
-            "openai/widgetAccessible": true,
-            "openai/widgetPrefersBorder": true,
-            "openai/widgetCSP": {
-              connect_domains: ["https://chatgpt.com", "https://hunter.io"],
-              resource_domains: ["https://*.oaistatic.com", "https://*.hunter.io", "https://hunter.io"],
-            },
-            "openai/widgetDescription":
-              "Displays the top 5 matching companies with a link to view the full result set.",
-          },
-        },
-      ],
-    }))
+  return server
+}
 
-    // --- ChatGPT-specific tools with widget metadata ---
-    this.server.registerTool(
-      TOOL_NAMES.discover,
-      {
-        description:
-          "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call.",
-        inputSchema: {
-          query: z
-            .string()
-            .min(1)
-            .max(500)
-            .describe("Your search query. Example: 'software companies in San Francisco with more than 50 employees'"),
-        },
-        outputSchema: discoverOutputSchema.shape,
-        annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
-        _meta: {
-          "openai/outputTemplate": "ui://widget/discover-widget.html",
-          "openai/widgetAccessible": true,
-          "openai/toolInvocation/invoking": "Rendering the results",
-          "openai/toolInvocation/invoked": "Results ready",
-        },
-      },
-      async ({ query }: { query: string }) => {
-        // Route through callHunterApi for typed errorSchema envelope on isError,
-        // mutationAck on empty bodies, and `stripInjectedFields` defense-in-depth
-        // (HUN-19943 todos/011). Query goes in the path because POST /discover
-        // takes it as a URL parameter, not a form body.
-        const search = new URLSearchParams({ query }).toString()
-        const result = await callHunterApi({ path: `/discover?${search}`, apiKey, baseUrl, method: "POST" })
-        // Widget contract: discover-widget.tsx renders the result list + a
-        // "See all on Hunter" link via meta.permalink. The widget is the sole
-        // visual; empty content[] prevents ChatGPT from rendering a raw JSON
-        // blob alongside it (same pattern as Company-Enrichment). The model
-        // reads from structuredContent for follow-up reasoning. On the isError
-        // path we preserve the original result so error narration in content[]
-        // is not wiped.
-        const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
-        return embedNextAction(
-          widgetResult,
-          buildNextAction({
-            kind: "ask_user",
-            question:
-              "I found matching companies. Which one(s) should I find contacts for? You can also refine the search.",
-          }),
-        )
-      },
-    )
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
+}
 
-    this.server.registerTool(
-      TOOL_NAMES.companyEnrichment,
-      {
-        description:
-          "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found.",
-        inputSchema: {
-          domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
-        },
-        outputSchema: companyEnrichmentOutputSchema.shape,
-        annotations: BILLABLE_LOOKUP_ANNOTATIONS,
-        _meta: {
-          "openai/outputTemplate": "ui://widget/company-widget.html",
-          "openai/widgetAccessible": true,
-          "openai/toolInvocation/invoking": "Enrichment in progress",
-          "openai/toolInvocation/invoked": "Enrichment completed",
-        },
-      },
-      async ({ domain }: { domain: string }) => {
-        // Route through callHunterApi for typed errorSchema envelope on isError,
-        // mutationAck on empty bodies, and `stripInjectedFields` defense-in-depth
-        // (HUN-19943 todos/011). The company widget at src/company-widget.tsx:47
-        // reads either `toolOutput.data` OR `toolOutput` directly — the
-        // `{ data, meta }` envelope returned by callHunterApi triggers the `.data`
-        // branch, so widget rendering is preserved.
-        const result = await callHunterApi({
-          path: "/companies/find",
-          apiKey,
-          baseUrl,
-          params: { domain },
-        })
-        // Widget contract: the company widget at src/company-widget.tsx is the sole
-        // visual source of truth — empty content[] prevents ChatGPT from rendering
-        // a raw JSON blob alongside the rendered widget. structuredContent.data is
-        // what the widget reads. See chatgpt-mcp/docs/dashboard.md. On the isError
-        // path we preserve the original result so error narration in content[] is
-        // not wiped.
-        const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
-        return embedNextAction(
-          widgetResult,
-          buildNextAction({
-            kind: "ask_user",
-            question:
-              "Save this company as a lead, find contacts at this domain, or both? (Multiple equally-valid next steps — let the user choose.)",
-          }),
-        )
-      },
-    )
-
-    this.server.registerTool(
-      TOOL_NAMES.saveCompany,
-      {
-        description:
-          "Use this when the user wants to add a company as a lead in their Hunter account, identified by domain. Free to call.",
-        inputSchema: {
-          domain: z.string().min(1).max(253).describe("Domain name of the company to save into your Hunter Leads"),
-        },
-        outputSchema: saveCompanyOutputSchema.shape,
-        annotations: PRIVATE_WRITE_ANNOTATIONS,
-      },
-      async ({ domain }: { domain: string }) => {
-        const result = await callHunterApi({
-          path: "/leads/companies",
-          apiKey,
-          baseUrl,
-          method: "POST",
-          params: { domain },
-        })
-        return withDeepLink(result, "/leads")
-      },
-    )
-
-    // --- Shared tools from modules ---
-    registerSearchTools(this.server, apiKey, baseUrl)
-    registerEnrichmentTools(this.server, apiKey, baseUrl)
-    registerAccountTools(this.server, apiKey, baseUrl)
-    registerLeadTools(this.server, apiKey, baseUrl)
-    registerLeadsListTools(this.server, apiKey, baseUrl)
-    registerCustomAttributeTools(this.server, apiKey, baseUrl)
-    registerCampaignTools(this.server, apiKey, baseUrl)
-    registerProspectingTool(this.server)
-    registerPrompts(this.server)
-
-    // Capability recovery resource — see docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 5).
-    this.server.registerResource(
-      "capabilities-recovery",
-      CAPABILITIES_RECOVERY_URI,
-      {
-        description: "How to translate ambiguous user intent into Hunter API filter values.",
-        mimeType: "text/markdown",
-      },
-      async () => ({
-        contents: [
-          {
-            uri: CAPABILITIES_RECOVERY_URI,
-            mimeType: "text/markdown",
-            text: CAPABILITIES_RECOVERY_MD,
-          },
-        ],
-      }),
-    )
+function extractApiKey(request: Request): string | null {
+  const explicit = request.headers.get("x-api-key")
+  if (explicit) return explicit
+  const authHeader = request.headers.get("authorization")
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.split(/\s+/)[1] ?? ""
+    if (token) return token
   }
+  return null
+}
+
+function addCorsHeaders(response: Response): Response {
+  const headers = new Headers(response.headers)
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value)
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // CORS preflight handling
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 200,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
-        },
-      })
+      return new Response(null, { status: 200, headers: CORS_HEADERS })
     }
-
-    let AUTHORIZATION_SERVER = "https://hunter.io"
-    let ENVIRONMENT = "production"
 
     const url = new URL(request.url)
-
-    if (url.hostname === "localhost") {
-      AUTHORIZATION_SERVER = "https://localhost:4000"
-      ENVIRONMENT = "development"
-    }
-
-    ctx.props.environment = ENVIRONMENT
+    const AUTHORIZATION_SERVER = url.hostname === "localhost" ? "https://localhost:4000" : "https://hunter.io"
 
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-      // Extract API key from headers
-      let apiKey = request.headers.get("x-api-key")
-      if (!apiKey) {
-        const authHeader = request.headers.get("authorization")
-        if (authHeader?.startsWith("Bearer ")) {
-          apiKey = authHeader.split(/\s+/)[1] ?? ""
-        }
-      }
-
-      if (!apiKey) {
-        return new Response("Unauthorized: a Hunter API key is required", {
-          status: 401,
-          headers: {
-            "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-          },
-        })
-      }
-
-      ctx.props.apiKey = apiKey
-
-      return HunterChatGPTMCP.serveSSE("/sse").fetch(request, env, ctx)
+      return new Response("Gone — use /mcp (Streamable HTTP transport)", { status: 410, headers: CORS_HEADERS })
     }
 
     if (url.pathname === "/mcp") {
-      // Extract API key from headers
-      let apiKey = request.headers.get("x-api-key")
-      if (!apiKey) {
-        const authHeader = request.headers.get("authorization")
-        if (authHeader?.startsWith("Bearer ")) {
-          apiKey = authHeader.split(/\s+/)[1] ?? ""
+      const apiKey = extractApiKey(request)
+
+      const baseUrl = url.hostname === "localhost" ? BASE_API_URL_DEVELOPMENT : BASE_API_URL_PRODUCTION
+
+      // Validate on every request rather than caching — intentional security
+      // posture. The old DO model validated once per session, but that enabled
+      // the session-hijack class of bug this PR fixes. The extra 50-200ms RTT
+      // per request is the accepted trade-off for statelessness.
+      // When no key is present, allow through: ChatGPT calls tools/list for
+      // discovery before the user has authenticated via OAuth. Actual tool calls
+      // still fail at the Hunter backend (empty Bearer → 401).
+      if (apiKey) {
+        try {
+          const accountResponse = await fetch(`${baseUrl}/account`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          })
+          await accountResponse.body?.cancel()
+          if (accountResponse.status === 401 || accountResponse.status === 403) {
+            return new Response("Unauthorized: invalid Hunter API key", {
+              status: 401,
+              headers: {
+                ...CORS_HEADERS,
+                "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+              },
+            })
+          }
+          if (!accountResponse.ok) {
+            return new Response("Upstream validation unavailable", { status: 502, headers: CORS_HEADERS })
+          }
+        } catch {
+          return new Response("Upstream validation unavailable", { status: 502, headers: CORS_HEADERS })
         }
       }
-
-      if (!apiKey) {
-        return new Response("Unauthorized: a Hunter API key is required", {
-          status: 401,
-          headers: {
-            "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-          },
-        })
-      }
-
-      ctx.props.apiKey = apiKey
-
-      return HunterChatGPTMCP.serve("/mcp").fetch(request, env, ctx)
+      const server = createServer(apiKey || "", baseUrl)
+      const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+      await server.connect(transport)
+      return addCorsHeaders(await transport.handleRequest(request))
     }
 
     if (
       url.pathname === "/.well-known/oauth-protected-resource" ||
       url.pathname === "/.well-known/oauth-protected-resource/sse"
     ) {
-      const wellKnownResource = {
-        resource: url.origin,
-        authorization_servers: [AUTHORIZATION_SERVER],
-        scopes_supported: ["read", "write"],
-        bearer_methods_supported: ["header"],
-      }
-
-      return new Response(JSON.stringify(wellKnownResource, null, 2), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
-        },
-      })
+      return new Response(
+        JSON.stringify(
+          {
+            resource: url.origin,
+            authorization_servers: [AUTHORIZATION_SERVER],
+            scopes_supported: ["read", "write"],
+            bearer_methods_supported: ["header"],
+          },
+          null,
+          2,
+        ),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
+      )
     }
 
     if (url.pathname === "/.well-known/openai-apps-challenge") {
       return new Response("JUhnNKiJYpD65gL3PPLSMoSuyplvLfsWHz9QUQ1q_Hs", {
         status: 200,
-        headers: {
-          "Content-Type": "text/plain",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
-        },
+        headers: { "Content-Type": "text/plain", ...CORS_HEADERS },
       })
     }
 
     if (url.pathname.startsWith("/assets/")) {
       const assetResponse = await env.ASSETS.fetch(request)
-
-      // Add CORS headers to asset responses (required for ChatGPT widgets)
       const newHeaders = new Headers(assetResponse.headers)
       newHeaders.set("Access-Control-Allow-Origin", "*")
-
       return new Response(assetResponse.body, {
         status: assetResponse.status,
         statusText: assetResponse.statusText,
