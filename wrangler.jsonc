@@ -8,6 +8,24 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
 	"compatibility_flags": ["nodejs_compat_v2"],
+	// The stateless refactor (#12556) dropped the HunterChatGPTMCP Durable
+	// Object, but simply removing the `durable_objects` + `migrations` blocks
+	// is not enough: the previously-deployed `v1` migration left DOs of that
+	// class live in production, so every deploy since then failed with
+	// "New version of script does not export class 'HunterChatGPTMCP' which is
+	// depended on by existing Durable Objects [code: 10064]". The `v2`
+	// delete-class migration below explicitly retires those DOs so the deploy
+	// can complete. Keep `v1` in the list so Cloudflare can reconcile history.
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["HunterChatGPTMCP"]
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["HunterChatGPTMCP"]
+		}
+	],
 	"observability": {
 		"enabled": true
 	},
