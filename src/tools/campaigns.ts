@@ -62,19 +62,22 @@ const campaignSchema = z
   })
   .loose()
 
-const recipientSchema = z
-  .object({
-    email: z.string(),
-    lead_id: z.number().int().positive().optional(),
-    first_name: nullableString().optional(),
-    last_name: nullableString().optional(),
-    company: nullableString().optional(),
-    // The recipients/index.jbuilder doesn't emit an `id` field, but accept it
-    // optionally for forward-compat.
-    id: z.union([z.number().int().positive(), z.string()]).optional(),
-    status: z.string().optional(),
-  })
-  .loose()
+// Recipient PII categories are disclosed in the OpenAI dashboard data form.
+// Schema uses Zod's default strip-on-parse behavior: any new field Hunter
+// adds to recipients/index.jbuilder is silently dropped at parse time and
+// never reaches the model. Adding a new recipient field to the surface
+// requires a deliberate schema bump here + disclosure update.
+const recipientSchema = z.object({
+  email: z.string(),
+  lead_id: z.number().int().positive().optional(),
+  first_name: nullableString().optional(),
+  last_name: nullableString().optional(),
+  company: nullableString().optional(),
+  // The recipients/index.jbuilder doesn't emit an `id` field, but accept it
+  // optionally for forward-compat with future Hunter API revisions.
+  id: z.union([z.number().int().positive(), z.string()]).optional(),
+  status: z.string().optional(),
+})
 
 const listCampaignsDataSchema = z.object({ campaigns: z.array(campaignSchema) }).loose()
 const listRecipientsDataSchema = z.object({ recipients: z.array(recipientSchema) }).loose()

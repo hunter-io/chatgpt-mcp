@@ -2,20 +2,60 @@ import { z } from "zod"
 
 import type { HunterError } from "./schemas/common"
 
-// Bearer / api_key scrub for upstream error bodies. Defined here (not in
-// `schemas/common.ts`) to avoid a runtime circular import — `schemas/common`
-// imports `TOOL_NAMES` from this module; a reverse value-import would
-// evaluate the schema with TOOL_NAMES still undefined. See HUN-19943 todos/019.
-const BEARER_RE = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi
-const API_KEY_RE = /api[_-]?key=[^\s&]+/gi
+// Credential / Bearer scrub for upstream bodies. Three narrowly-scoped patterns
+// to avoid the over-matching trap (e.g. the earlier `(?:bearer|authorization)…`
+// catch-all collapsed "authorization required" into "Bearer [REDACTED] required"
+// because the trailing alnum class consumed plain English). Defined here (not
+// in `schemas/common.ts`) to avoid a runtime circular import — `schemas/common`
+// imports `TOOL_NAMES` from this module; a reverse value-import would evaluate
+// the schema with TOOL_NAMES still undefined. See HUN-19943 todos/019.
+//
+// BEARER_RE — `Bearer <token>` with ≥16-char token. The minimum-length anchor
+// excludes literal-English false matches like "Bearer of bad news"; real Hunter
+// API keys are 40 chars and JWTs are 100+, so legitimate tokens pass through.
+const BEARER_RE = /\bBearer\s+[A-Za-z0-9\-._~+/]{16,}=*/gi
+// AUTH_HEADER_RE — full HTTP-style `Authorization: …` header echo. Requires
+// the colon, so "authorization required" never matches. Excludes `"` from the
+// value class so the regex is safe to run on JSON envelope text — without
+// that exclusion, an `Authorization: Bearer xyz` substring embedded inside a
+// JSON string value would consume past the closing `"` through the rest of
+// the line, destroying brackets, commas, and other fields in the envelope.
+// The other three credential regexes already stop at `"` characters or
+// whitespace and don't need this guard.
+const AUTH_HEADER_RE = /\bAuthorization\s*:\s*[^\r\n"]+/gi
+// TOKEN_KV_RE — URL-encoded form `api_key=…`, `apikey=…`, `token=…`, or
+// `authorization=…`. Stops at whitespace/&/quotes so other querystring keys
+// remain visible after a single redaction.
+const TOKEN_KV_RE = /\b(?:api[_-]?key|apikey|token|authorization)\s*=\s*[^\s&"']+/gi
+// JWT_RE — three base64url segments separated by dots. Same shape regardless
+// of issuer; safe to redact whenever it appears.
+const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g
 
+/**
+ * Scrubs credential-shaped tokens from an upstream message string. Pass
+ * `Number.POSITIVE_INFINITY` for `max` when caller is the success-path JSON
+ * envelope (no truncation appropriate); the default 200-char cap suits
+ * one-line error messages.
+ */
 export function sanitizeUpstreamMessage(value: string, max = 200): string {
-  return value.replace(BEARER_RE, "Bearer [REDACTED]").replace(API_KEY_RE, "api_key=[REDACTED]").slice(0, max)
+  return value
+    .replace(BEARER_RE, "Bearer [REDACTED]")
+    .replace(AUTH_HEADER_RE, "Authorization: [REDACTED]")
+    .replace(TOKEN_KV_RE, "[REDACTED_CREDENTIAL]")
+    .replace(JWT_RE, "[REDACTED_JWT]")
+    .slice(0, max)
 }
 
 export const BASE_API_URL_PRODUCTION = "https://api.hunter.io/v2"
 export const BASE_API_URL_DEVELOPMENT = "http://localhost:3000/v2"
 export const HUNTER_BASE = "https://hunter.io"
+
+// Trailing suffix appended to the user-visible content text on every successful
+// Hunter API response so the model can attribute the data. Centralized here
+// (todo #108) because both `callHunterApi` and `stripResponseFields` reproduce
+// the JSON-envelope-plus-source format; a divergence between them would
+// silently desync the success-path text from the structuredContent.
+export const HUNTER_SOURCE_SUFFIX = "\n\nSource: Hunter.io (https://hunter.io)"
 
 // TOOL_NAMES_START
 // Single source of truth for every tool name exposed by Hunter MCPs.
@@ -332,7 +372,37 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
  * Walks objects and arrays recursively. Returns a structurally-shared copy
  * with sanitized keys; non-objects pass through unchanged.
  */
-const INJECTED_FIELD_NAMES = new Set(["nextAction", "pendingToolCall", "viewInHunter"])
+// Source-of-truth Set (case-preserved for human readability). The runtime
+// check at `stripInjectedFieldsInner` uses the lowercase-normalized variant
+// below so camelCase entries like `nextAction` still match the literal key,
+// AND PascalCase / SHOUT-CASE variants from a future proxy header echo or
+// new upstream field also get stripped. Looking up `key.toLowerCase()`
+// against the original case-preserved Set would silently break the
+// chain-control strip — that's the regression the post-merge codex review
+// caught at helpers.ts:408.
+const INJECTED_FIELD_NAMES = new Set([
+  // Chain-control fields. Defense-in-depth against prompt injection through
+  // Hunter response records steering the agent's next call (see HUN-19943
+  // todos/016).
+  "nextAction",
+  "pendingToolCall",
+  "viewInHunter",
+  // Telemetry / internal-ID fields. OpenAI Apps SDK submission privacy
+  // guidance: "session IDs, trace IDs, request IDs, timestamps" must not
+  // appear in user-facing tool responses. Hunter's Rails API doesn't
+  // routinely emit these today, but the filter keeps the surface tight as
+  // upstream adds observability fields. `account_id` is intentionally NOT
+  // in this set — Hunter's API uses `id` for many legitimate resources
+  // (leads, lists, attributes), and `account_id` specifically is not
+  // currently emitted.
+  "request_id",
+  "trace_id",
+  "correlation_id",
+  "internal_id",
+  "x_request_id",
+  "x-request-id",
+])
+const INJECTED_FIELD_NAMES_LOWERCASE = new Set([...INJECTED_FIELD_NAMES].map((k) => k.toLowerCase()))
 
 function stripInjectedFields(parsed: unknown): unknown {
   if (parsed == null || typeof parsed !== "object") return parsed
@@ -346,7 +416,14 @@ function stripInjectedFieldsInner(value: unknown, path: string): unknown {
   }
   const out: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (INJECTED_FIELD_NAMES.has(key)) {
+    // Case-insensitive match — Hunter Rails emits snake_case today but a future
+    // upstream addition or a proxy header echo using PascalCase / SHOUT-CASE
+    // (e.g. `X-Request-ID`) would otherwise slip through the strip. We use a
+    // pre-computed lowercase variant set so camelCase entries in
+    // INJECTED_FIELD_NAMES (`nextAction`, `pendingToolCall`, `viewInHunter`)
+    // still match — looking up `key.toLowerCase()` against the original
+    // case-preserved Set silently breaks chain-control stripping.
+    if (INJECTED_FIELD_NAMES_LOWERCASE.has(key.toLowerCase())) {
       const at = path ? `${path}.${key}` : key
       console.warn(`callHunterApi: stripped injected \`${at}\` from Hunter response`)
       continue
@@ -440,7 +517,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
       content: [
         {
           type: "text" as const,
-          text: `${message}\n\nSource: Hunter.io (https://hunter.io)`,
+          text: `${message}${HUNTER_SOURCE_SUFFIX}`,
           annotations: { audience: ["user"] },
         },
       ],
@@ -473,6 +550,15 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   }
   // Strip any attacker-injected `nextAction` keys (security defense-in-depth).
   const sanitized = stripInjectedFields(json) as Record<string, unknown>
+  // Defense-in-depth: also scrub credential-shaped tokens out of the
+  // user-visible content text. If a saved Hunter record (lead notes, custom-
+  // attribute value, campaign subject) carries `Authorization: Bearer …`,
+  // `api_key=…`, or a raw JWT in any string value, the scrub redacts it before
+  // the model sees it. `structuredContent` still ships the raw value — that
+  // surface is for machine consumption and is harder to use for exfil via the
+  // assistant transcript. No truncation here: pass `Number.POSITIVE_INFINITY`
+  // so the JSON envelope renders in full.
+  const rawText = `${JSON.stringify(sanitized)}${HUNTER_SOURCE_SUFFIX}`
   return {
     // `audience: ["user"]` tags the JSON-envelope text block so hosts can route
     // it distinctly from the assistant-only nextAction blocks emitted by
@@ -480,7 +566,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     content: [
       {
         type: "text" as const,
-        text: `${JSON.stringify(sanitized)}\n\nSource: Hunter.io (https://hunter.io)`,
+        text: sanitizeUpstreamMessage(rawText, Number.POSITIVE_INFINITY),
         annotations: { audience: ["user"] },
       },
     ],
@@ -748,11 +834,10 @@ export const PRIVATE_READ_ANNOTATIONS = {
 } as const
 
 /**
- * Paid lookup that may consume Hunter credits. State change without irreversible
- * side effect. `readOnlyHint: false` is honest about the credit-balance mutation;
- * `destructiveHint: false` because credits replenish on the plan cycle and no
- * data is deleted/overwritten/sent. The Plan-Prospecting-Flow coordinator
- * surfaces a single upfront credit-cost prompt for bulk flows.
+ * Paid lookup. Credit-spend (not read-only) but no delete/overwrite of user data
+ * (not destructive). Bulk credit consent is enforced server-side via
+ * `confirmed_credit_use` on Domain-Search. See HUN-20170-v3 plan, Phase 1.1c.
+ * https://developers.openai.com/apps-sdk/reference
  */
 export const BILLABLE_LOOKUP_ANNOTATIONS = {
   readOnlyHint: false,
@@ -881,6 +966,11 @@ export interface LoopFilters {
   seniority?: string
   department?: string
   required_field?: "full_name" | "position" | "phone_number"
+  // Bulk credit-consent flag (HUN-20170-v3 Phase 1.1c). When set true on the
+  // first Domain-Search call in a `pending_companies` batch, authorizes the
+  // entire chain. Carried through chained `suggestedArgs` so subsequent
+  // Domain-Search calls in the loop don't re-trigger the server-side guard.
+  confirmed_credit_use?: boolean
 }
 
 /**
@@ -888,14 +978,147 @@ export interface LoopFilters {
  * plain record suitable for spreading into chained `suggestedArgs`. Undefined
  * fields are dropped so the chained payload stays minimal.
  */
-export function carryLoopFilters(args: LoopFilters): Record<string, string | number> {
-  const out: Record<string, string | number> = {}
+export function carryLoopFilters(args: LoopFilters): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {}
   if (args.limit !== undefined) out.limit = args.limit
   if (args.type) out.type = args.type
   if (args.seniority) out.seniority = args.seniority
   if (args.department) out.department = args.department
   if (args.required_field) out.required_field = args.required_field
+  if (args.confirmed_credit_use === true) out.confirmed_credit_use = true
   return out
+}
+
+/**
+ * Strips fields from `structuredContent.data` that aren't in the supplied
+ * Zod schema's allowlist by parsing the data through the schema. Zod 4's
+ * default object behavior drops unknown keys at parse time; the schema
+ * therefore acts as a positive allowlist (the doc-comment says "here's what
+ * we keep"; the runtime enforces it).
+ *
+ * Why this exists: declaring an outputSchema is necessary but not sufficient
+ * for response minimization. The MCP SDK validates `structuredContent`
+ * against the outputSchema, but it does NOT use the parsed (stripped) result
+ * — `parseResult.data` is discarded after validation. So fields outside the
+ * schema's allowlist still reach the model through `structuredContent` and
+ * the JSON envelope text. Codex flagged this on PR #12677 at enrichment.ts:33.
+ *
+ * On parse failure (schema doesn't match — e.g. required field missing) the
+ * helper falls back to the original `result`. Callers that need a stronger
+ * guarantee should also use `stripResponseFields` with an explicit named
+ * field list as a belt-and-suspenders pass.
+ *
+ * On no-op (parsed data is structurally identical to the original) the
+ * helper returns the original `result` to avoid re-serialization.
+ */
+export function minimizeResponseData(result: McpTextResult, schema: z.ZodType): McpTextResult {
+  if (result.isError) return result
+  const sc = result.structuredContent as { data?: unknown } | undefined
+  if (!sc?.data || typeof sc.data !== "object") return result
+  const parseResult = schema.safeParse(sc.data)
+  if (!parseResult.success) return result
+  const trimmed = parseResult.data
+  // No-op fast path: shape unchanged → reuse the original `result` so we
+  // don't re-allocate or re-serialize on every call.
+  const originalJson = JSON.stringify(sc.data)
+  const trimmedJson = JSON.stringify(trimmed)
+  if (originalJson === trimmedJson) return result
+  const trimmedStructured = { ...sc, data: trimmed }
+  // Re-run `sanitizeUpstreamMessage` on the rewritten text — same reason as
+  // `stripResponseFields`: we serialize fresh from the parsed data and need
+  // to re-apply the scrub invariant that `callHunterApi` ran on the original
+  // text.
+  const rawText = `${JSON.stringify(trimmedStructured)}${HUNTER_SOURCE_SUFFIX}`
+  return {
+    ...result,
+    content: [
+      { ...result.content[0], type: "text" as const, text: sanitizeUpstreamMessage(rawText, Number.POSITIVE_INFINITY) },
+    ],
+    structuredContent: trimmedStructured,
+  }
+}
+
+/**
+ * Strips named keys from a tool result's `structuredContent.data` AND rewrites
+ * the JSON-envelope text in `content[0]` to match. No-op on error responses
+ * (they don't carry a `data` envelope) and when none of the named keys are
+ * present. Extracted in todo #107 so any tool needing per-field response
+ * minimization shares the same shape; the original site is `Get-Account-Details`
+ * (PII strip: first_name, last_name, email, team_id).
+ *
+ * Uses the shared `HUNTER_SOURCE_SUFFIX` to mirror `callHunterApi`'s success-
+ * path text format, so a future tweak to the source attribution propagates
+ * to all callers without silent desync.
+ *
+ * Compare with `minimizeResponseData` above: this function takes an explicit
+ * named field list (what to remove), the other takes a Zod schema (what to
+ * keep). Account uses both, chained — defense-in-depth.
+ */
+export function stripResponseFields(result: McpTextResult, fieldsToStrip: ReadonlySet<string>): McpTextResult {
+  if (result.isError) return result
+  const sc = result.structuredContent as { data?: Record<string, unknown> } | undefined
+  if (!sc?.data || typeof sc.data !== "object") return result
+  const trimmed: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(sc.data)) {
+    if (!fieldsToStrip.has(k)) trimmed[k] = v
+  }
+  // No-op if every key was already absent — keep the original result intact
+  // so we don't allocate or re-serialize on every call.
+  if (Object.keys(trimmed).length === Object.keys(sc.data).length) return result
+  const trimmedStructured = { ...sc, data: trimmed }
+  // Re-run `sanitizeUpstreamMessage` on the rewritten text. callHunterApi's
+  // success branch ran the same scrub on its original `content[0].text`; this
+  // function discards that text and serializes fresh from the (unscrubbed)
+  // structuredContent, so the scrub invariant has to be re-applied here.
+  // Without it, a credential-shaped string in a value we kept (anything
+  // outside `fieldsToStrip`) would re-surface in the user-visible channel
+  // even though callHunterApi already redacted it once.
+  const rawText = `${JSON.stringify(trimmedStructured)}${HUNTER_SOURCE_SUFFIX}`
+  return {
+    ...result,
+    content: [
+      { ...result.content[0], type: "text" as const, text: sanitizeUpstreamMessage(rawText, Number.POSITIVE_INFINITY) },
+    ],
+    structuredContent: trimmedStructured,
+  }
+}
+
+/**
+ * Server-side bulk credit-consent guard. When `pending_companies` is non-empty
+ * AND `confirmed_credit_use !== true`, returns a synthesized `McpTextResult`
+ * carrying an `ask_user` nextAction with the credit-cost summary — the caller
+ * should `return` it immediately, short-circuiting the Hunter API call.
+ * Returns `null` when the call is authorized to proceed.
+ *
+ * Today `Domain-Search` is the only tool that calls this, because it's the
+ * only credit-debit entry to bulk loops. As soon as a second tool wants to
+ * accept `pending_companies` directly (e.g. a future bulk-verification entry
+ * point), it MUST call this helper at handler-top — otherwise the implicit
+ * invariant "the loop always re-enters Domain-Search before next credit
+ * debit" silently breaks. Extracted from the original inline guard so the
+ * contract is grep-able (`grep -r requireBulkConsent`).
+ *
+ * Lives outside the NEXT_ACTION byte-aligned region so each MCP adopts
+ * independently. See HUN-20170-v3 plan Phase 1.1c + todo #106.
+ */
+export function requireBulkConsent(
+  pending: readonly string[] | undefined,
+  confirmed: boolean | undefined,
+  summary: string,
+  estimatedCredits: { search: number; verification: number },
+): McpTextResult | null {
+  if (!pending || pending.length === 0 || confirmed === true) return null
+  return embedNextAction(
+    {
+      content: [{ type: "text" as const, text: summary, annotations: { audience: ["user"] } }],
+      structuredContent: {
+        kind: "approval_required" as const,
+        ok: true as const,
+        estimated_credits: estimatedCredits,
+      },
+    },
+    buildNextAction({ kind: "ask_user", question: summary }),
+  )
 }
 
 /**

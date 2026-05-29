@@ -82,17 +82,21 @@ export function registerCustomAttributeTools(server: McpServer, apiKey: string, 
     },
   )
 
+  // Destructive because the rename overwrites the prior attribute label and the
+  // previous value cannot be retrieved from the Hunter API. Per OpenAI Apps SDK
+  // reference, tools that "may delete or overwrite user data" warrant
+  // destructiveHint: true. HUN-20170-v3, Phase 1.3.
   server.registerTool(
     TOOL_NAMES.updateCustomAttribute,
     {
       description:
-        "Use this when the user wants to rename an existing custom-attribute definition, identified by ID. Free to call.",
+        "Use this when the user wants to rename an existing custom-attribute definition, identified by ID. Overwrites the existing label; the previous label cannot be recovered from the API. If the user declines the rename, offer to instead create a new custom-attribute definition with the desired label. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the custom attribute to update"),
         label: z.string().min(1).max(100).describe("New label for the custom attribute"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, label }) => {
       return callHunterApi({

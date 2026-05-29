@@ -467,6 +467,68 @@ After completing all sections, fill this in.
 
 ---
 
+## Section 5 — Resubmission notes (paste verbatim into OpenAI submission form)
+
+Use this block when filling out the "Notes for the reviewer" field on the
+OpenAI Apps SDK submission form. Pre-empts the three reviewer-edge-cases
+the v3 implementation knowingly accepts as trade-offs; surfacing them
+proactively beats letting a reviewer discover them on a test run.
+
+### A. Bulk credit consent is enforced server-side
+
+Bulk prospecting flows on paid Hunter lookups (Domain-Search,
+Email-Verifier, Person/Company/Combined-Enrichment) require **one upfront
+credit-cost approval per batch**, enforced by a server-side
+`confirmed_credit_use` guard on `Domain-Search`. The first call in a
+multi-company batch returns an `ask_user` `nextAction` carrying the credit
+estimate; after the user approves, subsequent chained calls in the same
+batch proceed without re-prompting because the flag propagates through
+the `nextAction.suggestedArgs` carry. Single-call paid lookups surface the
+per-call credit cost in the assistant's user-facing narration before
+invoking. This is intentional under our v3 annotation posture — the host's
+destructive-confirmation prompt would otherwise fire on every chained call
+and the 50-company prospecting loop becomes user-hostile.
+
+### B. Hunter MCP scope vs. dashboard parity
+
+Hunter MCP v3 covers email discovery, verification, enrichment, and
+lead/campaign read-write. Campaign **authoring**, async **bulk
+verification**, and a few smaller parity items (Author-Finder, dedicated
+Add/Remove-Lead-To-List primitives, the full Discover filter set) are on
+the roadmap. Reviewers who ask the agent to compose a new campaign, to
+queue a bulk verification job, or to move 10 leads from list A to list B
+will see a clean "I can't do that yet" response from the tool surface —
+that is the surface telling the truth, not a bug. The web app exposes
+these; the MCP will follow in a future cycle.
+
+### C. Title-vs-canonical-name dashboard surface
+
+The six weakest-named billable tools carry an `annotations.title` field
+with a verb-form human-readable label (`Find Emails By Domain`, `Find
+Person Email`, `Verify Email`, `Enrich Person`, `Enrich Company`, `Enrich
+Person And Company`). Canonical `name` values are unchanged
+(`Domain-Search`, `Email-Finder`, etc.) to keep blast radius small for
+this resubmission. If the dashboard card surfaces only the canonical name
+and not the title, we will upgrade to canonical kebab-case renames on the
+same PR before merging — the contingency commit is a six-line `TOOL_NAMES`
+edit plus the mirrored byte-aligned edit in remote-mcp.
+
+### D. Privacy posture summary
+
+- `Get-Account-Details` returns plan name and per-product credit balances
+  only. Name, email, and team ID are stripped server-side before reaching
+  the model.
+- Person- and Combined-Enrichment use `.strict()` schemas with audited
+  field allowlists. Future Hunter API additions are silently dropped
+  unless a coordinated schema bump + privacy-policy disclosure update
+  ships first.
+- Tool responses contain no API keys, OAuth tokens, JWTs, session IDs,
+  trace IDs, request IDs, or correlation IDs — these are scrubbed
+  server-side via the credential-shape regex set and the
+  `INJECTED_FIELD_NAMES` strip pass.
+
+---
+
 ## Appendix — Tool inventory
 
 The 34 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run.

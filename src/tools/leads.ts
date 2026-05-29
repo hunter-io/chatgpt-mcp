@@ -273,11 +273,24 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .enum(["full_name", "position", "phone_number"])
           .optional()
           .describe("Loop carry: forwarded from Domain-Search."),
+        confirmed_credit_use: z
+          .boolean()
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search bulk credit-consent guard."),
       },
       outputSchema: singleLeadOutputSchema.shape,
       annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
-    async ({ pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
+    async ({
+      pending_companies,
+      limit,
+      type,
+      seniority,
+      department,
+      required_field,
+      confirmed_credit_use,
+      ...fields
+    }) => {
       const result = await callHunterApi({
         path: "/leads",
         apiKey,
@@ -296,7 +309,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       return chainOrComplete(
         linked,
         pending_companies,
-        { limit, type, seniority, department, required_field },
+        { limit, type, seniority, department, required_field, confirmed_credit_use },
         {
           reason: "Lead saved; continuing loop with next picked company.",
           loopCompleteSummary: "Lead saved. Multi-company loop complete.",
@@ -326,11 +339,25 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .enum(["full_name", "position", "phone_number"])
           .optional()
           .describe("Loop carry: forwarded from Domain-Search."),
+        confirmed_credit_use: z
+          .boolean()
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search bulk credit-consent guard."),
       },
       outputSchema: createLeadIfMissingOutputSchema.shape,
       annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
-    async ({ email, pending_companies, limit, type, seniority, department, required_field, ...fields }) => {
+    async ({
+      email,
+      pending_companies,
+      limit,
+      type,
+      seniority,
+      department,
+      required_field,
+      confirmed_credit_use,
+      ...fields
+    }) => {
       // Pre-flight: does the lead already exist?
       // We use /leads/exist (free, no credit cost) BEFORE POST /leads because
       // Hunter's create controller (app/controllers/api/leads/create_controller.rb)
@@ -394,7 +421,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       return chainOrComplete(
         leadResult,
         pending_companies,
-        { limit, type, seniority, department, required_field },
+        { limit, type, seniority, department, required_field, confirmed_credit_use },
         {
           reason: "Lead saved or already existed; continuing with the next selected company.",
           loopCompleteSummary: "Lead saved or already existed. Multi-company loop complete.",

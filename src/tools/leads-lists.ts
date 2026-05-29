@@ -106,16 +106,21 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     },
   )
 
+  // Destructive because the rename overwrites the prior list name and the previous
+  // value cannot be retrieved from the Hunter API. Per OpenAI Apps SDK reference,
+  // tools that "may delete or overwrite user data" warrant destructiveHint: true.
+  // HUN-20170-v3, Phase 1.2.
   server.registerTool(
     TOOL_NAMES.updateLeadsList,
     {
-      description: "Use this when the user wants to rename an existing leads list, identified by ID. Free to call.",
+      description:
+        "Use this when the user wants to rename an existing leads list, identified by ID. Overwrites the existing list name; the previous name cannot be recovered from the API. If the user declines the rename, offer to instead create a new leads list with the desired name. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to update"),
         name: z.string().min(1).max(100).describe("New name for the leads list"),
       },
       outputSchema: singleOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, name }) => {
       const result = await callHunterApi({

@@ -12,9 +12,12 @@ import {
   loopRecoveryAction,
   parseHunterApiData,
   pendingCompaniesSchema,
+  requireBulkConsent,
 } from "../helpers"
 import {
   buildResponseSchema,
+  hunterUrl,
+  nextActionSchema,
   nullableNumber,
   nullableString,
   paginationMetaSchema,
@@ -116,7 +119,33 @@ const emailCountDataSchema = z
   })
   .loose()
 
-const domainSearchOutputSchema = buildResponseSchema(domainSearchDataSchema, paginationMetaSchema)
+// Domain-Search can return two shapes:
+//   1. Normal Hunter API response — `{ data, meta, viewInHunter?, nextAction? }`
+//   2. Approval-required short-circuit (HUN-20170-v3 Phase 1.1c) — fires when
+//      `pending_companies` is set without `confirmed_credit_use: true`. No
+//      Hunter API call happens; structuredContent carries `kind:
+//      "approval_required"` + the bulk credit-cost estimate, and `nextAction`
+//      is an `ask_user`.
+// Both shapes coexist in one outputSchema with `data` optional and a `kind`
+// discriminator; cleaner than a top-level union (Zod top-level union is
+// dropped by the MCP SDK's normalizeObjectSchema — see schemas/common.ts:40).
+const domainSearchOutputSchema = z
+  .object({
+    data: domainSearchDataSchema.optional(),
+    meta: paginationMetaSchema.optional(),
+    viewInHunter: hunterUrl.optional(),
+    nextAction: nextActionSchema.optional(),
+    // Approval-required discriminator (set only on the bulk-consent short-circuit).
+    kind: z.literal("approval_required").optional(),
+    ok: z.literal(true).optional(),
+    estimated_credits: z
+      .object({
+        search: z.number().int().nonnegative(),
+        verification: z.number().int().nonnegative(),
+      })
+      .optional(),
+  })
+  .loose()
 const emailFinderOutputSchema = buildResponseSchema(emailFinderDataSchema)
 const emailVerifierOutputSchema = buildResponseSchema(emailVerifierDataSchema)
 const emailCountOutputSchema = buildResponseSchema(emailCountDataSchema)
@@ -136,7 +165,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.domainSearch,
     {
       description:
-        "Use this when the user wants the contacts published for a domain — emails with names, positions, and confidence scores. Optional filters: type, seniority, department, required field. Costs 1 search credit per 10 emails returned (rounded up), only charged when emails are found.",
+        "Use this when the user wants the contacts published for a domain — emails with names, positions, and confidence scores. Optional filters: type, seniority, department, required field. Costs 1 search credit per 10 emails returned (rounded up), only charged when emails are found. Do not use this for personal/webmail domains (gmail.com, yahoo.com, etc.) — results will be empty.",
       inputSchema: {
         domain: domainStringSchema.describe("Domain name to find data for"),
         limit: z.number().optional().describe("Maximum number of email addresses to return"),
@@ -159,11 +188,52 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .optional()
           .describe("Only return results where this field has a value"),
         pending_companies: pendingCompaniesSchema,
+        confirmed_credit_use: z
+          .boolean()
+          .optional()
+          .describe(
+            "Bulk credit-consent flag. Set true after the user has approved the upfront credit estimate for a multi-company prospecting batch. Required when `pending_companies` is non-empty; otherwise the server returns an ask_user with the credit-cost summary and does NOT call Hunter. Single-company calls (no pending_companies) ignore this flag.",
+          ),
       },
       outputSchema: domainSearchOutputSchema.shape,
-      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
+      annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Find Emails By Domain" },
     },
-    async ({ domain, limit, offset, type, seniority, department, required_field, pending_companies }) => {
+    async ({
+      domain,
+      limit,
+      offset,
+      type,
+      seniority,
+      department,
+      required_field,
+      pending_companies,
+      confirmed_credit_use,
+    }) => {
+      // Server-side bulk credit-consent gate. Short-circuits with an ask_user
+      // nextAction when the user is in a multi-company prospecting loop
+      // (`pending_companies` non-empty) and hasn't yet approved the credit
+      // estimate. Single-company calls ignore the flag and proceed. Subsequent
+      // chained Domain-Search calls inside the same bulk session carry
+      // `confirmed_credit_use: true` through `carryLoopFilters` so the guard
+      // fires exactly once at the start of the loop. See `requireBulkConsent`
+      // in helpers.ts for the contract a future bulk-eligible tool must honor.
+      //
+      // The message is user-facing (the prospecting directive instructs the
+      // model to relay the ask_user question verbatim). Keep it free of
+      // implementation jargon — no flag names, no "Domain-Search call", no
+      // "authorize the batch". The model already knows from Plan-Prospecting-
+      // Flow's directive that approval means re-issuing with
+      // `confirmed_credit_use: true`.
+      const totalCompanies = 1 + (pending_companies?.length ?? 0) // this domain + remaining picks
+      const consentGuard = requireBulkConsent(
+        pending_companies,
+        confirmed_credit_use,
+        `This will use up to ${totalCompanies} Hunter search credits and up to ${totalCompanies} ` +
+          `verification credits (one per saved contact). Approve to continue?`,
+        { search: totalCompanies, verification: totalCompanies },
+      )
+      if (consentGuard) return consentGuard
+
       // Self-reference guard: drop the current domain from the loop carry so
       // the chain doesn't re-enter DS for the same company after saving its
       // lead. Dedup + lowercase normalization is handled by `pendingCompaniesSchema`'s
@@ -194,7 +264,17 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
         // Forward DS filters (seniority, department, etc.) through the chain so
         // they apply at every company in the loop, not just the seed call.
         // Email-Verifier and Upsert-Lead accept these as carry-only fields.
-        const filterCarry = carryLoopFilters({ limit, type, seniority, department, required_field })
+        // `confirmed_credit_use: true` propagates so subsequent Domain-Search
+        // calls in this loop don't re-trigger the consent guard
+        // (HUN-20170-v3 Phase 1.1c/1.1d).
+        const filterCarry = carryLoopFilters({
+          limit,
+          type,
+          seniority,
+          department,
+          required_field,
+          confirmed_credit_use: true,
+        })
         if (email) {
           return embedNextAction(
             result,
@@ -254,13 +334,13 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailFinder,
     {
       description:
-        "Use this when the user wants a specific person's email address at a company. Provide the person's full name and the company's domain. Costs 1 search credit, only charged when an email is found.",
+        "Use this when the user wants a specific person's email address at a company. Provide the person's full name and the company's domain. Costs 1 search credit, only charged when an email is found. Do not use this when the user already has the email and only wants to confirm it works — call Email-Verifier instead.",
       inputSchema: {
         full_name: z.string().min(1).max(200).describe("Full name of the person to find the email address for"),
         domain: domainStringSchema.describe("Domain name to find the person's email address for"),
       },
       outputSchema: emailFinderOutputSchema.shape,
-      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
+      annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Find Person Email" },
     },
     async ({ full_name, domain }) => {
       return callHunterApi({ path: "/email-finder", apiKey, baseUrl, params: { full_name, domain } })
@@ -271,7 +351,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailVerifier,
     {
       description:
-        "Use this when the user wants to check whether an email address is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification credit, only charged for valid, invalid, or accept_all results.",
+        "Use this when the user wants to check whether an email address is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification credit, only charged for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all.",
       inputSchema: {
         email: z.string().email().max(254).describe("Email address to verify"),
         pending_companies: pendingCompaniesSchema,
@@ -285,11 +365,15 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .enum(["full_name", "position", "phone_number"])
           .optional()
           .describe("Loop carry: forwarded from Domain-Search."),
+        confirmed_credit_use: z
+          .boolean()
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search bulk credit-consent guard."),
       },
       outputSchema: emailVerifierOutputSchema.shape,
-      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
+      annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Verify Email" },
     },
-    async ({ email, pending_companies, limit, type, seniority, department, required_field }) => {
+    async ({ email, pending_companies, limit, type, seniority, department, required_field, confirmed_credit_use }) => {
       const result = await callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } })
       if (result.isError) {
         if (pending_companies !== undefined && pending_companies.length > 0) {
@@ -301,7 +385,14 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       const status = parseHunterApiData<EmailVerifierData>(result)?.status
 
       if (pending_companies !== undefined) {
-        const filterCarry = carryLoopFilters({ limit, type, seniority, department, required_field })
+        const filterCarry = carryLoopFilters({
+          limit,
+          type,
+          seniority,
+          department,
+          required_field,
+          confirmed_credit_use,
+        })
         if (status === "valid") {
           return embedNextAction(
             result,
@@ -362,7 +453,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailCount,
     {
       description:
-        "Use this when the user wants the count of email addresses Hunter has indexed for a domain, optionally split by personal vs generic. Free to call.",
+        "Use this when the user wants the count of email addresses Hunter has indexed for a domain, optionally split by personal vs generic. Free to call. Do not use this as a substitute for Domain-Search; this returns a count only, not the email list itself.",
       inputSchema: {
         domain: domainStringSchema.describe("Domain name to count email addresses for"),
         type: z.enum(["personal", "generic"]).optional().describe("Type of email addresses to count"),

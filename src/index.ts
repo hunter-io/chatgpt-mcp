@@ -120,7 +120,7 @@ import { registerSearchTools } from "./tools/search"
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "2.2.0",
+    version: "2.3.0",
   })
 
   // --- ChatGPT widget resources ---
@@ -170,7 +170,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     TOOL_NAMES.discover,
     {
       description:
-        "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call.",
+        "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call. Do not use this when the user has already named a specific company — call Company-Enrichment directly with that company's domain.",
       inputSchema: {
         query: z
           .string()
@@ -217,12 +217,12 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     TOOL_NAMES.companyEnrichment,
     {
       description:
-        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found.",
+        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found. Do not use this for personal websites or webmail domains (gmail.com, yahoo.com, etc.) — there is no company behind those domains to enrich.",
       inputSchema: {
         domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
       },
       outputSchema: companyEnrichmentOutputSchema.shape,
-      annotations: BILLABLE_LOOKUP_ANNOTATIONS,
+      annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Enrich Company" },
       _meta: {
         "openai/outputTemplate": "ui://widget/company-widget.html",
         "openai/widgetAccessible": true,
@@ -317,10 +317,41 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
   return server
 }
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
+// HUN-20170-v3 Phase 4.5: CORS posture restricted from wildcard `Origin: *` to
+// an allowlist of documented host origins. Server-to-server MCP clients (the
+// OpenAI host, programmatic integrators) do not send an `Origin` header and
+// are unaffected. Browser-side requests from non-allowed origins receive no
+// `Access-Control-Allow-Origin` header (browser blocks). This closes the
+// browser-stolen-Bearer attack vector flagged in the security-sentinel
+// review without breaking any documented integration path.
+const ALLOWED_CORS_ORIGINS = new Set(["https://chatgpt.com", "https://chat.openai.com"])
+
+const CORS_METHOD_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, mcp-protocol-version",
+}
+
+function corsHeadersFor(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin")
+  // No Origin header → server-to-server call (or non-CORS context). Browsers
+  // always send Origin on cross-origin requests, so absence means no CORS
+  // negotiation is needed. Return only the method/header policy so OPTIONS
+  // preflights still describe what's allowed without granting any specific
+  // origin access.
+  if (!origin) {
+    return CORS_METHOD_HEADERS
+  }
+  // Browser-side from an allowed host: reflect the specific origin and
+  // include Vary: Origin so caches don't serve a wrong-origin response.
+  if (ALLOWED_CORS_ORIGINS.has(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      Vary: "Origin",
+      ...CORS_METHOD_HEADERS,
+    }
+  }
+  // Unknown origin: no Allow-Origin header, browser blocks.
+  return CORS_METHOD_HEADERS
 }
 
 function extractApiKey(request: Request): string | null {
@@ -334,9 +365,9 @@ function extractApiKey(request: Request): string | null {
   return null
 }
 
-function addCorsHeaders(response: Response): Response {
+function addCorsHeaders(response: Response, request: Request): Response {
   const headers = new Headers(response.headers)
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+  for (const [key, value] of Object.entries(corsHeadersFor(request))) {
     headers.set(key, value)
   }
   return new Response(response.body, {
@@ -349,14 +380,17 @@ function addCorsHeaders(response: Response): Response {
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 200, headers: CORS_HEADERS })
+      return new Response(null, { status: 200, headers: corsHeadersFor(request) })
     }
 
     const url = new URL(request.url)
     const AUTHORIZATION_SERVER = url.hostname === "localhost" ? "https://localhost:4000" : "https://hunter.io"
 
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-      return new Response("Gone — use /mcp (Streamable HTTP transport)", { status: 410, headers: CORS_HEADERS })
+      return new Response("Gone — use /mcp (Streamable HTTP transport)", {
+        status: 410,
+        headers: corsHeadersFor(request),
+      })
     }
 
     if (url.pathname === "/mcp") {
@@ -381,22 +415,22 @@ export default {
             return new Response("Unauthorized: invalid Hunter API key", {
               status: 401,
               headers: {
-                ...CORS_HEADERS,
+                ...corsHeadersFor(request),
                 "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
               },
             })
           }
           if (!accountResponse.ok) {
-            return new Response("Upstream validation unavailable", { status: 502, headers: CORS_HEADERS })
+            return new Response("Upstream validation unavailable", { status: 502, headers: corsHeadersFor(request) })
           }
         } catch {
-          return new Response("Upstream validation unavailable", { status: 502, headers: CORS_HEADERS })
+          return new Response("Upstream validation unavailable", { status: 502, headers: corsHeadersFor(request) })
         }
       }
       const server = createServer(apiKey || "", baseUrl)
       const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
       await server.connect(transport)
-      return addCorsHeaders(await transport.handleRequest(request))
+      return addCorsHeaders(await transport.handleRequest(request), request)
     }
 
     if (
@@ -414,14 +448,14 @@ export default {
           null,
           2,
         ),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeadersFor(request) } },
       )
     }
 
     if (url.pathname === "/.well-known/openai-apps-challenge") {
       return new Response("JUhnNKiJYpD65gL3PPLSMoSuyplvLfsWHz9QUQ1q_Hs", {
         status: 200,
-        headers: { "Content-Type": "text/plain", ...CORS_HEADERS },
+        headers: { "Content-Type": "text/plain", ...corsHeadersFor(request) },
       })
     }
 
