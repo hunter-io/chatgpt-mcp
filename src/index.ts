@@ -70,8 +70,13 @@ const discoverOutputSchema = buildResponseSchema(discoverDataSchema, paginationM
 const companyEnrichmentDataSchema = z
   .object({
     id: z.union([z.number(), z.string()]).optional(),
-    name: z.string().optional(),
-    domain: z.string().optional(),
+    // `name`/`domain` come from `domain.company_name` / `domain.value` in
+    // `_company.jbuilder` as raw scalars; `company_name` is null for a found-
+    // but-nameless company, so `z.string()` would reject it and the SDK would
+    // -32602. Same null-tolerance class as the email-finder accept_all bug
+    // (HUN-20344). Mirrors remote-mcp's companyEnrichmentDataSchema.
+    name: nullableString().optional(),
+    domain: nullableString().optional(),
     legalName: nullableString().optional(),
     logo: nullableString().optional(),
     location: nullableString().optional(),

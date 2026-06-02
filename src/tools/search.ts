@@ -18,6 +18,7 @@ import {
   buildResponseSchema,
   hunterUrl,
   nextActionSchema,
+  nullableBoolean,
   nullableNumber,
   nullableString,
   paginationMetaSchema,
@@ -79,7 +80,12 @@ const emailFinderDataSchema = z
     email: nullableString(),
     score: nullableNumber(),
     domain: z.string().optional(),
-    accept_all: z.boolean().optional(),
+    // `accept_all` is sourced from `@result&.accept_all` and the Rails jbuilder
+    // ALWAYS emits the key — it is `null` on a not-found / inconclusive-
+    // verification result. `.optional()` permits a missing key but rejects
+    // `null`, so the MCP SDK threw -32602 and Claude looped retrying. Accept
+    // null. (HUN-20344)
+    accept_all: nullableBoolean().optional(),
     position: nullableString().optional(),
     twitter: nullableString().optional(),
     linkedin_url: nullableString().optional(),

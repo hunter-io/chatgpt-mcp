@@ -1164,6 +1164,70 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     expect(text).not.toContain("lat")
   })
 
+  it("Email-Finder outputSchema accepts a not-found result with null accept_all (HUN-20344 regression)", async () => {
+    // The Rails `/email-finder` jbuilder ALWAYS emits `accept_all` (sourced from
+    // `@result&.accept_all`) and sets it to `null` on a not-found / inconclusive-
+    // verification result — a very common outcome. Before the fix `accept_all`
+    // was `z.boolean().optional()`, which permits a missing key but rejects
+    // `null`, so the MCP SDK threw -32602 and Claude looped retrying the same
+    // doomed query (~1h, "timeout/failure"). This pins parse-succeeds on null.
+    const tool = registeredTools.get("Email-Finder")!
+    const outputSchemaShape = tool.outputSchema as Record<string, z.ZodTypeAny> | undefined
+    const reconstructedSchema = outputSchemaShape ? z.object(outputSchemaShape).loose() : undefined
+    // Mirrors the jbuilder "miss" shape: every `@result&.x` field is null, the
+    // key is present, `sources` is [], `verification` is an object with nulls.
+    const notFoundData = {
+      data: {
+        first_name: null,
+        last_name: null,
+        email: null,
+        score: null,
+        domain: "example.com",
+        accept_all: null,
+        position: null,
+        twitter: null,
+        linkedin_url: null,
+        phone_number: null,
+        company: null,
+        sources: [],
+        verification: { date: null, status: null },
+      },
+      meta: { params: { full_name: "Nobody Here", domain: "example.com" } },
+    }
+    if (reconstructedSchema) {
+      // Must NOT throw — `z.boolean().optional()` on accept_all threw on null.
+      expect(() => reconstructedSchema.parse(notFoundData)).not.toThrow()
+    }
+    // And the live handler succeeds end-to-end (no isError) on the same payload.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(notFoundData)),
+      }),
+    )
+    const result = await tool.handler({ full_name: "Nobody Here", domain: "example.com" })
+    expect(result.isError).toBeUndefined()
+  })
+
+  it("Company-Enrichment outputSchema accepts a found-but-nameless company (HUN-20344 same-class guard)", async () => {
+    // `_company.jbuilder` emits `name`/`domain` from `domain.company_name` /
+    // `domain.value` as raw scalars; `company_name` is null for a thin company
+    // record. Before the fix `name`/`domain` were `z.string().optional()`, which
+    // rejects null and would -32602 — the same class as the email-finder bug.
+    // chatgpt-mcp keeps this schema in index.ts (not enrichment.ts), which is
+    // why the first audit pass missed it (Cursor Bugbot flagged it on the PR).
+    const tool = registeredTools.get("Company-Enrichment")!
+    const outputSchemaShape = tool.outputSchema as Record<string, z.ZodTypeAny> | undefined
+    const reconstructedSchema = outputSchemaShape ? z.object(outputSchemaShape).loose() : undefined
+    const namelessCompany = {
+      data: { id: "uuid-1", name: null, domain: "example.com", legalName: null, foundedYear: null },
+    }
+    if (reconstructedSchema) {
+      expect(() => reconstructedSchema.parse(namelessCompany)).not.toThrow()
+    }
+  })
+
   it("stripResponseFields re-scrubs the rewritten content[0].text (cursor bot LOW)", async () => {
     // Get-Account-Details goes through stripResponseFields to remove the four
     // PII fields. The rewrite serializes fresh from structuredContent — without
