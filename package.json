@@ -49,6 +49,9 @@
 		"onlyBuiltDependencies": [
 			"esbuild",
 			"workerd"
-		]
+		],
+		"overrides": {
+			"lodash": ">=4.18.0"
+		}
 	}
 }
