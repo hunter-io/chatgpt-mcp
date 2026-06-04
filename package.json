@@ -42,9 +42,6 @@
 		"vitest": "^4.1.7",
 		"wrangler": "^4.94.0"
 	},
-	"overrides": {
-		"sugarss": "^5.0.1"
-	},
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild",
