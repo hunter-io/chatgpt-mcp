@@ -63,7 +63,7 @@ function registerAllTools() {
   createServer("test-api-key", "https://api.hunter.io/v2")
 }
 
-// All 35 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
+// All 37 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
 // "all TOOL_NAMES are registered" assertion below.
 const ALL_TOOL_NAMES = [
   "Find-Companies",
@@ -75,6 +75,12 @@ const ALL_TOOL_NAMES = [
   "Company-Enrichment",
   "Combined-Enrichment",
   "Get-Account-Details",
+  "List-Email-Accounts",
+  "List-Sequence-Follow-Ups",
+  "Pause-Sequence",
+  "Resume-Sequence",
+  "Archive-Sequence",
+  "Get-Sequence-Stats",
   "List-Leads",
   "Get-Lead",
   "Create-Lead",
@@ -90,6 +96,21 @@ const ALL_TOOL_NAMES = [
   "Update-Leads-List",
   "Delete-Leads-List",
   "Merge-Leads-Lists",
+  "List-Company-Lists",
+  "Get-Company-List",
+  "Create-Company-List",
+  "Update-Company-List",
+  "Delete-Company-List",
+  "Favorite-Company-List",
+  "Unfavorite-Company-List",
+  "Add-Company-To-List",
+  "Remove-Company-From-List",
+  "List-Company-List-Folders",
+  "Create-Company-List-Folder",
+  "Update-Company-List-Folder",
+  "Delete-Company-List-Folder",
+  "List-Connected-Apps",
+  "Get-Connected-App",
   "List-Custom-Attributes",
   "Get-Custom-Attribute",
   "Create-Custom-Attribute",
@@ -189,11 +210,19 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
   // readOnly=true, destructive=false, openWorld=false.
   const privateReadTools = [
     "Get-Account-Details",
+    "List-Email-Accounts",
+    "List-Sequence-Follow-Ups",
+    "Get-Sequence-Stats",
     "List-Leads",
     "Get-Lead",
     "Lead-Exists",
     "List-Leads-Lists",
     "Get-Leads-List",
+    "List-Company-Lists",
+    "Get-Company-List",
+    "List-Company-List-Folders",
+    "List-Connected-Apps",
+    "Get-Connected-App",
     "List-Custom-Attributes",
     "Get-Custom-Attribute",
     "List-Campaigns",
@@ -213,6 +242,12 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Create-Lead-If-Missing",
     "Save-Company",
     "Create-Leads-List",
+    "Create-Company-List",
+    "Favorite-Company-List",
+    "Unfavorite-Company-List",
+    "Add-Company-To-List",
+    "Remove-Company-From-List",
+    "Create-Company-List-Folder",
     "Create-Custom-Attribute",
   ]
 
@@ -234,6 +269,10 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Update-Leads-List",
     "Delete-Leads-List",
     "Merge-Leads-Lists",
+    "Update-Company-List",
+    "Delete-Company-List",
+    "Update-Company-List-Folder",
+    "Delete-Company-List-Folder",
     "Update-Custom-Attribute",
     "Delete-Custom-Attribute",
   ]
@@ -242,6 +281,35 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     const tool = registeredTools.get(name)
     expect(tool).toBeDefined()
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
+  })
+
+  // Pause-Sequence: WRITE_ANNOTATIONS — reversible toggle that touches the
+  // outbound delivery surface (stops sending), so openWorld=true but not
+  // destructive (resume re-enables sending).
+  it("tool 'Pause-Sequence' has write annotations (openWorld=true)", () => {
+    const tool = registeredTools.get("Pause-Sequence")
+    expect(tool).toBeDefined()
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
+  })
+
+  // Resume-Sequence: WRITE_ANNOTATIONS — reversible toggle that re-enables the
+  // outbound delivery surface (starts sending), so openWorld=true but not
+  // destructive (pause stops sending again).
+  it("tool 'Resume-Sequence' has write annotations (openWorld=true)", () => {
+    const tool = registeredTools.get("Resume-Sequence")
+    expect(tool).toBeDefined()
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
+  })
+
+  // Archive-Sequence: DESTRUCTIVE_ANNOTATIONS — archiving is IRREVERSIBLE via the
+  // API (resume rejects archived sequences with sequence_not_active, and there is
+  // no un-archive endpoint), so destructiveHint=true makes the host confirm before
+  // archiving. openWorld stays true (touches the outbound delivery surface). Codex
+  // review, PR #12958.
+  it("tool 'Archive-Sequence' has destructive annotations (irreversible: no un-archive)", () => {
+    const tool = registeredTools.get("Archive-Sequence")
+    expect(tool).toBeDefined()
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true })
   })
 
   // Add-Campaign-Recipients: WRITE_ANNOTATIONS (unchanged) — affects active/
@@ -860,6 +928,2025 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
   // "tool annotations" describe block above; no need to duplicate here.
 })
 
+// HUN-18635 / Group 01: List-Email-Accounts. GET /v2/email_accounts returns the
+// user's connected sending inboxes with a `sending_status` per account. No 422
+// path (read-only, no request body); 401 surfaces as the typed error envelope.
+describe("List-Email-Accounts (Group 01)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("calls GET /email_accounts with no params when none supplied", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 20, offset: 0 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Email-Accounts")!.handler
+    await handler({})
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/email_accounts", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("forwards limit and offset as query params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 2, offset: 4 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Email-Accounts")!.handler
+    await handler({ limit: 2, offset: 4 })
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/email_accounts?offset=4&limit=2")
+  })
+
+  it("returns the email accounts list with sending_status in structuredContent", async () => {
+    const mockData = {
+      data: [
+        {
+          id: 7,
+          email: "ops@example.com",
+          first_name: "Ada",
+          last_name: "Lovelace",
+          sending_status: "paused",
+          daily_limit: 50,
+          provider: "gmail",
+        },
+      ],
+      meta: { total: 1, limit: 20, offset: 0 },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Email-Accounts")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { sending_status: string }[]; meta: { total: number } }
+    expect(structured.data[0].sending_status).toBe("paused")
+    expect(structured.meta.total).toBe(1)
+  })
+
+  it("surfaces a 401 as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: { get: () => null },
+        text: () => Promise.resolve(JSON.stringify({ errors: [{ id: "unauthorized", details: "Invalid API key." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Email-Accounts")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toBe("Invalid API key.")
+  })
+})
+
+// HUN-18641 / Group 02: List-Sequence-Follow-Ups. GET
+// /v2/sequences/:sequence_id/follow_ups returns the follow-up steps of a
+// sequence ordered by (step ASC, variant ASC). Read-only (no request body),
+// so no 422 path; 404 surfaces when the sequence does not exist or belongs to
+// another team; 400 pagination_error surfaces on bad offset/limit.
+describe("List-Sequence-Follow-Ups (Group 02)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("calls GET /sequences/:id/follow_ups with no pagination params when none supplied", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { follow_ups: [] }, meta: { limit: 20, offset: 0 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    await handler({ sequence_id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/follow_ups", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("forwards limit and offset as query params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { follow_ups: [] }, meta: { limit: 5, offset: 10 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    await handler({ sequence_id: 7, limit: 5, offset: 10 })
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/sequences/7/follow_ups?offset=10&limit=5")
+  })
+
+  it("returns the follow-up steps with step ordering in structuredContent", async () => {
+    const mockData = {
+      data: {
+        follow_ups: [
+          {
+            id: 1,
+            step: 0,
+            wait_days: 0,
+            message_format: "html",
+            messages_sent: 12,
+            subject: "Intro",
+            body: "Hello there",
+            variant: null,
+          },
+          {
+            id: 2,
+            step: 1,
+            wait_days: 3,
+            message_format: "text",
+            messages_sent: 4,
+            // The jbuilder emits `display_subject`, which resolves inheritance
+            // to a (possibly empty) string and never returns nil. `null` here
+            // only exercises the defensive `nullableString()` cushion.
+            subject: null,
+            body: "Following up",
+            variant: "A",
+          },
+        ],
+      },
+      meta: { limit: 20, offset: 0 },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { follow_ups: { step: number; subject: string | null; variant: string | null }[] }
+      meta: { limit: number; offset: number }
+    }
+    expect(structured.data.follow_ups[0].step).toBe(0)
+    expect(structured.data.follow_ups[1].subject).toBeNull()
+    expect(structured.data.follow_ups[1].variant).toBe("A")
+    expect(structured.meta.limit).toBe(20)
+  })
+
+  it("surfaces a legacy follow-up with a null message_format without dropping the list", async () => {
+    // `follow_ups.message_format` is a nullable varchar with no default and the
+    // jbuilder emits the raw column value, so an un-migrated row can serialize
+    // `message_format: null`. The output schema must admit it (rather than fail
+    // validation and hide the whole sequence's follow-ups from the agent).
+    const mockData = {
+      data: {
+        follow_ups: [
+          {
+            id: 1,
+            step: 0,
+            wait_days: 0,
+            message_format: null,
+            messages_sent: 12,
+            subject: "Intro",
+            body: "Hello there",
+            variant: null,
+          },
+        ],
+      },
+      meta: { limit: 20, offset: 0 },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { follow_ups: { message_format: string | null }[] }
+    }
+    expect(structured.data.follow_ups[0].message_format).toBeNull()
+  })
+
+  it("surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This sequence does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    const result = await handler({ sequence_id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This sequence does not exist.")
+  })
+
+  it("surfaces a 400 pagination_error as the typed error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "pagination_error", details: "The parameter 'limit' should range between 1 and 100." }],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
+    const result = await handler({ sequence_id: 7, limit: 999 })
+
+    expect(result.isError).toBe(true)
+    // A 400 is not specifically mapped, so it falls through to the generic
+    // `validation` code (no `field` hint — that is reserved for 402/422).
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("validation")
+    expect(err.message).toBe("The parameter 'limit' should range between 1 and 100.")
+  })
+})
+
+// HUN-18647 / Group 03: Pause-Sequence. POST /v2/sequences/:sequence_id/pause
+// pauses a started, non-archived sequence so it stops sending. The controller
+// renders an inline `{ data: { id, paused } }` body (not a jbuilder, not an
+// empty ack). 422 sequence_not_active surfaces for a draft or archived
+// sequence; 404 for a sequence that does not exist or belongs to another user
+// (owner-only endpoint). Pausing an already-paused sequence is idempotent.
+describe("Pause-Sequence (Group 03)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("POSTs /sequences/:id/pause with no body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 7, paused: true } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Pause-Sequence")!.handler
+    await handler({ sequence_id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/pause", {
+      method: "POST",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("returns the paused state in structuredContent on success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 7, paused: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Pause-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; paused: boolean } }
+    expect(structured.data.id).toBe(7)
+    expect(structured.data.paused).toBe(true)
+  })
+
+  it("is idempotent: pausing an already-paused sequence still returns paused: true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 7, paused: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Pause-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { paused: boolean } }
+    expect(structured.data.paused).toBe(true)
+  })
+
+  it("surfaces a 422 sequence_not_active (draft/archived) as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "sequence_not_active",
+                  code: 422,
+                  details: "This sequence is not active. Only started, non-archived sequences can be paused.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Pause-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("sequence_not_active")
+    expect(err.message).toContain("not active")
+  })
+
+  it("surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This sequence does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Pause-Sequence")!.handler
+    const result = await handler({ sequence_id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This sequence does not exist.")
+  })
+})
+
+// HUN-18648 / Group 04: Resume-Sequence. DELETE /v2/sequences/:sequence_id/pause
+// resumes a paused sequence so it starts sending again. The controller renders
+// an inline `{ data: { message } }` body on both the resume path ("Sequence
+// resumed.") and the not-paused no-op ("Sequence is not paused."). Resuming runs
+// the full validation pipeline, so a 422 surfaces for an archived sequence
+// (sequence_not_active) or a config that fails validation — disconnected email
+// account or empty schedule (validation_failed). 404 for a sequence that does
+// not exist or belongs to another user (owner-only endpoint).
+describe("Resume-Sequence (Group 04)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("DELETEs /sequences/:id/pause with no body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { message: "Sequence resumed." } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    await handler({ sequence_id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/pause", {
+      method: "DELETE",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("returns the resume message in structuredContent on success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { message: "Sequence resumed." } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { message: string } }
+    expect(structured.data.message).toBe("Sequence resumed.")
+  })
+
+  it("returns the not-paused no-op message on a sequence that is not paused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { message: "Sequence is not paused." } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { message: string } }
+    expect(structured.data.message).toBe("Sequence is not paused.")
+  })
+
+  it("surfaces a 422 sequence_not_active (archived) as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "sequence_not_active",
+                  code: 422,
+                  details: "This sequence is archived. Archived sequences cannot be resumed.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("sequence_not_active")
+    expect(err.message).toContain("archived")
+  })
+
+  it("surfaces a 422 validation_failed (disconnected email account) as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "validation_failed",
+                  code: 422,
+                  details: "Email account must be connected.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+    expect(err.message).toContain("Email account")
+  })
+
+  it("surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This sequence does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Resume-Sequence")!.handler
+    const result = await handler({ sequence_id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This sequence does not exist.")
+  })
+})
+
+// HUN-18649 / Group 05: Archive-Sequence. POST /v2/sequences/:sequence_id/archive
+// archives a started sequence (active or paused) so it stops sending and is
+// filed away. The controller renders an inline `{ data: { id, archived } }` body
+// (not a jbuilder, not an empty ack). 422 sequence_not_started surfaces for a
+// draft (never-started) sequence; 404 for a sequence that does not exist or
+// belongs to another user (owner-only endpoint). Archiving an already-archived
+// sequence is idempotent.
+describe("Archive-Sequence (Group 05)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("POSTs /sequences/:id/archive with no body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 7, archived: true } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    await handler({ sequence_id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/archive", {
+      method: "POST",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("returns the archived state in structuredContent on an active sequence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 123, archived: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    const result = await handler({ sequence_id: 123 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; archived: boolean } }
+    expect(structured.data.id).toBe(123)
+    expect(structured.data.archived).toBe(true)
+  })
+
+  it("archives a paused (started) sequence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 8, archived: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    const result = await handler({ sequence_id: 8 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { archived: boolean } }
+    expect(structured.data.archived).toBe(true)
+  })
+
+  it("is idempotent: archiving an already-archived sequence still returns archived: true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 123, archived: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    const result = await handler({ sequence_id: 123 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { archived: boolean } }
+    expect(structured.data.archived).toBe(true)
+  })
+
+  it("surfaces a 422 sequence_not_started (draft) as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "sequence_not_started",
+                  code: 422,
+                  details: "This sequence is not started. Only started sequences (active or paused) can be archived.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("sequence_not_started")
+    expect(err.message).toContain("not started")
+  })
+
+  it("surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This sequence does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Archive-Sequence")!.handler
+    const result = await handler({ sequence_id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This sequence does not exist.")
+  })
+})
+
+// HUN-18650 / Group 06: Get-Sequence-Stats. GET /v2/sequences/:sequence_id/stats
+// returns aggregated stats (recipients_count, sent, delivered, opened, clicked,
+// replied, bounced, unsubscribed_recipients) plus calculated float rates
+// (open_rate, click_rate, reply_rate, bounce_rate, unsubscribed_recipients_rate
+// in the 0.0-1.0 range) and a per-follow-up breakdown ordered by (step ASC,
+// variant ASC). Read-only (no request body), so no 422 path; 404 surfaces when
+// the sequence does not exist or belongs to another team (Pundit scope).
+describe("Get-Sequence-Stats (Group 06)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("calls GET /sequences/:id/stats with no params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 7, name: "Q3 outreach", follow_ups: [] } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Get-Sequence-Stats")!.handler
+    await handler({ sequence_id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/stats", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("returns the aggregated stats and per-follow-up breakdown in structuredContent", async () => {
+    const mockData = {
+      data: {
+        id: 7,
+        name: "Q3 outreach",
+        recipients_count: 100,
+        sent: 250,
+        delivered: 240,
+        opened: 120,
+        clicked: 30,
+        replied: 12,
+        bounced: 10,
+        unsubscribed_recipients: 5,
+        open_rate: 0.5,
+        click_rate: 0.125,
+        reply_rate: 0.05,
+        bounce_rate: 0.04,
+        unsubscribed_recipients_rate: 0.05,
+        follow_ups: [
+          {
+            id: 1,
+            step: 0,
+            variant: null,
+            messages_sent: 100,
+            delivered: 96,
+            opened: 60,
+            clicked: 18,
+            replied: 8,
+            bounced: 4,
+            unsubscribed: 2,
+            open_rate: 0.625,
+            click_rate: 0.1875,
+            reply_rate: 0.0833,
+            bounce_rate: 0.04,
+            unsubscribe_rate: 0.0208,
+          },
+          {
+            id: 2,
+            step: 1,
+            variant: "A",
+            messages_sent: 75,
+            delivered: 72,
+            opened: 30,
+            clicked: 6,
+            replied: 2,
+            bounced: 3,
+            unsubscribed: 1,
+            open_rate: 0.4167,
+            click_rate: 0.0833,
+            reply_rate: 0.0278,
+            bounce_rate: 0.04,
+            unsubscribe_rate: 0.0139,
+          },
+        ],
+      },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Sequence-Stats")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: {
+        id: number
+        recipients_count: number
+        open_rate: number
+        follow_ups: { step: number; variant: string | null; unsubscribe_rate: number }[]
+      }
+    }
+    expect(structured.data.id).toBe(7)
+    expect(structured.data.recipients_count).toBe(100)
+    expect(structured.data.open_rate).toBe(0.5)
+    expect(structured.data.follow_ups[0].variant).toBeNull()
+    expect(structured.data.follow_ups[1].variant).toBe("A")
+    expect(structured.data.follow_ups[1].step).toBe(1)
+  })
+
+  it("handles a sequence with zero activity (rates default to 0)", async () => {
+    const mockData = {
+      data: {
+        id: 7,
+        name: "Draft sequence",
+        recipients_count: 0,
+        sent: 0,
+        delivered: 0,
+        opened: 0,
+        clicked: 0,
+        replied: 0,
+        bounced: 0,
+        unsubscribed_recipients: 0,
+        open_rate: 0,
+        click_rate: 0,
+        reply_rate: 0,
+        bounce_rate: 0,
+        unsubscribed_recipients_rate: 0,
+        follow_ups: [],
+      },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Sequence-Stats")!.handler
+    const result = await handler({ sequence_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { open_rate: number; follow_ups: unknown[] } }
+    expect(structured.data.open_rate).toBe(0)
+    expect(structured.data.follow_ups).toEqual([])
+  })
+
+  it("surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This sequence does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Sequence-Stats")!.handler
+    const result = await handler({ sequence_id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This sequence does not exist.")
+  })
+})
+
+// HUN-18601 / Group 07: Company-Lists CRUD. The resource is mounted at the
+// hyphenated path /v2/company-lists (the controller/model are company_lists).
+// List/Get render `{ data, meta }` bodies; Create renders a single-list body
+// (201); Update + Delete render no body (Update 204; Delete 204 for empty/
+// dynamic lists, 202 for a static list with companies that destroys async via
+// Lead::CompanyList::DestroyJob), so callHunterApi synthesises a mutationAck.
+// 404 surfaces when a list does not exist or belongs to another team; 422
+// (validation_failed) on Create/Update for a duplicate/empty name or invalid
+// dynamic filters.
+describe("Company-Lists CRUD (Group 07)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("List-Company-Lists sends an explicit default limit/offset when none supplied (avoids the controller's limit(0) empty page)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Company-Lists")!.handler
+    await handler({})
+
+    // The Rails controller does `.limit(params[:limit].to_i)` with no default, so an
+    // omitted limit would request limit(0) → empty page. The tool sends 20/0 instead.
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists?offset=0&limit=20")
+  })
+
+  it("List-Company-Lists forwards limit and offset as query params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Company-Lists")!.handler
+    await handler({ limit: 5, offset: 10 })
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists?offset=10&limit=5")
+  })
+
+  it("List-Company-Lists returns static + dynamic lists with type and filters in structuredContent", async () => {
+    const mockData = {
+      data: {
+        company_lists: [
+          { id: 2, name: "SaaS prospects", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: null, created_at: "2026-05-01T00:00:00Z" },
+          { id: 1, name: "Manual picks", type: "static", company_list_folder_id: 9, created_at: "2026-04-01T00:00:00Z" },
+        ],
+      },
+      meta: { total: 2, params: { limit: 20, offset: 0 } },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Company-Lists")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { company_lists: { id: number; type: string; filters?: Record<string, unknown>; company_list_folder_id: number | null }[] }
+      meta: { total: number }
+    }
+    expect(structured.data.company_lists[0].type).toBe("dynamic")
+    expect(structured.data.company_lists[0].filters).toEqual({ industry: "software" })
+    expect(structured.data.company_lists[1].type).toBe("static")
+    expect(structured.data.company_lists[1].company_list_folder_id).toBe(9)
+    expect(structured.meta.total).toBe(2)
+  })
+
+  it("Get-Company-List calls GET /company-lists/:id and returns companies_count", async () => {
+    const mockData = {
+      data: { id: 7, name: "Targets", type: "static", company_list_folder_id: null, created_at: "2026-04-01T00:00:00Z", companies_count: 42 },
+    }
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockData)),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Get-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { companies_count: number } }
+    expect(structured.data.companies_count).toBe(42)
+  })
+
+  it("Get-Company-List surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Company-List")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+
+  it("Create-Company-List POSTs a static list with just a name", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { id: 11, name: "New list", type: "static", company_list_folder_id: null, created_at: "2026-06-01T00:00:00Z", companies_count: 0 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Create-Company-List")!.handler
+    const result = await handler({ name: "New list" })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists")
+    expect(opts.method).toBe("POST")
+    expect(opts.body).toBe("name=New+list")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; type: string } }
+    expect(structured.data.id).toBe(11)
+    expect(structured.data.type).toBe("static")
+  })
+
+  it("Create-Company-List POSTs a dynamic list with type + nested filters", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { id: 12, name: "Dynamic", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: null, created_at: "2026-06-01T00:00:00Z", companies_count: 0 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Create-Company-List")!.handler
+    await handler({ name: "Dynamic", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: 3 })
+
+    const [, opts] = mockFetch.mock.calls[0]
+    expect(opts.method).toBe("POST")
+    expect(opts.body).toContain("name=Dynamic")
+    expect(opts.body).toContain("type=dynamic")
+    expect(opts.body).toContain("filters%5Bindustry%5D=software")
+    expect(opts.body).toContain("company_list_folder_id=3")
+  })
+
+  it("Create-Company-List surfaces a 422 validation_failed as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Name has already been taken." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Create-Company-List")!.handler
+    const result = await handler({ name: "Duplicate" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+    expect(err.message).toContain("already been taken")
+  })
+
+  it("Update-Company-List PUTs the rename and returns the mutationAck on a 204", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Update-Company-List")!.handler
+    const result = await handler({ id: 7, name: "Renamed" })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/7")
+    expect(opts.method).toBe("PUT")
+    expect(opts.body).toBe("name=Renamed")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; ok: boolean; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.ok).toBe(true)
+    expect(structured.status).toBe(204)
+  })
+
+  it("Update-Company-List sends a blank company_list_folder_id when null is passed (clears the folder)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Update-Company-List")!.handler
+    const result = await handler({ id: 7, company_list_folder_id: null })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/7")
+    expect(opts.method).toBe("PUT")
+    // Blank value → Rails coerces it to nil on the optional folder association (unfile).
+    expect(opts.body).toBe("company_list_folder_id=")
+    expect(result.isError).toBeUndefined()
+  })
+
+  it("Update-Company-List surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Update-Company-List")!.handler
+    const result = await handler({ id: 999, name: "Renamed" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+
+  it("Update-Company-List surfaces a 422 validation_failed as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Name can't be blank." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Update-Company-List")!.handler
+    const result = await handler({ id: 7, name: "x" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+  })
+
+  it("Delete-Company-List returns the mutationAck on a 204 (empty/dynamic list)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Delete-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/7")
+    expect(opts.method).toBe("DELETE")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.status).toBe(204)
+  })
+
+  it("Delete-Company-List returns the mutationAck on a 202 (async static-list destroy)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Delete-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.status).toBe(202)
+  })
+
+  it("Delete-Company-List surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Delete-Company-List")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+})
+
+// HUN-18521 / Group 08: Company-list folders CRUD. Mounted at the hyphenated
+// collection path /v2/company-lists/folders (the controller/model are
+// company_lists/folders). List renders a `{ data: { folders }, meta }` body;
+// Create renders a single-folder `{ data: {...} }` body (201); Update + Delete
+// render no body (204 No Content), so callHunterApi synthesises a mutationAck.
+// 404 surfaces when a folder does not exist; 403 (forbidden) on Update/Delete
+// when the caller is not the owner / a team admin / the team owner; 422
+// (validation_failed) on Create/Update for a missing/duplicate name or an
+// invalid/missing color.
+describe("Company-List Folders CRUD (Group 08)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("List-Company-List-Folders sends an explicit default limit/offset when none supplied (keeps meta.params.limit accurate)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Company-List-Folders")!.handler
+    await handler({})
+
+    // The folders jbuilder echoes the raw params[:limit] in meta; sending explicit
+    // 20/0 keeps the echoed pagination consistent with the page actually returned.
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/folders?offset=0&limit=20")
+  })
+
+  it("List-Company-List-Folders forwards limit and offset as query params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Company-List-Folders")!.handler
+    await handler({ limit: 5, offset: 10 })
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/folders?offset=10&limit=5")
+  })
+
+  it("List-Company-List-Folders returns folders with color and counts in structuredContent", async () => {
+    const mockData = {
+      data: {
+        folders: [
+          { id: 2, name: "Prospects", color: "EF4444", company_lists_count: 3, created_at: "2026-05-01T00:00:00Z" },
+          { id: 1, name: "Archive", color: "374151", company_lists_count: 0, created_at: "2026-04-01T00:00:00Z" },
+        ],
+      },
+      meta: { total: 2, params: { limit: 20, offset: 0 } },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Company-List-Folders")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { folders: { id: number; name: string; color: string; company_lists_count: number }[] }
+      meta: { total: number }
+    }
+    expect(structured.data.folders[0].color).toBe("EF4444")
+    expect(structured.data.folders[0].company_lists_count).toBe(3)
+    expect(structured.data.folders[1].name).toBe("Archive")
+    expect(structured.meta.total).toBe(2)
+  })
+
+  it("Create-Company-List-Folder POSTs name + color and returns the created folder", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { id: 11, name: "My Folder", color: "374151", company_lists_count: 0, created_at: "2026-06-01T00:00:00Z" } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Create-Company-List-Folder")!.handler
+    const result = await handler({ name: "My Folder", color: "374151" })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/folders")
+    expect(opts.method).toBe("POST")
+    expect(opts.body).toContain("name=My+Folder")
+    expect(opts.body).toContain("color=374151")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; color: string } }
+    expect(structured.data.id).toBe(11)
+    expect(structured.data.color).toBe("374151")
+  })
+
+  it("Create-Company-List-Folder surfaces a 422 validation_failed (missing color) as invalid_input", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color can't be blank." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Create-Company-List-Folder")!.handler
+    const result = await handler({ name: "My Folder", color: "" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+    expect(err.message).toContain("Color")
+  })
+
+  it("Update-Company-List-Folder PUTs the changes and returns the mutationAck on a 204", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Update-Company-List-Folder")!.handler
+    const result = await handler({ id: 7, name: "Renamed", color: "EF4444" })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/folders/7")
+    expect(opts.method).toBe("PUT")
+    expect(opts.body).toContain("name=Renamed")
+    expect(opts.body).toContain("color=EF4444")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; ok: boolean; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.ok).toBe(true)
+    expect(structured.status).toBe(204)
+  })
+
+  it("Update-Company-List-Folder surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This folder does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Update-Company-List-Folder")!.handler
+    const result = await handler({ id: 999, name: "Renamed" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This folder does not exist.")
+  })
+
+  it("Update-Company-List-Folder surfaces a 403 forbidden as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not allowed to update this folder." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Update-Company-List-Folder")!.handler
+    const result = await handler({ id: 7, name: "Renamed" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toContain("not allowed")
+  })
+
+  it("Update-Company-List-Folder surfaces a 422 validation_failed (invalid color) as invalid_input", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color is invalid." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Update-Company-List-Folder")!.handler
+    const result = await handler({ id: 7, color: "INVALID" })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+  })
+
+  it("Delete-Company-List-Folder DELETEs and returns the mutationAck on a 204", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Delete-Company-List-Folder")!.handler
+    const result = await handler({ id: 7 })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/folders/7")
+    expect(opts.method).toBe("DELETE")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.status).toBe(204)
+  })
+
+  it("Delete-Company-List-Folder surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This folder does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Delete-Company-List-Folder")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This folder does not exist.")
+  })
+
+  it("Delete-Company-List-Folder surfaces a 403 forbidden as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not allowed to delete this folder." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Delete-Company-List-Folder")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toContain("not allowed")
+  })
+
+  // `color` is a closed enum on Create/Update (the model validates
+  // `inclusion: { in: VALID_COLORS }`), so the inputSchema enumerates the 14
+  // allowed Hunter folder colors. An invalid color is rejected at the schema
+  // level — agent parity with the UI's swatch picker, before the network call.
+  it("Create-Company-List-Folder input schema accepts an allowed color and rejects an arbitrary hex", () => {
+    const schema = z.object(registeredTools.get("Create-Company-List-Folder")!.inputSchema as Record<string, z.ZodType>)
+    expect(schema.safeParse({ name: "My Folder", color: "374151" }).success).toBe(true)
+    expect(schema.safeParse({ name: "My Folder", color: "EF4444" }).success).toBe(true)
+    expect(schema.safeParse({ name: "My Folder", color: "FF0000" }).success).toBe(false)
+    expect(schema.safeParse({ name: "My Folder", color: "123456" }).success).toBe(false)
+    expect(schema.safeParse({ name: "My Folder", color: "" }).success).toBe(false)
+  })
+
+  it("Update-Company-List-Folder input schema rejects an arbitrary hex but allows the color to be omitted", () => {
+    const schema = z.object(registeredTools.get("Update-Company-List-Folder")!.inputSchema as Record<string, z.ZodType>)
+    expect(schema.safeParse({ id: 7, color: "EF4444" }).success).toBe(true)
+    expect(schema.safeParse({ id: 7, name: "Renamed" }).success).toBe(true)
+    expect(schema.safeParse({ id: 7, color: "INVALID" }).success).toBe(false)
+    expect(schema.safeParse({ id: 7, color: "FF0000" }).success).toBe(false)
+  })
+})
+
+// HUN-18527 / Group 09: Company-list favorite / unfavorite. Mounted at the
+// hyphenated member path /v2/company-lists/:id/favorite (the controller is
+// company_lists/favorites). Both verbs render an inline `{ data: { id,
+// favorited } }` body (NOT an empty 204 ack): POST favorite → 201 with
+// `favorited: true`; DELETE unfavorite → 200 with `favorited: false`. Both are
+// idempotent (find_or_create_by / find_by&.destroy!), so no 422 path. 404
+// surfaces when the list does not exist or belongs to another team.
+describe("Company-List Favorite/Unfavorite (Group 09)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("Favorite-Company-List POSTs /company-lists/:id/favorite with no body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 7, favorited: true } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Favorite-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7/favorite", {
+      method: "POST",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; favorited: boolean } }
+    expect(structured.data.id).toBe(7)
+    expect(structured.data.favorited).toBe(true)
+  })
+
+  it("Favorite-Company-List is idempotent: favoriting an already-favorited list still returns favorited: true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 7, favorited: true } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Favorite-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { favorited: boolean } }
+    expect(structured.data.favorited).toBe(true)
+  })
+
+  it("Favorite-Company-List surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Favorite-Company-List")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+
+  it("Unfavorite-Company-List DELETEs /company-lists/:id/favorite with no body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 7, favorited: false } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Unfavorite-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7/favorite", {
+      method: "DELETE",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; favorited: boolean } }
+    expect(structured.data.id).toBe(7)
+    expect(structured.data.favorited).toBe(false)
+  })
+
+  it("Unfavorite-Company-List is idempotent: unfavoriting a non-favorited list still returns favorited: false", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 7, favorited: false } })),
+      }),
+    )
+
+    const handler = registeredTools.get("Unfavorite-Company-List")!.handler
+    const result = await handler({ id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { favorited: boolean } }
+    expect(structured.data.favorited).toBe(false)
+  })
+
+  it("Unfavorite-Company-List surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Unfavorite-Company-List")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+})
+
+// HUN-18528 / Group 10: Company-list membership. Mounted at the hyphenated
+// member path /v2/company-lists/:company_list_id/companies (controller is
+// company_lists/companies). Add (POST) renders the added company via
+// create.jbuilder → 201 `{ data: { id, domain, created_at } }`; Remove (DELETE
+// /companies/:company_id) responds `head :no_content` (204 empty body → ack).
+// Both operate on static lists only (dynamic lists 404). Add can surface a 400
+// (missing company_id), 404 (list/company not found, other team, dynamic), or
+// 422 validation_failed (company already in the list). Remove surfaces 404
+// (list/company not found, other team, dynamic, or company not in the list).
+describe("Company-List Membership (Group 10)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("Add-Company-To-List POSTs /company-lists/:id/companies with the company_id form body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 42, domain: "example.com", created_at: "2026-06-02" } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Add-Company-To-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/7/companies")
+    expect(opts.method).toBe("POST")
+    expect(opts.headers).toEqual({ "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "Content-Type": "application/x-www-form-urlencoded" })
+    expect(opts.body).toBe("company_id=42")
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { id: number; domain: string; created_at: string } }
+    expect(structured.data.id).toBe(42)
+    expect(structured.data.domain).toBe("example.com")
+  })
+
+  it("Add-Company-To-List surfaces a 400 wrong_params (missing company_id) as the typed validation envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "wrong_params", code: 400, details: "You are missing the company_id parameter" }],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Add-Company-To-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    // A 400 is not specifically mapped, so it falls through to the generic
+    // `validation` code (no `field` hint — that is reserved for 402/422).
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("validation")
+    expect(err.message).toBe("You are missing the company_id parameter")
+  })
+
+  it("Add-Company-To-List surfaces a 422 validation_failed (already in list) as the typed invalid_input envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "validation_failed", code: 422, details: "Company has already been taken." }],
+            }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Add-Company-To-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("validation_failed")
+    expect(err.message).toBe("Company has already been taken.")
+  })
+
+  it("Add-Company-To-List surfaces a 404 (dynamic list / not found) as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Add-Company-To-List")!.handler
+    const result = await handler({ company_list_id: 999, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company list does not exist.")
+  })
+
+  it("Remove-Company-From-List DELETEs /company-lists/:id/companies/:company_id and returns the mutationAck on a 204", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(""),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Remove-Company-From-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/company-lists/7/companies/42")
+    expect(opts.method).toBe("DELETE")
+    expect(opts.body).toBeUndefined()
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { kind: string; status: number }
+    expect(structured.kind).toBe("ack")
+    expect(structured.status).toBe(204)
+  })
+
+  it("Remove-Company-From-List surfaces a 404 (company not in list) as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company is not in this company list." }] }),
+          ),
+      }),
+    )
+
+    const handler = registeredTools.get("Remove-Company-From-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This company is not in this company list.")
+  })
+
+  // Both verbs `authorize @company_list, :update?` (companies_controller.rb), so a
+  // policy denial returns 403 `{ id: "forbidden", code: 403 }` — mapHunterError
+  // folds 403 into the `unauthorized` envelope. Lock that surfaced mapping.
+  it("Add-Company-To-List surfaces a 403 (policy denied) as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Add-Company-To-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toBe("You are not authorized.")
+  })
+
+  it("Remove-Company-From-List surfaces a 403 (policy denied) as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Remove-Company-From-List")!.handler
+    const result = await handler({ company_list_id: 7, company_id: 42 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toBe("You are not authorized.")
+  })
+})
+
+// HUN-18654 / Group 11: Connected apps (read-only). GET /v2/connected_apps lists
+// the user's third-party integrations (scoped to the team via policy_scope) with
+// `meta: { total, limit, offset }`; GET /v2/connected_apps/:id renders a single
+// app plus its `attribute_mappings`. Both are read-only (no request body), so no
+// 422 path. List returns an empty array when nothing is connected; show surfaces
+// a 404 when the app does not exist or belongs to another team. 401 surfaces as
+// the typed error envelope at the base-controller auth layer.
+describe("Connected Apps (Group 11)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("List-Connected-Apps calls GET /connected_apps with no params when none supplied", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 20, offset: 0 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Connected-Apps")!.handler
+    await handler({})
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected_apps", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+  })
+
+  it("List-Connected-Apps forwards limit and offset as query params", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 5, offset: 10 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("List-Connected-Apps")!.handler
+    await handler({ limit: 5, offset: 10 })
+
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/connected_apps?offset=10&limit=5")
+  })
+
+  it("List-Connected-Apps returns the apps list with a null name/category in structuredContent", async () => {
+    const mockData = {
+      data: [
+        {
+          id: 3,
+          provider: "gsheets",
+          name: "Google Sheets",
+          category: "spreadsheet",
+          provider_email: null,
+          connected_at: "2026-01-02T03:04:05.000Z",
+          updated_at: "2026-02-03T04:05:06.000Z",
+        },
+        {
+          id: 4,
+          provider: "smtp_imap",
+          // Provider not in INTERNAL_APPS → name falls back to provider_name,
+          // category is null.
+          name: null,
+          category: null,
+          provider_email: "ops@example.com",
+          connected_at: "2026-03-04T05:06:07.000Z",
+          updated_at: "2026-03-04T05:06:07.000Z",
+        },
+      ],
+      meta: { total: 2, limit: 20, offset: 0 },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Connected-Apps")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { id: number; provider: string; name: string | null; category: string | null }[]
+      meta: { total: number }
+    }
+    expect(structured.data[0].name).toBe("Google Sheets")
+    expect(structured.data[1].name).toBeNull()
+    expect(structured.data[1].category).toBeNull()
+    expect(structured.meta.total).toBe(2)
+  })
+
+  it("List-Connected-Apps surfaces a 401 as the typed unauthorized error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: { get: () => null },
+        text: () => Promise.resolve(JSON.stringify({ errors: [{ id: "unauthorized", details: "Invalid API key." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("List-Connected-Apps")!.handler
+    const result = await handler({})
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("unauthorized")
+    expect(err.message).toBe("Invalid API key.")
+  })
+
+  it("Get-Connected-App calls GET /connected_apps/:id and returns attribute_mappings in structuredContent", async () => {
+    const mockData = {
+      data: {
+        id: 3,
+        provider: "hubspot",
+        name: "HubSpot",
+        category: "crm",
+        provider_email: "ops@hubspot.com",
+        connected_at: "2026-01-02T03:04:05.000Z",
+        updated_at: "2026-02-03T04:05:06.000Z",
+        attribute_mappings: [
+          { target_field: "email", source_field: "email" },
+          { target_field: "company", source_field: "company_name" },
+        ],
+      },
+    }
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockData)),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const handler = registeredTools.get("Get-Connected-App")!.handler
+    const result = await handler({ id: 3 })
+
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected_apps/3", {
+      method: "GET",
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      body: undefined,
+    })
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as {
+      data: { id: number; attribute_mappings: { target_field: string; source_field: string }[] }
+    }
+    expect(structured.data.id).toBe(3)
+    expect(structured.data.attribute_mappings).toHaveLength(2)
+    expect(structured.data.attribute_mappings[0]).toEqual({ target_field: "email", source_field: "email" })
+  })
+
+  it("Get-Connected-App tolerates an empty attribute_mappings array", async () => {
+    const mockData = {
+      data: {
+        id: 9,
+        provider: "smtp_imap",
+        name: null,
+        category: null,
+        provider_email: "ops@example.com",
+        connected_at: "2026-03-04T05:06:07.000Z",
+        updated_at: "2026-03-04T05:06:07.000Z",
+        attribute_mappings: [],
+      },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockData)),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Connected-App")!.handler
+    const result = await handler({ id: 9 })
+
+    expect(result.isError).toBeUndefined()
+    const structured = result.structuredContent as { data: { attribute_mappings: unknown[] } }
+    expect(structured.data.attribute_mappings).toEqual([])
+  })
+
+  it("Get-Connected-App surfaces a 404 (not found / other team) as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This connected app does not exist." }] })),
+      }),
+    )
+
+    const handler = registeredTools.get("Get-Connected-App")!.handler
+    const result = await handler({ id: 999 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("not_found")
+    expect(err.message).toBe("This connected app does not exist.")
+  })
+})
+
 // HUN-20170: Hunter's 402 response includes an "upgrade your plan or purchase
 // credits" CTA. OpenAI's app guidelines forbid in-ChatGPT purchase/upgrade
 // CTAs (including freemium upsells), so mapHunterError must scrub it before
@@ -1448,5 +3535,65 @@ describe("HUN-20170: model-visible corpus contains no OpenAI-banned phrases", ()
         throw new Error(`capabilities-recovery resource matches banned pattern ${pattern} (${reason})`)
       }
     }
+  })
+})
+
+// HUN-20344 audit follow-up: an outputSchema leaf typed non-nullable while the
+// Rails jbuilder/column can emit `null` makes the MCP SDK output validator
+// reject an otherwise-valid response and the tool call fails. The post-merge
+// audit of the new endpoints found two such leaves; these pin parse-succeeds on
+// null so the bug class can't silently come back:
+//   - Get-Connected-App: attribute_mappings[].target_field / source_field are
+//     NULLABLE columns on attribute_mappings (db/structure.sql), emitted raw.
+//   - List-Email-Accounts: `email` is the nullable `send_email_as` column,
+//     emitted raw. (name/category/provider_email/first_name/last_name were
+//     already nullable.)
+describe("HUN-20344 audit: new-endpoint output schemas admit null for nullable jbuilder fields", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("Get-Connected-App outputSchema accepts null attribute_mappings fields", () => {
+    const tool = registeredTools.get("Get-Connected-App")!
+    const shape = tool.outputSchema as Record<string, z.ZodTypeAny>
+    const schema = z.object(shape).loose()
+    const payload = {
+      data: {
+        id: 7,
+        provider: "smtp_imap",
+        name: null,
+        category: null,
+        provider_email: null,
+        connected_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+        attribute_mappings: [
+          { target_field: null, source_field: null },
+          { target_field: "first_name", source_field: "First Name" },
+        ],
+      },
+    }
+    expect(() => schema.parse(payload)).not.toThrow()
+  })
+
+  it("List-Email-Accounts outputSchema accepts a null email / first_name / last_name", () => {
+    const tool = registeredTools.get("List-Email-Accounts")!
+    const shape = tool.outputSchema as Record<string, z.ZodTypeAny>
+    const schema = z.object(shape).loose()
+    const payload = {
+      data: [
+        {
+          id: 1,
+          email: null,
+          first_name: null,
+          last_name: null,
+          sending_status: "warming",
+          daily_limit: 50,
+          provider: "gmail",
+        },
+      ],
+      meta: { total: 1, limit: 20, offset: 0 },
+    }
+    expect(() => schema.parse(payload)).not.toThrow()
   })
 })

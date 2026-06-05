@@ -273,6 +273,61 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 
 > `List-Campaigns`, `Add-Campaign-Recipients`, and `Start-Campaign` are exercised by Section 1 prompts 4 and 5.
 
+### Email accounts (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| EA1 | `List-Email-Accounts` | `Show me the email accounts connected to my Hunter account and their sending status` | Read-only list of sending accounts: email, name, provider, daily limit, status (active/paused/warming) | ☐ | |
+
+### Sequences (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| SQ1 | `List-Sequence-Follow-Ups` | `Show the follow-up steps of sequence <SEQUENCE_ID>` | Steps ordered by step: subject, body, wait_days, message_format, messages_sent, variant | ☐ | |
+| SQ2 | `Get-Sequence-Stats` | `How is sequence <SEQUENCE_ID> performing?` | recipients/sent/delivered/opened/clicked/replied + rates (0–1) + per-step breakdown | ☐ | |
+| SQ3 | `Pause-Sequence` (write) | `Pause sequence <SEQUENCE_ID>` | Sequence paused (stops sending), reversible. Draft/archived → invalid_input (`sequence_not_active`) | ☐ | |
+| SQ4 | `Resume-Sequence` (write) | `Resume sequence <SEQUENCE_ID>` | Resumed after validation; surfaces invalid_input if the email account is disconnected or the schedule is empty | ☐ | |
+| SQ5 | `Archive-Sequence` (destructive) | `Archive sequence <SEQUENCE_ID>` | Confirmation prompt (irreversible via API); on accept archived and can't be resumed. Draft → invalid_input (`sequence_not_started`) | ☐ | |
+
+> Tip: use a paused/test sequence for SQ3–SQ5. Archiving (SQ5) cannot be undone via the API — use a disposable sequence.
+
+### Company lists (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| CL1 | `List-Company-Lists` | `Show me my Hunter company lists` | Static + dynamic lists with name, type, folder id, created_at | ☐ | |
+| CL2 | `Get-Company-List` | `Get details for company list <LIST_ID>` | One list + companies_count | ☐ | |
+| CL3 | `Create-Company-List` (write) | `Create a company list called "Playbook Targets"` | Creates the list, returns its id | ☐ | |
+| CL4 | `Update-Company-List` (destructive) | `Rename company list <LIST_ID> to "Playbook Renamed", then move it out of its folder` | Rename overwrites (confirm); passing a null folder un-files it (Unfiled) | ☐ | |
+| CL5 | `Delete-Company-List` (destructive) | `Delete company list <DISPOSABLE_LIST_ID>` | Confirmation; on accept removed (202 async if the list still has companies) | ☐ | |
+
+### Company list folders (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| FO1 | `List-Company-List-Folders` | `Show my company-list folders` | Folders with name, color, company_lists_count | ☐ | |
+| FO2 | `Create-Company-List-Folder` (write) | `Create a company-list folder "Playbook" with color 3489F9` | Creates the folder, returns its id | ☐ | |
+| FO3 | `Update-Company-List-Folder` (destructive) | `Rename folder <FOLDER_ID> to "Playbook Renamed"` | Renamed (confirm); 403 if not the owner/team admin | ☐ | |
+| FO4 | `Delete-Company-List-Folder` (destructive) | `Delete folder <FOLDER_ID>` | Confirmation; on accept removed (its lists are un-filed, not deleted) | ☐ | |
+
+### Company list favorites & membership (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| ME1 | `Favorite-Company-List` (write) | `Mark company list <LIST_ID> as a favorite` | List favorited; reversible | ☐ | |
+| ME2 | `Unfavorite-Company-List` (write) | `Remove company list <LIST_ID> from my favorites` | List unfavorited | ☐ | |
+| ME3 | `Add-Company-To-List` (write) | `Add company <COMPANY_ID> to company list <LIST_ID>` | Company added to the static list (returns id, domain). Dynamic list → not_found | ☐ | |
+| ME4 | `Remove-Company-From-List` (write) | `Remove company <COMPANY_ID> from company list <LIST_ID>` | Membership removed (reversible by re-adding) | ☐ | |
+
+### Connected apps (HUN-20196)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| CN1 | `List-Connected-Apps` | `What apps are connected to my Hunter account?` | Read-only list: provider, name, category, provider_email, connected_at | ☐ | |
+| CN2 | `Get-Connected-App` | `Show the field mappings for connected app <APP_ID>` | One app + attribute_mappings (target_field ↔ source_field) | ☐ | |
+
+> These 21 rows exercise the HUN-20196 tools. Use a throwaway list/folder/sequence for the destructive rows (CL4/CL5, FO3/FO4, SQ5) so you don't lose real data.
+
 ---
 
 ## Section 3 — Edge cases & known gotchas
@@ -451,9 +506,9 @@ After completing all sections, fill this in.
 | Section | Total | Pass | Fail | Blocked |
 |---------|-------|------|------|---------|
 | 1 — Marketplace prompts | 5 | | | |
-| 2 — Tool coverage matrix | 26 | | | |
+| 2 — Tool coverage matrix | 47 | | | |
 | 3 — Edge cases | 10 | | | |
-| **Total** | **41** | | | |
+| **Total** | **62** | | | |
 
 **Overall verdict:** ☐ Ready for app review submission ☐ Needs fixes before submission
 
@@ -529,9 +584,226 @@ edit plus the mirrored byte-aligned edit in remote-mcp.
 
 ---
 
+## Section 6 — OpenAI submission form: test-case autofill script
+
+The OpenAI Apps SDK submission form has a **Test cases** section (positive `version.test_cases.*` + `version.negative_test_cases.*` fields). Paste the snippet below into the browser DevTools console **on the submission-form page** to fill every row at once and length-check it. It mirrors the form's field-name scheme and sets values React-safely via `setNativeValue`.
+
+**Before running:** in the form, add **12 positive** test-case rows and **3 negative** rows (the script fills existing inputs — it does not create rows). Substitute `<ANGLE_BRACKET>` placeholders with real test-account values first. Field limits enforced by the script: `description ≤200`, `user_prompt ≤500`, `tools_triggered ≤200`, `expected_output ≤300`. Cases 1–5 cover the original surface; 6–12 cover the HUN-20196 additions (email accounts, sequences, company lists/folders, membership/favorites, connected apps).
+
+```js
+(() => {
+  const DATA = {
+    test_cases: [
+      {
+        description: "Find companies by industry and location",
+        user_prompt: "Using Hunter, find pharmaceutical companies headquartered in the United Kingdom.",
+        tools_triggered: "Find-Companies",
+        expected_output:
+          "A Discover widget/list of matching UK pharmaceutical companies, showing company details and a Hunter link to view the full result set. No leads are saved yet."
+      },
+      {
+        description: "Enrich a known company and save it",
+        user_prompt: "Using Hunter, show me the company profile for gsk.com, then save the company to my Hunter Leads.",
+        tools_triggered: "Company-Enrichment, Save-Company",
+        expected_output:
+          "A company profile card for gsk.com with enrichment details, followed by a successful Save-Company result or an already-saved message with a Hunter Leads link."
+      },
+      {
+        description: "Find contacts for a domain, verify, and save",
+        user_prompt:
+          "Using Hunter, find one marketing contact at hubspot.com, verify the email, and save it as a lead only if the email is valid.",
+        tools_triggered: "Domain-Search, Email-Verifier, Create-Lead-If-Missing",
+        expected_output:
+          "Hunter returns a contact from hubspot.com, verifies deliverability, and saves it only if valid. If the lead already exists, it reports no changes were made."
+      },
+      {
+        description: "Run a multi-company prospecting flow with consent",
+        user_prompt:
+          "Using Hunter, find 3 marketing leads at SaaS companies in Spain and save valid contacts to my leads.",
+        tools_triggered:
+          "Plan-Prospecting-Flow, Find-Companies, Domain-Search, Email-Verifier, Create-Lead-If-Missing",
+        expected_output:
+          "A prospecting plan starts with company discovery, asks before bulk credit use, then after approval verifies and saves valid contacts without overwriting existing leads."
+      },
+      {
+        description: "Review account and campaigns without sending emails",
+        user_prompt:
+          "Using Hunter, show my account details, list my campaigns, and show recipients for one campaign if any exist. Do not add recipients or start a campaign.",
+        tools_triggered: "Get-Account-Details, List-Campaigns, List-Campaign-Recipients",
+        expected_output:
+          "Account/credit details and a campaign list are returned. If a campaign exists, recipient statuses are shown. No recipients are added and no campaign is started."
+      },
+      {
+        description: "List connected sending accounts before outreach",
+        user_prompt:
+          "Using Hunter, list the email accounts connected to my account and tell me which are active versus paused or warming.",
+        tools_triggered: "List-Email-Accounts",
+        expected_output:
+          "A read-only list of the user's sending accounts with email, name, provider, daily limit, and sending status (active / paused / warming). No changes are made."
+      },
+      {
+        description: "Review a sequence's steps and performance",
+        user_prompt:
+          "Using Hunter, show the follow-up steps of sequence <SEQUENCE_ID> and its open, click, and reply rates.",
+        tools_triggered: "List-Sequence-Follow-Ups, Get-Sequence-Stats",
+        expected_output:
+          "The sequence's ordered follow-up steps plus aggregated stats (recipients, sent, delivered, open/click/reply rates) and a per-step breakdown. No emails are sent."
+      },
+      {
+        description: "Pause then resume an active sequence",
+        user_prompt: "Using Hunter, pause sequence <SEQUENCE_ID>, then resume it again.",
+        tools_triggered: "Pause-Sequence, Resume-Sequence",
+        expected_output:
+          "The sequence is paused so it stops sending, then resumed. Resume re-validates and reports an error if the email account is disconnected or the schedule is empty. Both actions are reversible."
+      },
+      {
+        description: "Archive a finished sequence (irreversible)",
+        user_prompt: "Using Hunter, archive sequence <SEQUENCE_ID>.",
+        tools_triggered: "Archive-Sequence",
+        expected_output:
+          "Because archiving is irreversible via the API, a confirmation is requested first; on approval the sequence is archived and can no longer be resumed. Archiving a draft returns an error."
+      },
+      {
+        description: "Create and organize company lists",
+        user_prompt:
+          "Using Hunter, create a company list called 'UK Pharma' and a folder called 'Targets', then show my company lists and folders.",
+        tools_triggered: "Create-Company-List, Create-Company-List-Folder, List-Company-Lists, List-Company-List-Folders",
+        expected_output:
+          "A new company list and folder are created, then the user's company lists (static or dynamic) and folders are listed. No companies are added to the list yet."
+      },
+      {
+        description: "Save a company to a list and favorite it",
+        user_prompt:
+          "Using Hunter, add company <COMPANY_ID> to company list <LIST_ID>, then mark that list as a favorite.",
+        tools_triggered: "Add-Company-To-List, Favorite-Company-List",
+        expected_output:
+          "The company is added to the static list and the list is marked as a favorite. Both are reversible (remove the company, or unfavorite the list)."
+      },
+      {
+        description: "View connected CRM integrations (read-only)",
+        user_prompt:
+          "Using Hunter, what apps are connected to my account, and show the field mappings for one of them.",
+        tools_triggered: "List-Connected-Apps, Get-Connected-App",
+        expected_output:
+          "A read-only list of connected apps (provider, name, category, connected date) and, for one app, its field mappings (Hunter field to integration field). No changes are made."
+      }
+    ],
+    negative_test_cases: [
+      {
+        description: "Hunter word used in an unrelated context",
+        user_prompt: "What does hunter-gatherer mean in anthropology?"
+      },
+      {
+        description: "Sales writing request without lead data lookup",
+        user_prompt:
+          "Write a cold email template for a pharmaceutical sales campaign, but do not look up companies or contacts."
+      },
+      {
+        description: "Consumer discovery outside Hunter prospecting",
+        user_prompt: "Find vegan restaurants near me for dinner tonight."
+      }
+    ]
+  };
+
+  const MAX = {
+    description: 200,
+    user_prompt: 500,
+    tools_triggered: 200,
+    expected_output: 300
+  };
+
+  function setNativeValue(el, value) {
+    const proto = Object.getPrototypeOf(el);
+    const desc =
+      Object.getOwnPropertyDescriptor(proto, "value") ||
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value") ||
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+
+    desc.set.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function findField(primaryName, fallbackId) {
+    return (
+      document.querySelector(`[name="${CSS.escape(primaryName)}"]`) ||
+      document.getElementById(fallbackId)
+    );
+  }
+
+  const rows = [];
+  const errors = [];
+
+  DATA.test_cases.forEach((tc, i) => {
+    const fields = [
+      ["description", `version.test_cases.${i}.description`, `version.test_cases.${i}.description`],
+      ["user_prompt", `version.test_cases.${i}.user_prompt`, `version.test_cases.${i}.user_prompt`],
+      ["tools_triggered", `version.test_cases.${i}.tools_triggered`, `version.test_cases.${i}.tool_triggered`],
+      ["expected_output", `version.test_cases.${i}.expected_output`, `version.test_cases.${i}.expected_output`]
+    ];
+
+    fields.forEach(([key, name, id]) => {
+      const value = tc[key] || "";
+      const max = MAX[key];
+      if (value.length > max) {
+        errors.push(`Test case ${i + 1} ${key} is ${value.length}/${max}`);
+        return;
+      }
+
+      const el = findField(name, id);
+      if (!el) {
+        errors.push(`Missing field: ${name}`);
+        return;
+      }
+
+      setNativeValue(el, value);
+      rows.push({ section: "positive", index: i + 1, field: key, length: value.length, max });
+    });
+  });
+
+  DATA.negative_test_cases.forEach((tc, i) => {
+    const fields = [
+      ["description", `version.negative_test_cases.${i}.description`, `version.negative_test_cases.${i}.description`],
+      ["user_prompt", `version.negative_test_cases.${i}.user_prompt`, `version.negative_test_cases.${i}.user_prompt`]
+    ];
+
+    fields.forEach(([key, name, id]) => {
+      const value = tc[key] || "";
+      const max = MAX[key];
+      if (value.length > max) {
+        errors.push(`Negative test case ${i + 1} ${key} is ${value.length}/${max}`);
+        return;
+      }
+
+      const el = findField(name, id);
+      if (!el) {
+        errors.push(`Missing field: ${name}`);
+        return;
+      }
+
+      setNativeValue(el, value);
+      rows.push({ section: "negative", index: i + 1, field: key, length: value.length, max });
+    });
+  });
+
+  console.table(rows);
+
+  if (errors.length) {
+    console.error(errors);
+    alert(`Some fields failed. See console. Count: ${errors.length}`);
+  } else {
+    alert("Test cases filled and length-checked.");
+  }
+})();
+```
+
+> **Per-tool annotation justifications** (the `Read Only` / `Open World` / `Destructive` dashboard fields, ≤200 chars each) are kept out of git per the `docs/dashboard.md` convention. Regenerate them at the gitignored `.context/HUN-20196/dashboard-justifications.md` before pasting.
+
+---
+
 ## Appendix — Tool inventory
 
-The 34 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run.
+The 55 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run.
 
 | Group | Tools |
 |-------|-------|
@@ -542,6 +814,12 @@ The 34 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Us
 | Leads lists | `List-Leads-Lists`, `Get-Leads-List`, `Create-Leads-List`, `Update-Leads-List`, `Delete-Leads-List`, `Merge-Leads-Lists` |
 | Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
 | Campaigns | `List-Campaigns`, `List-Campaign-Recipients`, `Add-Campaign-Recipients`, `Remove-Campaign-Recipients`, `Start-Campaign` |
+| Email accounts (HUN-20196) | `List-Email-Accounts` |
+| Sequences (HUN-20196) | `List-Sequence-Follow-Ups`, `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats` |
+| Company lists (HUN-20196) | `List-Company-Lists`, `Get-Company-List`, `Create-Company-List`, `Update-Company-List`, `Delete-Company-List` |
+| Company list folders (HUN-20196) | `List-Company-List-Folders`, `Create-Company-List-Folder`, `Update-Company-List-Folder`, `Delete-Company-List-Folder` |
+| Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
+| Connected apps (HUN-20196) | `List-Connected-Apps`, `Get-Connected-App` |
 | Coordinator | `Plan-Prospecting-Flow` |
 | Named prompts | `prospect`, `build-list`, `campaign-prep` |
 | Widgets | `discover-widget`, `company-widget` |

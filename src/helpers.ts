@@ -81,6 +81,14 @@ export const TOOL_NAMES = {
   combinedEnrichment: "Combined-Enrichment",
   // account
   account: "Get-Account-Details",
+  // email accounts
+  listEmailAccounts: "List-Email-Accounts",
+  // sequences
+  listSequenceFollowUps: "List-Sequence-Follow-Ups",
+  pauseSequence: "Pause-Sequence",
+  resumeSequence: "Resume-Sequence",
+  archiveSequence: "Archive-Sequence",
+  getSequenceStats: "Get-Sequence-Stats",
   // leads
   listLeads: "List-Leads",
   getLead: "Get-Lead",
@@ -98,6 +106,24 @@ export const TOOL_NAMES = {
   updateLeadsList: "Update-Leads-List",
   deleteLeadsList: "Delete-Leads-List",
   mergeLeadsLists: "Merge-Leads-Lists",
+  // company lists
+  listCompanyLists: "List-Company-Lists",
+  getCompanyList: "Get-Company-List",
+  createCompanyList: "Create-Company-List",
+  updateCompanyList: "Update-Company-List",
+  deleteCompanyList: "Delete-Company-List",
+  favoriteCompanyList: "Favorite-Company-List",
+  unfavoriteCompanyList: "Unfavorite-Company-List",
+  addCompanyToList: "Add-Company-To-List",
+  removeCompanyFromList: "Remove-Company-From-List",
+  // company list folders
+  listCompanyListFolders: "List-Company-List-Folders",
+  createCompanyListFolder: "Create-Company-List-Folder",
+  updateCompanyListFolder: "Update-Company-List-Folder",
+  deleteCompanyListFolder: "Delete-Company-List-Folder",
+  // connected apps
+  listConnectedApps: "List-Connected-Apps",
+  getConnectedApp: "Get-Connected-App",
   // custom attributes
   listCustomAttributes: "List-Custom-Attributes",
   getCustomAttribute: "Get-Custom-Attribute",
