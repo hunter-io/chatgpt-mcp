@@ -80,30 +80,15 @@ export const nextActionSchema = z.discriminatedUnion("kind", [
   }),
 ])
 
-// ─── mutationAckSchema ──────────────────────────────────────────────────────
-//
-// Synthesised by callHunterApi on HTTP 202/204 empty-body responses. Without
-// this, every delete-style tool's success path would fail outputSchema
-// validation (the SDK rejects `outputSchema declared but no structuredContent`).
-//
-// `kind: "ack"` discriminator distinguishes a synthesised acknowledgement from
-// a real Hunter `{ data, meta }` envelope, so handlers can branch cleanly.
-//
-// Strict (no `.loose()`) — this payload is synthesised by `callHunterApi` and
-// has a fixed shape; passthrough would only mask synthesis bugs.
-export const mutationAckSchema = z.object({
-  kind: z.literal("ack"),
-  ok: z.literal(true),
-  status: z.number().int(),
-  message: z.string(),
-})
-
 // ─── errorSchema ────────────────────────────────────────────────────────────
 //
 // Even when `isError: true` (SDK skips validation), the agent needs typed
 // recovery information — retryability, retry_after, which field failed, the
 // failure category — to plan the next step. Without this, callers have to
 // regex over prose. Biggest agent-native win in the HUN-19943 plan.
+//
+// Defined before `mutationAckSchema` and `buildResponseSchema` because both
+// reference it (an error envelope is a valid output of every tool — see below).
 export const errorSchema = z.object({
   code: z.enum([
     "rate_limited",
@@ -122,6 +107,28 @@ export const errorSchema = z.object({
 
 export type HunterErrorCode = z.infer<typeof errorSchema>["code"]
 export type HunterError = z.infer<typeof errorSchema>
+
+// ─── mutationAckSchema ──────────────────────────────────────────────────────
+//
+// The outputSchema for delete-style tools (they publish `mutationAckSchema.shape`
+// directly, because callHunterApi synthesises this envelope on HTTP 202/204
+// empty-body responses). `kind: "ack"` distinguishes a synthesised
+// acknowledgement from a real Hunter `{ data, meta }` envelope.
+//
+// HUN-20460 — those same tools also return `callHunterApi`, which emits
+// `{ error }` on 4xx/5xx (e.g. Delete-Leads-List on a missing list → 404). The
+// published schema is `additionalProperties: false` (the `.shape` rewrap drops
+// any passthrough), so without `error` declared here — and without the ack
+// fields being optional — that error envelope fails client validation with the
+// same `-32602` the shared buildResponseSchema fix addresses. So the ack fields
+// are optional and `error` is declared: the schema accepts BOTH shapes.
+export const mutationAckSchema = z.object({
+  kind: z.literal("ack").optional(),
+  ok: z.literal(true).optional(),
+  status: z.number().int().optional(),
+  message: z.string().optional(),
+  error: errorSchema.optional(),
+})
 
 // ─── Verification ───────────────────────────────────────────────────────────
 //
@@ -164,22 +171,48 @@ export const paginationMetaSchema = z
 // here; co-location matches the inputSchema cohesion pattern and avoids a
 // dead-on-arrival registry (see architecture review in the HUN-19943 plan).
 //
-// `.loose()` ONLY at the envelope level — leaf object schemas should declare
-// known keys so typos surface in vitest. Generic `<T extends z.ZodType>` keeps
-// inference downstream so `z.infer<ReturnType<typeof buildResponseSchema>>`
-// yields a precise `data` type, not `any`.
+// Leaf object schemas should declare known keys so typos surface in vitest.
+// Generic `<T extends z.ZodType>` keeps inference downstream so
+// `z.infer<ReturnType<typeof buildResponseSchema>>` yields a precise `data`
+// type, not `any`.
 //
 // `metaSchema` is optional and defaults to a loose object. List-style tools
 // should pass `paginationMetaSchema` so agents can plan the next page without
 // regex over prose.
+//
+// HUN-20460 — this envelope MUST describe EVERY shape `callHunterApi` puts on
+// `structuredContent`, not just the success one. On non-2xx / empty responses
+// it synthesises two other top-level shapes:
+//   • 4xx/5xx  → `{ error }`                       (errorSchema)
+//   • 202/204  → `{ kind, ok, status, message }`   (mutationAckSchema, flat)
+// Both are emitted with `isError`/ack semantics but still land in
+// `structuredContent`, which a schema-validating MCP client checks against the
+// PUBLISHED output schema. Crucially, `registerTool` is handed `<schema>.shape`
+// (a ZodRawShape), so the SDK re-wraps the fields in a FRESH `z.object(...)` and
+// the envelope `.loose()` below is DROPPED — the published JSON Schema is
+// `additionalProperties: false`. So the not-found `{ error }` envelope failed
+// client validation with `-32602` ("must have required property 'data', must
+// NOT have additional properties"): `data` was required and `error` was an
+// undeclared extra key. Therefore `data` MUST be optional and every synthesised
+// top-level key MUST be declared here. (The `.loose()` is kept for intent/local
+// use even though `registerTool` discards it via `.shape`.)
 export const buildResponseSchema = <T extends z.ZodType, M extends z.ZodType = z.ZodObject>(
   dataSchema: T,
   metaSchema?: M,
 ) =>
   z
     .object({
-      data: dataSchema,
+      // Present on success; ABSENT on the error/ack envelopes below.
+      data: dataSchema.optional(),
       meta: (metaSchema ?? z.object({}).loose()).optional(),
+      // 4xx/5xx envelope (callHunterApi → `{ error }`, isError:true).
+      error: errorSchema.optional(),
+      // 202/204 acknowledgement envelope — mutationAckSchema fields, inlined
+      // flat (they sit at the top level of structuredContent, not nested).
+      kind: z.literal("ack").optional(),
+      ok: z.literal(true).optional(),
+      status: z.number().int().optional(),
+      message: z.string().optional(),
       viewInHunter: hunterUrl.optional(),
       nextAction: nextActionSchema.optional(),
     })

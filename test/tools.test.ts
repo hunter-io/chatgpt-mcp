@@ -63,6 +63,16 @@ function registerAllTools() {
   createServer("test-api-key", "https://api.hunter.io/v2")
 }
 
+// Reconstruct a tool's PUBLISHED output schema EXACTLY as the MCP SDK does.
+// `registerTool` receives `<schema>.shape` (a ZodRawShape) and re-wraps it in a
+// FRESH `z.object(...)`, so the envelope-level `.loose()` from
+// `buildResponseSchema` is DROPPED and the published JSON Schema is
+// `additionalProperties: false`. `.strict()` models that envelope rejection;
+// leaf sub-objects keep their own Zod-default behavior. The earlier tests
+// reconstructed with `.loose()`, which masked HUN-20460 by accepting envelopes
+// (the not-found `{ error }` shape) that a schema-validating client rejects.
+const publishedOutputSchema = (shape: Record<string, z.ZodTypeAny>) => z.object(shape).strict()
+
 // All 37 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
 // "all TOOL_NAMES are registered" assertion below.
 const ALL_TOOL_NAMES = [
@@ -3164,8 +3174,11 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     // Real Hunter `/people/find` payloads emit fields outside the privacy-
     // minimization allowlist: `bio`, `timeZone`, `utcOffset`, `phone`,
     // `activeAt`, `avatar`, social subfields like `twitter.id`. The declared
-    // outputSchema must NOT reject these — `.strict()` would cause MCP SDK
-    // output validation to throw and the tool call to fail. This test pins
+    // outputSchema must NOT reject these: the `data` LEAF schema uses Zod's
+    // default strip (not `.strict()`), so unlisted NESTED fields are dropped at
+    // parse, not rejected. (The ENVELOPE is additionalProperties:false — see
+    // publishedOutputSchema — but that governs only top-level keys, and a
+    // realistic response adds none.) This test pins
     // the parse-succeeds behavior the codex review flagged at enrichment.ts:69.
     //
     // The schema's declared shape documents the minimization allowlist
@@ -3175,13 +3188,13 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     // verifies only the no-throw / no-isError part of that contract;
     // the SDK-level strip happens above the layer we exercise here.
     const tool = registeredTools.get("Person-Enrichment")!
-    // The registered outputSchema is `.shape` (a record of field → ZodType).
-    // Reconstruct the schema with z.object(shape).loose() — `.loose()` mirrors
-    // what `buildResponseSchema` applies at the envelope level so we exercise
-    // the actual leaf schemas (which use Zod 4 default object behavior, not
-    // `.strict()`).
+    // Reconstruct the PUBLISHED schema exactly as the SDK does (see
+    // publishedOutputSchema): the `.shape` rewrap makes the ENVELOPE strict
+    // (additionalProperties:false), while the `data` LEAF keeps Zod's default
+    // strip behavior — so the unlisted nested fields below are stripped, not
+    // rejected. realisticData has no extra top-level keys.
     const outputSchemaShape = tool.outputSchema as Record<string, z.ZodTypeAny> | undefined
-    const reconstructedSchema = outputSchemaShape ? z.object(outputSchemaShape).loose() : undefined
+    const reconstructedSchema = outputSchemaShape ? publishedOutputSchema(outputSchemaShape) : undefined
     // Verify the declared outputSchema parses a realistic Hunter shape
     // WITHOUT throwing.
     const realisticData = {
@@ -3260,7 +3273,7 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     // doomed query (~1h, "timeout/failure"). This pins parse-succeeds on null.
     const tool = registeredTools.get("Email-Finder")!
     const outputSchemaShape = tool.outputSchema as Record<string, z.ZodTypeAny> | undefined
-    const reconstructedSchema = outputSchemaShape ? z.object(outputSchemaShape).loose() : undefined
+    const reconstructedSchema = outputSchemaShape ? publishedOutputSchema(outputSchemaShape) : undefined
     // Mirrors the jbuilder "miss" shape: every `@result&.x` field is null, the
     // key is present, `sources` is [], `verification` is an object with nulls.
     const notFoundData = {
@@ -3306,7 +3319,7 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     // why the first audit pass missed it (Cursor Bugbot flagged it on the PR).
     const tool = registeredTools.get("Company-Enrichment")!
     const outputSchemaShape = tool.outputSchema as Record<string, z.ZodTypeAny> | undefined
-    const reconstructedSchema = outputSchemaShape ? z.object(outputSchemaShape).loose() : undefined
+    const reconstructedSchema = outputSchemaShape ? publishedOutputSchema(outputSchemaShape) : undefined
     const namelessCompany = {
       data: { id: "uuid-1", name: null, domain: "example.com", legalName: null, foundedYear: null },
     }
@@ -3557,7 +3570,7 @@ describe("HUN-20344 audit: new-endpoint output schemas admit null for nullable j
   it("Get-Connected-App outputSchema accepts null attribute_mappings fields", () => {
     const tool = registeredTools.get("Get-Connected-App")!
     const shape = tool.outputSchema as Record<string, z.ZodTypeAny>
-    const schema = z.object(shape).loose()
+    const schema = publishedOutputSchema(shape)
     const payload = {
       data: {
         id: 7,
@@ -3579,7 +3592,7 @@ describe("HUN-20344 audit: new-endpoint output schemas admit null for nullable j
   it("List-Email-Accounts outputSchema accepts a null email / first_name / last_name", () => {
     const tool = registeredTools.get("List-Email-Accounts")!
     const shape = tool.outputSchema as Record<string, z.ZodTypeAny>
-    const schema = z.object(shape).loose()
+    const schema = publishedOutputSchema(shape)
     const payload = {
       data: [
         {
@@ -3595,5 +3608,92 @@ describe("HUN-20344 audit: new-endpoint output schemas admit null for nullable j
       meta: { total: 1, limit: 20, offset: 0 },
     }
     expect(() => schema.parse(payload)).not.toThrow()
+  })
+})
+
+// ─── HUN-20460: error / ack envelopes must conform to the published schema ───
+//
+// callHunterApi puts NON-`{ data }` envelopes on `structuredContent` for the
+// common non-success paths — `{ error }` on 4xx/5xx and `{ kind, ok, status,
+// message }` on 202/204. Each tool's outputSchema is published from
+// `<schema>.shape`, which DROPS the envelope `.loose()` → the JSON Schema is
+// `additionalProperties: false`, so a schema-validating MCP client checks those
+// envelopes too. Before the fix `data` was required and `error`/ack keys were
+// undeclared, so a not-found Person-Enrichment (HTTP 404 → `{ error }`) failed
+// with -32602: "must have required property 'data', must NOT have additional
+// properties". These pin every callHunterApi envelope as schema-valid.
+describe("HUN-20460: error and ack envelopes conform to the published output schema", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("Person-Enrichment not-found { error } envelope conforms (schema + 404 end-to-end)", async () => {
+    const tool = registeredTools.get("Person-Enrichment")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+
+    // The exact envelope callHunterApi synthesises on a 404 (errorSchema shape).
+    // Before the fix this threw: `data` required + `error` undeclared (strict).
+    const errorEnvelope = {
+      error: { code: "not_found", retryable: false, message: "The email address does not exist in our database." },
+    }
+    expect(() => schema.parse(errorEnvelope)).not.toThrow()
+
+    // End-to-end: the real handler's emitted structuredContent conforms too.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "not_found", code: 404, details: "The email address does not exist in our database." }],
+            }),
+          ),
+      }),
+    )
+    const result = await tool.handler({ email: "nobody@coachfident.test" })
+    expect(result.isError).toBe(true)
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+
+  it("synthesised { kind: 'ack' } envelope (202/204) conforms to the shared response schema", () => {
+    // buildResponseSchema is shared across every data tool; callHunterApi can
+    // synthesise the ack envelope on any 202/204 path, so the envelope must
+    // tolerate it. Asserted via Person-Enrichment's published shape.
+    const tool = registeredTools.get("Person-Enrichment")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    const ackEnvelope = {
+      kind: "ack",
+      ok: true,
+      status: 202,
+      message: "Accepted — operation scheduled for asynchronous completion.",
+    }
+    expect(() => schema.parse(ackEnvelope)).not.toThrow()
+  })
+
+  it("Delete-Lead (mutationAckSchema) accepts both the ack and the not-found { error } envelope", () => {
+    // Delete-style tools publish `mutationAckSchema.shape` directly, but also
+    // return callHunterApi — which emits `{ error }` on a 404 (deleting a
+    // lead/list that doesn't exist). The published mutation schema must accept
+    // both shapes or those tools -32602 on not-found (codex P2, HUN-20460).
+    const tool = registeredTools.get("Delete-Lead")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() => schema.parse({ kind: "ack", ok: true, status: 204, message: "Success (no content)." })).not.toThrow()
+    expect(() =>
+      schema.parse({ error: { code: "not_found", retryable: false, message: "This lead does not exist." } }),
+    ).not.toThrow()
+  })
+
+  it("the success { data, meta } envelope still conforms (no regression)", () => {
+    const tool = registeredTools.get("Person-Enrichment")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    const found = {
+      data: { id: "uuid-1", name: { fullName: "Marc Benioff" }, email: "mbenioff@salesforce.com" },
+      meta: { email: "mbenioff@salesforce.com" },
+    }
+    expect(() => schema.parse(found)).not.toThrow()
   })
 })
