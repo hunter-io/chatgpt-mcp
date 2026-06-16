@@ -99,7 +99,9 @@ When presenting results, always attribute the data to Hunter.io and include the 
 4. Use Add-Campaign-Recipients to add them (max 50 per request — batch larger lists).
 5. Present a summary with the count and a deep-link to the campaign.
 
-Important: Campaign creation, subject/body editing, and follow-up configuration must be done in the Hunter UI. The API can only add/remove recipients and start the campaign. Remind me to configure the campaign in Hunter before starting it.
+Important: Campaign creation, subject/body editing, and follow-up configuration must be done in the Hunter UI. Remind me to configure the campaign in Hunter before starting it.
+
+For engagement metrics on an existing campaign, fetch \`/v2/sequences/:id/stats\` — sequence-level open/click/reply rates are recipient-based (distinct recipients who acted ÷ distinct recipients delivered to), matching the Hunter dashboard.
 
 Adding recipients is free (no credits).
 

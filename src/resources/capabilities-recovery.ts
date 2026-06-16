@@ -52,6 +52,10 @@ Domain-Search returns each email with a \`confidence\` field (0-100). Treat:
 
 If the user gives a person's name but no domain, ask for the company before calling either tool — Hunter cannot search by name alone.
 
+## Sequence (campaign) capabilities
+
+- Engagement metrics live at \`/v2/sequences/:id/stats\`: the top-level counts \`sent\`, \`delivered\`, \`opened\`, \`clicked\`, \`replied\` are each recipient-distinct (number of distinct recipients), alongside \`recipients_count\` and \`unsubscribed_recipients\`. Sequence-level \`open_rate\`, \`click_rate\`, \`reply_rate\` are recipient-based (distinct actors ÷ distinct recipients delivered to — matches the Hunter dashboard). \`bounced\` and \`bounce_rate\` are message-based. Per-step rates under \`follow_ups[]\` remain message-based.
+
 ## Anti-patterns
 
 - **Do not auto-pick the top Find-Companies result** — Hunter returns up to 100 companies; the top hit is not necessarily the best semantic match. Always emit \`nextAction.kind === "ask_user"\` after a raw Find-Companies call.

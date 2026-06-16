@@ -86,20 +86,21 @@ const archiveSequenceSchema = z.object({
 
 const archiveSequenceOutputSchema = buildResponseSchema(archiveSequenceSchema)
 
-// Get-Sequence-Stats renders aggregated sequence stats plus a per-follow-up
+// Get-Sequence-Stats renders recipient-based sequence stats plus a per-follow-up
 // breakdown from app/app/views/api/sequences/stats/show.jbuilder and
-// stats/_follow_up.jbuilder. The top-level fields are summed from the
-// sequence's follow-ups (sent/opened/clicked/replied/bounced), `delivered` is
-// `sent - bounced`, and the rates are floats in the 0.0-1.0 range (0 when the
-// denominator is zero — see the jbuilder's `.zero? ? 0 : …` guards), NOT
-// percentages. `unsubscribed_recipients` is the count of recipients who
-// unsubscribed and `unsubscribed_recipients_rate` divides it by
-// `recipients_count`. Leaves are strict (no `.loose()`) so a jbuilder field
-// rename surfaces in vitest; the envelope stays loose via buildResponseSchema.
-// `follow_ups` are ordered by (step ASC, variant ASC); `variant` is null for a
-// non-variant (default) follow-up and "A"/"B" for A/B tests. The per-follow-up
-// `delivered` comes from `messages_delivered` and the rates mirror the
-// top-level ones (`unsubscribe_rate` = unsubscribed / delivered).
+// stats/_follow_up.jbuilder. The top-level engagement fields
+// (sent/delivered/opened/clicked/replied/unsubscribed_recipients) are DISTINCT
+// recipients, NOT sums across follow-ups: `delivered` is the recipients who
+// received at least one non-bounced email (NOT `sent - bounced`). `bounced` and
+// `bounce_rate` are message-based. The rates are floats in the 0.0-1.0 range (0
+// when the denominator is zero), NOT percentages; open_rate/click_rate/reply_rate
+// divide by distinct delivered recipients and `unsubscribed_recipients_rate`
+// divides unsubscribed recipients by `recipients_count`. Leaves are strict (no
+// `.loose()`) so a jbuilder field rename surfaces in vitest; the envelope stays
+// loose via buildResponseSchema. `follow_ups` are MESSAGE-based per step (ordered
+// by step ASC, variant ASC; `variant` is null for a non-variant default follow-up
+// and "A"/"B" for A/B tests), so per-step counts do NOT sum to the recipient-based
+// top-level totals.
 const sequenceStatsFollowUpSchema = z.object({
   id: z.number().int().positive(),
   step: z.number().int().nonnegative(),
@@ -233,7 +234,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSequenceStats,
     {
       description:
-        "Use this when the user wants to see how a sequence is performing. Reports aggregated stats for a sequence plus a per-follow-up breakdown. The top-level totals (`recipients_count`, `sent`, `delivered`, `opened`, `clicked`, `replied`, `bounced`, `unsubscribed_recipients`) are summed across the sequence's follow-up steps, with `delivered` equal to `sent - bounced`. The rate fields (`open_rate`, `click_rate`, `reply_rate`, `bounce_rate`, `unsubscribed_recipients_rate`) are floats in the 0.0-1.0 range — multiply by 100 to present them as percentages to the user — and are 0 when their denominator is 0. The `follow_ups` array reports the same metrics per step (ordered by step, then variant), where `variant` is null for the default follow-up or A/B for A/B-tested steps. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to see how a sequence is performing. Reports recipient-based stats for a sequence plus a per-follow-up breakdown. The top-level engagement totals (`sent`, `delivered`, `opened`, `clicked`, `replied`, `unsubscribed_recipients`) count DISTINCT recipients — e.g. `replied` is the number of recipients who replied at least once, not the number of reply messages — and `delivered` is the recipients who received at least one non-bounced email (`recipients_count` is all recipients ever added to the sequence). `bounced` is message-based (a bounce is an SMTP-level event). The rate fields (`open_rate`, `click_rate`, `reply_rate`, `bounce_rate`, `unsubscribed_recipients_rate`) are floats in the 0.0-1.0 range — multiply by 100 to present them as percentages to the user — and are 0 when their denominator is 0; `open_rate`, `click_rate`, and `reply_rate` divide by distinct delivered recipients, while `bounce_rate` is message-based. The `follow_ups` array reports MESSAGE-based metrics per step (ordered by step, then variant; `variant` is null for the default follow-up or A/B for A/B-tested steps), so per-step counts do not sum to the recipient-based top-level totals. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to fetch stats for"),
       },

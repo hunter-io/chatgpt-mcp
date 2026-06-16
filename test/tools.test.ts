@@ -73,7 +73,7 @@ function registerAllTools() {
 // (the not-found `{ error }` shape) that a schema-validating client rejects.
 const publishedOutputSchema = (shape: Record<string, z.ZodTypeAny>) => z.object(shape).strict()
 
-// All 37 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
+// All 56 chatgpt-mcp tools — kept in sync with TOOL_NAMES via the dedicated
 // "all TOOL_NAMES are registered" assertion below.
 const ALL_TOOL_NAMES = [
   "Find-Companies",
