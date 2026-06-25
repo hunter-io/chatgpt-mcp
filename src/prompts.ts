@@ -7,7 +7,7 @@ export function registerPrompts(server: McpServer) {
     {
       title: "Prospect",
       description:
-        "Find and qualify B2B leads matching your criteria. Discovers companies, searches contacts, verifies emails, and saves to Hunter leads.",
+        "Find B2B contacts matching your criteria. Discovers companies and their contacts, returns them as a table for review, and saves to Hunter leads only if you ask.",
       argsSchema: {
         query: z
           .string()
@@ -20,19 +20,18 @@ export function registerPrompts(server: McpServer) {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Run a full B2B prospecting workflow for: "${query}"
+            text: `Run a B2B prospecting workflow for: "${query}"
+
+By default, gather the contacts and return them for review — do not save anything. Only save to my Hunter leads if I explicitly ask to (e.g. "save these", "add to my leads", "create a list"). A request that just says "leads" is a request to find contacts, not to save them.
 
 1. Use Find-Companies to find companies matching the criteria (free).
-2. For each company, use Domain-Search to find contacts. Use server-side filters (seniority, department) when the criteria mention roles or departments.
-3. Present the results and ask if I want to:
-   a. Verify emails (1 verification credit each)
-   b. Save verified contacts as leads via Create-Lead-If-Missing — this never overwrites an existing lead (free)
-   c. Enrich companies for more details (1 enrichment credit each)
-4. After saving, provide the deep-link to view leads in Hunter.
+2. For each company, use Domain-Search to find contacts. Use server-side filters (seniority, department) when the criteria mention roles or departments. Pass save_leads only when I asked to save (see step 4); otherwise leave it unset.
+3. Return the contacts as a table — one row per email with name, position, email, and verification status — and offer to save them to my Hunter leads as the next step.
+4. Only if I ask to save: if I ask to save BEFORE you've searched (the save was clear from the start), set save_leads true on the Domain-Search calls so the flow runs the save chain. But if I ask to save AFTER you've already gathered and shown me the table, do NOT re-run Domain-Search for companies you already searched (that just spends credits again) — save directly from the rows already in the table. Either way, don't blindly re-check all the rows: a row already shown as valid with high confidence is trustworthy as-is and is saved directly; only the rows that aren't already valid+high-confidence get an Email-Verifier check first (skip accept_all/invalid rows). Then save with Create-Lead-If-Missing, reusing each row's email, name, position, and company, which never overwrites an existing lead (free). Afterwards, provide the deep-link to view the leads in Hunter.
 
-Credit costs: Find-Companies is free. Domain-Search costs 1 search credit per 10 emails returned. Email-Verifier costs 1 verification credit each. Leads operations are free.
+Credits: Find-Companies is free. Domain-Search uses Hunter credits (1 per 10 emails returned). Checking deliverability with Email-Verifier uses Hunter credits, charged only for valid, invalid, or accept-all results, and runs only for rows that aren't already verified. Leads operations are free.
 
-When presenting results, always attribute the data to Hunter.io. Include links to the Hunter dashboard (e.g. https://hunter.io/leads) so the user can manage their leads directly.`,
+When presenting results, always attribute the data to Hunter.io. Include links to the Hunter dashboard (e.g. https://hunter.io/leads) so I can manage my leads directly.`,
           },
         },
       ],
@@ -58,12 +57,14 @@ When presenting results, always attribute the data to Hunter.io. Include links t
             type: "text" as const,
             text: `Build a Hunter leads list: "${description}"
 
-1. Create a new leads list with a descriptive name using Create-Leads-List (free).
-2. Find contacts matching the description — use Find-Companies + Domain-Search, or if I provided specific emails, use those directly.
-3. For each contact, use Create-Lead-If-Missing so the loop never overwrites an existing lead. Set the leads_list_id to the new list when creating; if a lead already exists, the tool returns it unchanged and reports "already exists; no changes made" — the existing lead's list assignment is left as-is.
+This is an explicit save request, so run the SAVE flow (not the return-a-table research flow).
+
+1. Create a new leads list with a descriptive name using Create-Leads-List (free), and note its id.
+2. Find contacts matching the description — use Find-Companies + Domain-Search, or if I provided specific emails, use those directly. When searching, set save_leads true on Domain-Search and pass the new list's id as leads_list_id so the save chain runs and the saved leads land in this list.
+3. Save through the save chain so each contact's deliverability is handled correctly: a row Domain-Search already returns as valid with high confidence is saved directly, and only the rows that aren't already valid+high-confidence get an Email-Verifier check first. The chain ends at Create-Lead-If-Missing, which never overwrites an existing lead. Set leads_list_id to the new list when creating; if a lead already exists, the tool returns it unchanged and reports "already exists; no changes made" — the existing lead's list assignment is left as-is.
 4. Present a summary with the count and the deep-link to view the list in Hunter.
 
-All leads operations are free. Only Domain-Search uses credits (1 per 10 emails returned).
+Leads operations are free. Domain-Search uses Hunter credits (1 per 10 emails returned). Checking deliverability with Email-Verifier uses Hunter credits, charged only for valid, invalid, or accept-all results, and runs only for rows that aren't already verified.
 
 When presenting results, always attribute the data to Hunter.io and include the Hunter dashboard link so the user can manage their list directly.`,
           },
@@ -95,7 +96,7 @@ When presenting results, always attribute the data to Hunter.io and include the 
 
 1. If no campaign ID is specified, use List-Campaigns to show available campaigns and ask me to pick one.
 2. Identify the recipients — from a leads list (List-Leads with leads_list_id), specific emails, or a new search.
-3. Before adding, offer to verify emails with Email-Verifier (1 verification credit each) to improve deliverability.
+3. Before adding, offer to verify emails with Email-Verifier (uses Hunter credits) to improve deliverability.
 4. Use Add-Campaign-Recipients to add them (max 50 per request — batch larger lists).
 5. Present a summary with the count and a deep-link to the campaign.
 

@@ -1,0 +1,107 @@
+{
+  "_comment": "Real-shape Domain-Search wire fixture (HUN-20651 Phase 4). Captured to match app/app/views/api/domain_search/show.json.jbuilder EXACTLY, so shouldVerify is exercised against shapes that actually occur on the wire — NOT hand-authored payloads that omit `verification` or hoist `confidence` into the wrong place. Key invariants this fixture pins (verified against the jbuilder): (1) EVERY email entry carries a `verification: { date, status }` block — it is ALWAYS emitted; on a fresh email with no < 1-month EmailVerification row both leaves are null (the dominant case). (2) `confidence` is an ENTRY-level integer 0-100, never nested inside `verification`. (3) `accept_all` exists at BOTH the domain level (`data.accept_all`) and — rarely — per email entry. The default `data.accept_all` here is false; tests flip it via the domainAcceptAll param. (4) The non-null `verification.date` on the valid+high-confidence entry is recent because Rails strips any verification older than EmailVerification::VALIDITY_THRESHOLD = 1.month before rendering — so there is no stale-date arm to test. Mutate (deep-clone) this fixture to build the shouldVerify truth table; do not edit the leaves in place.",
+  "data": {
+    "domain": "acme.com",
+    "disposable": false,
+    "webmail": false,
+    "accept_all": false,
+    "pattern": "{first}",
+    "organization": "Acme Inc",
+    "linked_domains": [],
+    "emails": [
+      {
+        "value": "olivia.martin@acme.com",
+        "type": "personal",
+        "confidence": 96,
+        "sources": [
+          {
+            "domain": "acme.com",
+            "uri": "http://acme.com/about/team",
+            "extracted_on": "2026-02-11",
+            "last_seen_on": "2026-06-02",
+            "still_on_page": true
+          }
+        ],
+        "first_name": "Olivia",
+        "last_name": "Martin",
+        "position": "Head of Sales",
+        "position_raw": "Head of Sales",
+        "seniority": "executive",
+        "department": "sales",
+        "linkedin": "https://www.linkedin.com/in/olivia-martin",
+        "twitter": null,
+        "phone_number": null,
+        "verification": {
+          "date": "2026-06-10",
+          "status": "valid"
+        }
+      },
+      {
+        "value": "lucas.bernard@acme.com",
+        "type": "personal",
+        "confidence": 72,
+        "sources": [
+          {
+            "domain": "acme.com",
+            "uri": "http://acme.com/blog/author/lucas",
+            "extracted_on": "2026-01-08",
+            "last_seen_on": "2026-05-22",
+            "still_on_page": true
+          }
+        ],
+        "first_name": "Lucas",
+        "last_name": "Bernard",
+        "position": "VP Sales",
+        "position_raw": "VP of Sales",
+        "seniority": "executive",
+        "department": "sales",
+        "linkedin": null,
+        "twitter": null,
+        "phone_number": null,
+        "verification": {
+          "date": null,
+          "status": null
+        }
+      },
+      {
+        "value": "emma.dubois@acme.com",
+        "type": "personal",
+        "confidence": 88,
+        "sources": [
+          {
+            "domain": "linkedin.com",
+            "uri": "https://www.linkedin.com/in/emma-dubois",
+            "extracted_on": "2026-03-19",
+            "last_seen_on": "2026-06-01",
+            "still_on_page": true
+          }
+        ],
+        "first_name": "Emma",
+        "last_name": "Dubois",
+        "position": "Sales Manager",
+        "position_raw": "Sales Manager",
+        "seniority": "senior",
+        "department": "sales",
+        "linkedin": null,
+        "twitter": null,
+        "phone_number": null,
+        "verification": {
+          "date": null,
+          "status": null
+        }
+      }
+    ]
+  },
+  "meta": {
+    "results": 3,
+    "limit": 10,
+    "offset": 0,
+    "params": {
+      "domain": "acme.com",
+      "company": null,
+      "type": null,
+      "seniority": null,
+      "department": null
+    }
+  }
+}

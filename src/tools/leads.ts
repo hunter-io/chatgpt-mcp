@@ -12,10 +12,12 @@ import {
   loopRecoveryAction,
   parseHunterApiData,
   pendingCompaniesSchema,
+  requireBulkConsent,
   withDeepLink,
   withDeepLinkFromId,
 } from "../helpers"
 import {
+  approvalRequiredShape,
   buildResponseSchema,
   mutationAckSchema,
   nullableNumber,
@@ -89,9 +91,26 @@ const singleLeadOutputSchema = buildResponseSchema(leadSchema)
 // Create-Lead-If-Missing extends the standard lead leaf with `alreadyExisted`
 // so callers can distinguish the create vs. no-op branches without parsing
 // the message text. The flag is omitted in the create path.
+//
+// HUN-20651 review fixes L/O/N: Create-Lead-If-Missing now gates at handler-top
+// when entered as a bulk SAVE batch (defined `pending_companies` + `save_leads`
+// without `confirmed_save_use`), short-circuiting with the `requireBulkConsent`
+// approval_required envelope. That envelope must be DECLARED in the published
+// outputSchema — otherwise the `.shape`-rewrapped closed schema rejects the
+// approval prompt with -32602. `.extend(approvalRequiredShape)` adds
+// `kind: "approval_required"` (widening `buildResponseSchema`'s `kind: "ack"`
+// literal to the union, which still admits "ack") + `estimated_credits`.
 const createLeadIfMissingOutputSchema = buildResponseSchema(
   leadSchema.extend({ alreadyExisted: z.boolean().optional() }),
-)
+).extend(approvalRequiredShape)
+// Create-Or-Update-Lead (Upsert) accepts the same bulk loop carry as
+// Create-Lead-If-Missing and now gates at handler-top when entered as a bulk
+// SAVE batch (HUN-20651 review fix AA) — a DESTRUCTIVE overwrite must not slip
+// past the save-consent gate. Like Create-Lead-If-Missing, the short-circuit
+// emits the `requireBulkConsent` approval_required envelope, so the published
+// outputSchema must DECLARE it (otherwise the `.shape`-rewrapped closed schema
+// rejects the approval prompt with -32602). Reuse the shared `approvalRequiredShape`.
+const upsertLeadOutputSchema = buildResponseSchema(leadSchema).extend(approvalRequiredShape)
 // Lead-Exists envelope: the controller emits `{ id, leads_list_id,
 // leads_list_name }` (all nullable when no lead matches). There is no `exists`
 // field — callers should derive existence from `data.id != null`. See
@@ -277,8 +296,13 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .boolean()
           .optional()
           .describe("Loop carry: forwarded from Domain-Search bulk credit-consent guard."),
+        confirmed_save_use: z
+          .boolean()
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search save-batch credit-consent guard."),
+        save_leads: z.boolean().optional().describe("Loop carry: forwarded from Domain-Search research-vs-save mode."),
       },
-      outputSchema: singleLeadOutputSchema.shape,
+      outputSchema: upsertLeadOutputSchema.shape,
       annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({
@@ -289,8 +313,45 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       department,
       required_field,
       confirmed_credit_use,
+      confirmed_save_use,
+      save_leads,
       ...fields
     }) => {
+      // Bulk-entry consent gate (HUN-20651 review fix AA). Create-Or-Update-Lead
+      // accepts `pending_companies` as a loop carry exactly like
+      // Create-Lead-If-Missing, so a model could invoke it DIRECTLY as a bulk SAVE
+      // entry (defined pending — empty OR non-empty — with `save_leads: true`)
+      // without arriving from a consented loop. This is DESTRUCTIVE (it overwrites
+      // existing leads in place), so an unconsented bulk call could overwrite leads
+      // AND advance the loop before any approval. We apply the SAME save-scoped gate
+      // Create-Lead-If-Missing / Email-Verifier use, with the same per-remaining-
+      // company estimate (review fix Z basis): the supplied current contact is saved
+      // here with no Domain-Search / Email-Verifier of its own, so only the remaining
+      // `pending_companies` incur a search + a verify as the loop continues — counting
+      // the current company would overstate both buckets by one. A legitimately
+      // consented loop carries `confirmed_save_use: true` and proceeds; research mode
+      // never gates (no save_leads); a normal single Create-Or-Update-Lead (no
+      // pending_companies) is unaffected.
+      if (pending_companies !== undefined && save_leads === true && confirmed_save_use !== true) {
+        // Consent copy accuracy (HUN-20651 review fix CC). Create-Or-Update-Lead
+        // performs PUT /leads, which OVERWRITES the fields of an existing lead in
+        // place — unlike Create-Lead-If-Missing, which only creates when missing and
+        // never touches an existing record. So the bulk consent copy must disclose
+        // the update/overwrite semantics rather than reuse Create-Lead-If-Missing's
+        // create-only "save this contact" wording. Kept bucket-agnostic (no
+        // per-plan credit fractions, no credit-selling).
+        const consentGuard = requireBulkConsent(
+          pending_companies,
+          confirmed_credit_use,
+          `This will update this contact in your Hunter leads, overwriting existing fields, and continue the ` +
+            `prospecting loop across up to ${pending_companies.length} more companies, using Hunter credits for each. ` +
+            `Approve to continue?`,
+          { search: pending_companies.length, verification: pending_companies.length },
+          { saveLeads: true, confirmedSave: confirmed_save_use },
+        )
+        if (consentGuard) return consentGuard
+      }
+
       const result = await callHunterApi({
         path: "/leads",
         apiKey,
@@ -306,10 +367,25 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
         return linked
       }
 
+      // Destination-list carry (HUN-20651 review fix BB). `leads_list_id` is a real
+      // lead field consumed above via `...fields` → buildLeadParams; thread it into
+      // the loop carry too — exactly as Create-Lead-If-Missing does — so subsequent
+      // contacts in a bulk save-to-list loop started from Create-Or-Update-Lead land
+      // in the same list instead of being saved unlisted.
       return chainOrComplete(
         linked,
         pending_companies,
-        { limit, type, seniority, department, required_field, confirmed_credit_use },
+        {
+          limit,
+          type,
+          seniority,
+          department,
+          required_field,
+          confirmed_credit_use,
+          confirmed_save_use,
+          save_leads,
+          leads_list_id: fields.leads_list_id,
+        },
         {
           reason: "Lead saved; continuing loop with next picked company.",
           loopCompleteSummary: "Lead saved. Multi-company loop complete.",
@@ -343,6 +419,11 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
           .boolean()
           .optional()
           .describe("Loop carry: forwarded from Domain-Search bulk credit-consent guard."),
+        confirmed_save_use: z
+          .boolean()
+          .optional()
+          .describe("Loop carry: forwarded from Domain-Search save-batch credit-consent guard."),
+        save_leads: z.boolean().optional().describe("Loop carry: forwarded from Domain-Search research-vs-save mode."),
       },
       outputSchema: createLeadIfMissingOutputSchema.shape,
       annotations: PRIVATE_WRITE_ANNOTATIONS,
@@ -356,8 +437,49 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       department,
       required_field,
       confirmed_credit_use,
+      confirmed_save_use,
+      save_leads,
       ...fields
     }) => {
+      // Bulk-entry consent gate (HUN-20651 review fixes L + O). Create-Lead-If-Missing
+      // accepts `pending_companies` as a loop carry, so a model could invoke it
+      // DIRECTLY as a bulk SAVE entry (defined pending — empty OR non-empty — with
+      // `save_leads: true`) without arriving from a consented loop. Lead creation
+      // itself is FREE, and the loop's real credit spend re-gates at the next
+      // Domain-Search, but for a UNIFORM contract (any pending-accepting bulk entry
+      // gates at handler-top per the `requireBulkConsent` doc) and to stop the loop
+      // advancing without consent, we apply the SAME save-scoped gate as
+      // Email-Verifier. Fix O: gate on a DEFINED pending (empty or not) — an empty
+      // defined array is still a bulk-shaped save entry; `requireBulkConsent` treats
+      // a defined-but-empty save array as a 1-company save batch. A legitimately
+      // consented loop carries `confirmed_save_use: true` and proceeds; research
+      // mode never gates (no save_leads); a normal single Create-Lead-If-Missing
+      // (no pending_companies) is unaffected.
+      if (pending_companies !== undefined && save_leads === true && confirmed_save_use !== true) {
+        // Message accuracy (HUN-20651 review fix W). Create-Lead-If-Missing is a
+        // create-only tool: this step SAVES the provided contact and does not run
+        // Email-Verifier — in the normal chain deliverability is checked UPSTREAM
+        // (at Email-Verifier) before this terminal. So the consent copy must not
+        // claim this step checks deliverability. The remaining companies are still
+        // searched and verified by the loop as it continues, which the upfront
+        // estimate covers; the message describes the save plus the loop continuing.
+        //
+        // Estimate accuracy (HUN-20651 review fix Z). The supplied current contact
+        // is SAVED here for free (no Domain-Search / Email-Verifier for it), so it
+        // must NOT be counted as a future search/verify. Only the remaining
+        // `pending_companies` incur a search + a verify as the loop continues —
+        // counting the current company would overstate BOTH buckets by one.
+        const consentGuard = requireBulkConsent(
+          pending_companies,
+          confirmed_credit_use,
+          `This will save this contact to your Hunter leads and continue the prospecting loop across up to ` +
+            `${pending_companies.length} more companies, using Hunter credits for each. Approve to continue?`,
+          { search: pending_companies.length, verification: pending_companies.length },
+          { saveLeads: true, confirmedSave: confirmed_save_use },
+        )
+        if (consentGuard) return consentGuard
+      }
+
       // Pre-flight: does the lead already exist?
       // We use /leads/exist (free, no credit cost) BEFORE POST /leads because
       // Hunter's create controller (app/controllers/api/leads/create_controller.rb)
@@ -418,10 +540,23 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
 
       // Loop continuation applies to BOTH branches (created AND alreadyExisted).
       // Without this, the multi-company chain stops at the first duplicate email.
+      // `leads_list_id` (a real lead field consumed above via `...fields` →
+      // buildLeadParams) is also carried forward (HUN-20651 review fix M) so every
+      // subsequent Create-Lead-If-Missing in the loop saves into the same list.
       return chainOrComplete(
         leadResult,
         pending_companies,
-        { limit, type, seniority, department, required_field, confirmed_credit_use },
+        {
+          limit,
+          type,
+          seniority,
+          department,
+          required_field,
+          confirmed_credit_use,
+          confirmed_save_use,
+          save_leads,
+          leads_list_id: fields.leads_list_id,
+        },
         {
           reason: "Lead saved or already existed; continuing with the next selected company.",
           loopCompleteSummary: "Lead saved or already existed. Multi-company loop complete.",

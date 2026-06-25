@@ -129,7 +129,7 @@ import { registerSequenceTools } from "./tools/sequences"
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "2.4.0",
+    version: "2.5.8",
   })
 
   // --- ChatGPT widget resources ---
@@ -226,7 +226,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     TOOL_NAMES.companyEnrichment,
     {
       description:
-        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 1 enrichment credit, only charged when data is found. Do not use this for personal websites or webmail domains (gmail.com, yahoo.com, etc.) — there is no company behind those domains to enrich.",
+        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Uses Hunter credits, charged only when data is found. Do not use this for personal websites or webmail domains (gmail.com, yahoo.com, etc.) — there is no company behind those domains to enrich.",
       inputSchema: {
         domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
       },

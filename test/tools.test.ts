@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { z } from "zod"
 import { sanitizeUpstreamMessage } from "../src/helpers"
+import { shouldVerify, verificationDecision } from "../src/tools/search"
 
 type ToolHandler = (...args: any[]) => any
 
@@ -455,10 +459,13 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
     registerAllTools()
   })
 
-  it("Domain-Search → Email-Verifier → Create-Lead-If-Missing → next Domain-Search threads pending_companies and confirmed_credit_use", async () => {
+  it("Domain-Search → Email-Verifier → Create-Lead-If-Missing → next Domain-Search threads pending_companies and confirmed_save_use", async () => {
     // Step 1: Domain-Search "a.com" returns one email + pending_companies=["b.com"].
-    // HUN-20170-v3 Phase 1.1c: bulk mode requires `confirmed_credit_use: true` on
-    // the seed call. The flag then propagates through every chained suggestedArgs.
+    // HUN-20170-v3 Phase 1.1c: bulk mode requires consent on the seed call. In SAVE
+    // mode (review fix B) that consent is the SAVE-scoped `confirmed_save_use: true`
+    // — a gather-scoped `confirmed_credit_use` does NOT cover saving. The save token
+    // then propagates through every chained suggestedArgs (carried only inside a
+    // save loop).
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValueOnce({
@@ -472,10 +479,14 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
       }),
     )
     const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // HUN-20651 Phase 2: save mode is now opt-in via `save_leads: true`. The seed
+    // call carries it + the save-scoped consent; both thread through every chained
+    // suggestedArgs so the whole loop stays in save mode and authorized.
     const dsResult = await dsHandler({
       domain: "a.com",
       pending_companies: ["b.com"],
-      confirmed_credit_use: true,
+      confirmed_save_use: true,
+      save_leads: true,
     })
     expect(dsResult.isError).toBeUndefined()
     const dsNext = (
@@ -483,7 +494,13 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
         nextAction: {
           kind: string
           tool: string
-          suggestedArgs: { email: string; pending_companies: string[]; confirmed_credit_use?: boolean }
+          suggestedArgs: {
+            email: string
+            pending_companies: string[]
+            confirmed_credit_use?: boolean
+            confirmed_save_use?: boolean
+            save_leads?: boolean
+          }
         }
       }
     ).nextAction
@@ -492,6 +509,8 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
     expect(dsNext.suggestedArgs.email).toBe("user@a.com")
     expect(dsNext.suggestedArgs.pending_companies).toEqual(["b.com"])
     expect(dsNext.suggestedArgs.confirmed_credit_use).toBe(true)
+    expect(dsNext.suggestedArgs.confirmed_save_use).toBe(true)
+    expect(dsNext.suggestedArgs.save_leads).toBe(true)
 
     // Step 2: Email-Verifier "user@a.com" (valid) chains into
     // Create-Lead-If-Missing, carrying pending_companies = ["b.com"] and the
@@ -511,7 +530,13 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
         nextAction: {
           kind: string
           tool: string
-          suggestedArgs: { email: string; pending_companies: string[]; confirmed_credit_use?: boolean }
+          suggestedArgs: {
+            email: string
+            pending_companies: string[]
+            confirmed_credit_use?: boolean
+            confirmed_save_use?: boolean
+            save_leads?: boolean
+          }
         }
       }
     ).nextAction
@@ -520,6 +545,8 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
     expect(evNext.suggestedArgs.email).toBe("user@a.com")
     expect(evNext.suggestedArgs.pending_companies).toEqual(["b.com"])
     expect(evNext.suggestedArgs.confirmed_credit_use).toBe(true)
+    expect(evNext.suggestedArgs.confirmed_save_use).toBe(true)
+    expect(evNext.suggestedArgs.save_leads).toBe(true)
 
     // Step 3: Create-Lead-If-Missing pre-flights /leads/exist (not found), then
     // POSTs /leads (success). Chains into next Domain-Search for "b.com" with
@@ -545,7 +572,13 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
         nextAction: {
           kind: string
           tool: string
-          suggestedArgs: { domain: string; pending_companies: string[]; confirmed_credit_use?: boolean }
+          suggestedArgs: {
+            domain: string
+            pending_companies: string[]
+            confirmed_credit_use?: boolean
+            confirmed_save_use?: boolean
+            save_leads?: boolean
+          }
         }
       }
     ).nextAction
@@ -554,6 +587,10 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
     expect(cmNext.suggestedArgs.domain).toBe("b.com")
     expect(cmNext.suggestedArgs.pending_companies).toEqual([])
     expect(cmNext.suggestedArgs.confirmed_credit_use).toBe(true)
+    // The save-scoped consent rides all the way to the next Domain-Search so the
+    // bulk gate stays satisfied for the rest of the save loop (review fix B).
+    expect(cmNext.suggestedArgs.confirmed_save_use).toBe(true)
+    expect(cmNext.suggestedArgs.save_leads).toBe(true)
   })
 
   it("Domain-Search with empty pending_companies terminates loop via complete", async () => {
@@ -565,10 +602,17 @@ describe("HUN-20170: headless prospecting chain advances via structuredContent.n
       }),
     )
     const dsHandler = registeredTools.get("Domain-Search")!.handler
-    // Last hop: pending is empty after this domain. confirmed_credit_use is
-    // irrelevant here because pending_companies.length === 0 — the guard only
-    // fires when pending_companies is non-empty.
-    const result = await dsHandler({ domain: "c.com", pending_companies: [] })
+    // Last hop of a CONSENTED save loop: pending is empty after this domain.
+    // `confirmed_save_use: true` proves the upfront save consent covered this batch
+    // (review fix H makes empty-pending save WITHOUT that consent gate instead of
+    // completing — covered in the dedicated H suite below). `save_leads: true`
+    // keeps this in save mode so the terminal is the save-loop "complete".
+    const result = await dsHandler({
+      domain: "c.com",
+      pending_companies: [],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
     expect(result.isError).toBeUndefined()
     const next = (result.structuredContent as { nextAction: { kind: string; summary: string } }).nextAction
     expect(next.kind).toBe("complete")
@@ -588,14 +632,14 @@ describe("HUN-20170-v3: Domain-Search confirmed_credit_use server-side guard", (
     registerAllTools()
   })
 
-  it("(1) bulk mode without confirmed_credit_use short-circuits with ask_user — no Hunter call", async () => {
+  it("(1) bulk mode without confirmed_credit_use short-circuits with ask_user — no Hunter call (research default)", async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)
     const dsHandler = registeredTools.get("Domain-Search")!.handler
     const result = await dsHandler({
       domain: "a.com",
       pending_companies: ["b.com", "c.com"],
-      // confirmed_credit_use intentionally omitted
+      // confirmed_credit_use intentionally omitted; save_leads omitted → research.
     })
     expect(result.isError).toBeUndefined()
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -609,16 +653,59 @@ describe("HUN-20170-v3: Domain-Search confirmed_credit_use server-side guard", (
     expect(structured.ok).toBe(true)
     // 1 (this domain) + 2 (remaining picks) = 3 total companies.
     expect(structured.estimated_credits.search).toBe(3)
-    expect(structured.estimated_credits.verification).toBe(3)
+    // HUN-20651 Phase 2: research mode does NOT auto-verify (verification is tied
+    // to lead creation), so the upfront verification estimate is 0.
+    expect(structured.estimated_credits.verification).toBe(0)
     expect(structured.nextAction.kind).toBe("ask_user")
-    expect(structured.nextAction.question).toContain("3 Hunter search credits")
+    // HUN-20651 Phase 1+2: bucket-agnostic consent copy. The company count is
+    // surfaced ("up to 3 companies") so the user can size the spend, but the
+    // copy describes WHEN credits are spent rather than the per-plan fraction
+    // (legacy dual-bucket vs unified diverge).
+    expect(structured.nextAction.question).toContain("up to 3 companies")
+    expect(structured.nextAction.question).toMatch(/Hunter credits/i)
+    // Research copy must NOT promise deliverability checks (it doesn't do them)
+    // nor use "saved contact" language.
+    expect(structured.nextAction.question).not.toMatch(/deliverability/i)
+    expect(structured.nextAction.question).not.toMatch(/saved? contact/i)
+    // Must never re-introduce the dual-bucket terminology the fix removed.
+    expect(structured.nextAction.question).not.toMatch(/search credit|verification credit|enrichment credit/i)
     // User-facing message must NOT leak internal implementation details
     // (cursor LOW: "User-facing consent message exposes internal parameter
     // names"). The prospecting directive handles flag-setting on the model
     // side; the user just needs to see the credit estimate + approval prompt.
     expect(structured.nextAction.question).not.toContain("confirmed_credit_use")
+    expect(structured.nextAction.question).not.toContain("save_leads")
     expect(structured.nextAction.question).not.toContain("Domain-Search")
     expect(structured.nextAction.question).not.toContain("authorize the batch")
+  })
+
+  it("(1b) save mode bulk consent surfaces deliverability + verification estimate, no jargon", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com", "c.com"],
+      save_leads: true,
+      // confirmed_credit_use omitted → gate fires once for the save batch too.
+    })
+    expect(result.isError).toBeUndefined()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind: string
+      estimated_credits: { search: number; verification: number }
+      nextAction: { kind: string; question: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.estimated_credits.search).toBe(3)
+    // Save mode estimates up to one verification per company.
+    expect(structured.estimated_credits.verification).toBe(3)
+    expect(structured.nextAction.question).toContain("up to 3 companies")
+    expect(structured.nextAction.question).toMatch(/deliverability/i)
+    expect(structured.nextAction.question).toMatch(/Hunter credits/i)
+    expect(structured.nextAction.question).not.toMatch(/search credit|verification credit|enrichment credit/i)
+    expect(structured.nextAction.question).not.toContain("confirmed_credit_use")
+    expect(structured.nextAction.question).not.toContain("save_leads")
   })
 
   it("(2) bulk mode with confirmed_credit_use=true proceeds — Hunter is called", async () => {
@@ -664,6 +751,1807 @@ describe("HUN-20170-v3: Domain-Search confirmed_credit_use server-side guard", (
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const structured = result.structuredContent as { kind?: string }
     expect(structured.kind).not.toBe("approval_required")
+  })
+})
+
+// HUN-20651 Phase 1: conditional verification. `shouldVerify` is the
+// deterministic server-side predicate; the Domain-Search handler routes past
+// Email-Verifier straight to the create-only save terminal when it returns false.
+describe("HUN-20651: shouldVerify predicate truth table", () => {
+  it("skips verify for fresh-valid + high-confidence (>= threshold)", () => {
+    expect(
+      shouldVerify({ value: "a@x.com", confidence: 95, verification: { status: "valid" } }, {}),
+    ).toBe(false)
+    // Exactly at the threshold (90) also skips.
+    expect(
+      shouldVerify({ value: "a@x.com", confidence: 90, verification: { status: "valid" } }, {}),
+    ).toBe(false)
+  })
+
+  it("verifies fresh-valid but LOW confidence (< threshold)", () => {
+    expect(
+      shouldVerify({ value: "a@x.com", confidence: 89, verification: { status: "valid" } }, {}),
+    ).toBe(true)
+    // Valid with no confidence at all defaults to 0 → verify.
+    expect(shouldVerify({ value: "a@x.com", verification: { status: "valid" } }, {})).toBe(true)
+  })
+
+  it("verifies the dominant case: null verification status (no fresh EmailVerification row)", () => {
+    expect(
+      shouldVerify({ value: "a@x.com", confidence: 99, verification: { status: null, date: null } }, {}),
+    ).toBe(true)
+    // Verification block entirely absent → also verify.
+    expect(shouldVerify({ value: "a@x.com", confidence: 99 }, {})).toBe(true)
+  })
+
+  it("does NOT re-verify accept_all (per-email or domain-level) or invalid", () => {
+    expect(shouldVerify({ value: "a@x.com", verification: { status: "accept_all" } }, {})).toBe(false)
+    expect(shouldVerify({ value: "a@x.com", accept_all: true }, {})).toBe(false)
+    // Domain-level accept_all suppresses re-verify even for an otherwise-verifiable row.
+    expect(
+      shouldVerify({ value: "a@x.com", verification: { status: null } }, { domainAcceptAll: true }),
+    ).toBe(false)
+    // invalid → known-bad; re-verifying wouldn't improve it → skip (surface/drop).
+    expect(shouldVerify({ value: "a@x.com", verification: { status: "invalid" } }, {})).toBe(false)
+  })
+
+  it("fails OPEN (verifies) on an unknown / out-of-range status", () => {
+    expect(shouldVerify({ value: "a@x.com", confidence: 99, verification: { status: "weird" } }, {})).toBe(true)
+  })
+})
+
+// HUN-20651 Phase 4: the SAME truth table again, but built by MUTATING a
+// real-shape Domain-Search fixture instead of hand-authoring entry objects. The
+// hand-authored block above is convenient but risks testing shapes the wire
+// never emits (e.g. `confidence` nested in `verification`, or an absent
+// `verification` block). This block pins the predicate against the actual Rails
+// emit shape captured from app/app/views/api/domain_search/show.json.jbuilder:
+// every entry ALWAYS carries `verification: { date, status }`, `confidence` is
+// entry-level, and `accept_all` exists at both the domain and (rarely) entry
+// level. We deep-clone before each mutation so the leaves stay pristine.
+describe("HUN-20651 Phase 4: shouldVerify truth table on a real-shape fixture", () => {
+  const FIXTURE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "./fixtures/domain-search-fresh.json")
+  type FixtureEntry = {
+    value: string
+    confidence?: number
+    accept_all?: boolean
+    verification: { date: string | null; status: string | null }
+  }
+  type Fixture = { data: { domain: string; accept_all: boolean; emails: FixtureEntry[] } }
+
+  // Fresh deep clone per call so a mutation in one case can't bleed into the next.
+  const loadFixture = (): Fixture => JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as Fixture
+
+  // The fixture's three entries are addressed by position so the intent reads
+  // clearly: 0 = valid+high-confidence (the skip case), 1 = null status / VP
+  // Sales (the dominant verify case), 2 = null status / Sales Manager.
+  const VALID_HIGH = 0
+  const NULL_STATUS = 1
+
+  it("the captured fixture matches the real Rails emit shape (every entry has verification leaves; confidence is entry-level)", () => {
+    const { data } = loadFixture()
+    expect(typeof data.accept_all).toBe("boolean")
+    expect(data.emails.length).toBeGreaterThan(0)
+    for (const entry of data.emails) {
+      // verification block is ALWAYS present (present-with-null-leaves on fresh emails).
+      expect(entry).toHaveProperty("verification")
+      expect(entry.verification).toHaveProperty("status")
+      expect(entry.verification).toHaveProperty("date")
+      // confidence lives on the entry, never inside verification.
+      expect(entry.verification).not.toHaveProperty("confidence")
+      if (entry.confidence !== undefined) {
+        expect(entry.confidence).toBeGreaterThanOrEqual(0)
+        expect(entry.confidence).toBeLessThanOrEqual(100)
+      }
+    }
+    // The fixture's valid entry is high-confidence — the only skip-eligible row as captured.
+    expect(data.emails[VALID_HIGH].verification.status).toBe("valid")
+    expect(data.emails[VALID_HIGH].confidence).toBeGreaterThanOrEqual(90)
+    // The null-status leaves ARE null (not absent) — the dominant fresh case.
+    expect(data.emails[NULL_STATUS].verification.status).toBeNull()
+    expect(data.emails[NULL_STATUS].verification.date).toBeNull()
+  })
+
+  it("RV (dominant): null verification status leaves → verify", () => {
+    const { data } = loadFixture()
+    // Untouched fixture entry: VP Sales with { status: null, date: null }.
+    expect(shouldVerify(data.emails[NULL_STATUS], { domainAcceptAll: data.accept_all })).toBe(true)
+  })
+
+  it("RV: valid + confidence < 90 → verify (mutate the high-confidence entry down)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[VALID_HIGH]
+    entry.confidence = 89
+    expect(shouldVerify(entry, { domainAcceptAll: data.accept_all })).toBe(true)
+  })
+
+  it("RV: valid + confidence >= 90 → SKIP (no Email-Verifier, no credit)", () => {
+    const { data } = loadFixture()
+    // Untouched: the captured valid entry is already 96 confidence.
+    expect(shouldVerify(data.emails[VALID_HIGH], { domainAcceptAll: data.accept_all })).toBe(false)
+  })
+
+  it("RV: per-email accept_all → surface, no verify (mutate one entry)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[NULL_STATUS]
+    entry.accept_all = true
+    expect(shouldVerify(entry, { domainAcceptAll: data.accept_all })).toBe(false)
+  })
+
+  it("RV: domain-level accept_all → surface every row, no verify (flip data.accept_all)", () => {
+    const { data } = loadFixture()
+    data.accept_all = true
+    // Even the otherwise-verifiable null-status row is suppressed when the whole
+    // domain is catch-all (a re-verify would just echo accept_all and burn a credit).
+    for (const entry of data.emails) {
+      expect(shouldVerify(entry, { domainAcceptAll: data.accept_all })).toBe(false)
+    }
+  })
+
+  it("RV: invalid → no re-verify (mutate a null-status entry to invalid)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[NULL_STATUS]
+    entry.verification.status = "invalid"
+    expect(shouldVerify(entry, { domainAcceptAll: data.accept_all })).toBe(false)
+  })
+
+  it("RV: unknown/out-of-range status fails OPEN → verify (mutate to a garbage status)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[VALID_HIGH]
+    entry.verification.status = "totally-bogus"
+    expect(shouldVerify(entry, { domainAcceptAll: data.accept_all })).toBe(true)
+  })
+})
+
+// HUN-20651 review fix A: the THREE-way `verificationDecision` router. The bug
+// being fixed: routing on the `shouldVerify` boolean conflated "trustworthy, save
+// it" with "accept_all/invalid, skip the re-verify but DON'T save". This block
+// pins the three distinct outcomes against the real-shape fixture, and asserts the
+// invariant that ties the router back to the (retained) provenance predicate:
+// `verificationDecision !== "verify"` IFF `shouldVerify === false`.
+describe("HUN-20651 review fix A: verificationDecision 3-way truth table (real-shape fixture)", () => {
+  const FIXTURE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "./fixtures/domain-search-fresh.json")
+  type FixtureEntry = {
+    value: string
+    confidence?: number
+    accept_all?: boolean
+    verification: { date: string | null; status: string | null }
+  }
+  type Fixture = { data: { domain: string; accept_all: boolean; emails: FixtureEntry[] } }
+  const loadFixture = (): Fixture => JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as Fixture
+  const VALID_HIGH = 0
+  const NULL_STATUS = 1
+
+  it("valid + confidence >= 90 → skip_and_use (trust as returned, save it)", () => {
+    const { data } = loadFixture()
+    expect(verificationDecision(data.emails[VALID_HIGH], { domainAcceptAll: data.accept_all })).toBe("skip_and_use")
+  })
+
+  it("null verification status → verify (the dominant case)", () => {
+    const { data } = loadFixture()
+    expect(verificationDecision(data.emails[NULL_STATUS], { domainAcceptAll: data.accept_all })).toBe("verify")
+  })
+
+  it("valid + confidence < 90 → verify", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[VALID_HIGH]
+    entry.confidence = 89
+    expect(verificationDecision(entry, { domainAcceptAll: data.accept_all })).toBe("verify")
+  })
+
+  it("per-email accept_all → skip_and_drop (NOT saveable)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[NULL_STATUS]
+    entry.accept_all = true
+    expect(verificationDecision(entry, { domainAcceptAll: data.accept_all })).toBe("skip_and_drop")
+  })
+
+  it("domain-level accept_all → skip_and_drop, EXCEPT a per-email valid+high-confidence row", () => {
+    const { data } = loadFixture()
+    data.accept_all = true
+    // A fresh per-email valid + high-confidence verification is an authoritative
+    // positive signal for THIS address that the product trusts over the domain-level
+    // catch-all fallback (domain_search/_emails.haml) — so it stays saveable.
+    expect(verificationDecision(data.emails[VALID_HIGH], { domainAcceptAll: data.accept_all })).toBe("skip_and_use")
+    // Every row WITHOUT a definitive per-email valid still drops on a catch-all
+    // domain (re-verify would echo accept_all and the address isn't saveable).
+    expect(verificationDecision(data.emails[NULL_STATUS], { domainAcceptAll: data.accept_all })).toBe("skip_and_drop")
+  })
+
+  it("invalid → skip_and_drop (NOT saveable, no re-verify)", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[NULL_STATUS]
+    entry.verification.status = "invalid"
+    expect(verificationDecision(entry, { domainAcceptAll: data.accept_all })).toBe("skip_and_drop")
+  })
+
+  it("unknown/out-of-range status fails OPEN → verify", () => {
+    const { data } = loadFixture()
+    const entry = data.emails[VALID_HIGH]
+    entry.verification.status = "totally-bogus"
+    expect(verificationDecision(entry, { domainAcceptAll: data.accept_all })).toBe("verify")
+  })
+
+  it("invariant: verificationDecision !== 'verify' IFF shouldVerify === false (markers stay consistent)", () => {
+    // Sweep every (status, confidence, accept_all) combination the predicate can see
+    // and assert the two functions never disagree on the skip/verify boundary — so
+    // the verification_source marker (driven by shouldVerify) and the save/research
+    // routing (driven by verificationDecision) can never drift apart.
+    const statuses = [null, "valid", "invalid", "accept_all", "webmail", "disposable", "unknown", "garbage"]
+    for (const status of statuses) {
+      for (const confidence of [0, 50, 89, 90, 96, 100]) {
+        for (const acceptAll of [false, true]) {
+          for (const domainAcceptAll of [false, true]) {
+            const entry = { value: "x@y.com", confidence, accept_all: acceptAll, verification: { status } }
+            const skipped = !shouldVerify(entry, { domainAcceptAll })
+            const decided = verificationDecision(entry, { domainAcceptAll })
+            expect(decided !== "verify").toBe(skipped)
+          }
+        }
+      }
+    }
+  })
+})
+
+describe("HUN-20651: Domain-Search conditional-verify routing + verification_source marker", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("single-company: fresh-valid + high-confidence skips Email-Verifier and routes to Create-Lead-If-Missing WITH the per-email gate", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid", date: "2026-06-01" } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // HUN-20651 Phase 2: save mode is opt-in; pass save_leads to exercise the
+    // save terminal (research mode would instead emit a render-the-table complete).
+    const result = await dsHandler({ domain: "a.com", save_leads: true })
+    expect(result.isError).toBeUndefined()
+    const next = (
+      result.structuredContent as {
+        nextAction: { kind: string; tool: string; requiresConfirmation?: boolean; suggestedArgs: { email: string } }
+      }
+    ).nextAction
+    expect(next.kind).toBe("call_tool")
+    // Skip-verify lands directly at the create-only save terminal (no redundant
+    // re-verify), but the per-email confirmation gate STILL fires: a single-company
+    // save has no bulk consent covering the lead-write spend (review fix C).
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.suggestedArgs.email).toBe("user@a.com")
+    expect(next.requiresConfirmation).toBe(true)
+    // The row carries the trusted-as-is provenance marker.
+    const emails = (result.structuredContent as { data: { emails: { verification_source: string }[] } }).data.emails
+    expect(emails[0].verification_source).toBe("domain_search")
+  })
+
+  it("single-company: null verification status still routes to Email-Verifier with the confirmation gate", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                emails: [{ value: "user@a.com", confidence: 99, verification: { status: null, date: null } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Save mode, single company, not consented → the per-email gate still belongs.
+    const result = await dsHandler({ domain: "a.com", save_leads: true })
+    const next = (
+      result.structuredContent as { nextAction: { tool: string; requiresConfirmation?: boolean } }
+    ).nextAction
+    expect(next.tool).toBe("Email-Verifier")
+    expect(next.requiresConfirmation).toBe(true)
+    const emails = (result.structuredContent as { data: { emails: { verification_source: string }[] } }).data.emails
+    expect(emails[0].verification_source).toBe("email_verifier")
+  })
+
+  it("multi-company loop: skip-verify routes past Email-Verifier to Create-Lead-If-Missing, carrying the loop", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                emails: [{ value: "user@a.com", confidence: 95, verification: { status: "valid", date: "2026-06-01" } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const next = (
+      result.structuredContent as {
+        nextAction: {
+          tool: string
+          suggestedArgs: {
+            email: string
+            pending_companies: string[]
+            confirmed_credit_use?: boolean
+            confirmed_save_use?: boolean
+          }
+        }
+      }
+    ).nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.suggestedArgs.email).toBe("user@a.com")
+    // Loop carry preserved so the create terminal advances to the next company.
+    expect(next.suggestedArgs.pending_companies).toEqual(["b.com"])
+    expect(next.suggestedArgs.confirmed_credit_use).toBe(true)
+    expect(next.suggestedArgs.confirmed_save_use).toBe(true)
+  })
+
+  // HUN-20651 review fix A: an accept_all (or invalid) BEST contact must NOT be
+  // saved in save mode — re-verifying it just echoes accept_all/invalid (billable
+  // and pointless) AND the address is not trustworthy to create a lead from. The
+  // OLD behaviour conflated "skip re-verify" with "skip straight to save" and saved
+  // it. The loop must instead advance to the next company WITHOUT ever chaining to
+  // Create-Lead-If-Missing or Email-Verifier. (The row is still surfaced, tagged
+  // domain_search, for the eventual table.)
+  it("multi-company loop: accept_all domain is NOT saved — advances to the next company instead", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                accept_all: true,
+                emails: [{ value: "user@a.com", confidence: 50, verification: { status: null } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const next = (
+      result.structuredContent as {
+        nextAction: { tool?: string; reason?: string; suggestedArgs?: { domain?: string } }
+      }
+    ).nextAction
+    // NEVER saves an accept_all/invalid contact; advances the loop instead.
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.suggestedArgs?.domain).toBe("b.com")
+    const emails = (result.structuredContent as { data: { emails: { verification_source: string }[] } }).data.emails
+    expect(emails[0].verification_source).toBe("domain_search")
+    // HUN-20651 review fix F: a contact WAS found — the advance reason must say so
+    // (not saved because accept_all/invalid), NOT reuse the "no contacts" copy.
+    expect(next.reason).toMatch(/found at a\.com but not saved/i)
+    expect(next.reason).toMatch(/accept_all\/invalid/i)
+    expect(next.reason).not.toMatch(/no contacts/i)
+  })
+
+  // HUN-20651 review fix F: the drop-complete summary path — a save run whose LAST
+  // (and only) company yields an accept_all/invalid contact must complete with the
+  // drop-specific summary, never the "No contacts found" loop-complete summary.
+  it("multi-company loop: last company is accept_all → drop-complete summary (not the no-contact summary)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                accept_all: true,
+                emails: [{ value: "user@a.com", confidence: 50, verification: { status: null } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Empty pending → this is the final hop, so advanceLoop hits the complete branch.
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: [],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } })
+      .nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.summary).toMatch(/found at a\.com but not saved/i)
+    expect(next.summary).toMatch(/accept_all\/invalid/i)
+    expect(next.summary).not.toMatch(/no contacts found/i)
+  })
+
+  // HUN-20651 review fix F: the genuine 0-contact case must STILL use the
+  // "No contacts found" copy — the drop copy is reserved for found-but-dropped.
+  it("multi-company loop: a company with no contacts keeps the no-contact advance copy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [] } })),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const next = (result.structuredContent as { nextAction: { tool?: string; reason?: string } }).nextAction
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.reason).toMatch(/no contacts at a\.com/i)
+    expect(next.reason).not.toMatch(/not saved/i)
+  })
+
+  // HUN-20651 review fix A: the single-company save counterpart — an accept_all
+  // best contact must complete WITHOUT chaining to a write tool (surface only).
+  it("single-company save: accept_all best contact is surfaced, not saved", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                accept_all: true,
+                emails: [{ value: "user@a.com", confidence: 50, verification: { status: null } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", save_leads: true })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } })
+      .nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.summary).toMatch(/not.*saved|catch-all|invalid/i)
+  })
+
+  // HUN-20651 review fix A: an invalid best contact is likewise dropped from the
+  // save path (no Email-Verifier, no Create-Lead-If-Missing) in the multi loop.
+  it("multi-company loop: invalid best contact is NOT saved — advances instead", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain: "a.com",
+                emails: [{ value: "user@a.com", confidence: 50, verification: { status: "invalid" } }],
+              },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const next = (result.structuredContent as { nextAction: { tool?: string } }).nextAction
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.tool).toBe("Domain-Search")
+  })
+})
+
+// HUN-20651 Phase 2: research mode (the default). The loop returns a table and
+// writes nothing — Domain-Search advances Domain-Search → next Domain-Search and
+// NEVER chains into Email-Verifier or Create-Lead-If-Missing. Save mode is opt-in
+// via `save_leads: true` and is covered by the conditional-verify routing tests
+// above.
+describe("HUN-20651 Phase 2: research-mode terminal routing", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // Helper: a Domain-Search fetch stub returning one high-confidence valid email.
+  // In SAVE mode this would skip-verify into Create-Lead-If-Missing; research mode
+  // must ignore that and advance to the next company regardless.
+  const stubValidEmail = (domain: string) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: {
+                domain,
+                emails: [{ value: `user@${domain}`, confidence: 97, verification: { status: "valid", date: "2026-06-01" } }],
+              },
+            }),
+          ),
+      }),
+    )
+
+  it("multi-company: a company WITH contacts advances to the next Domain-Search (never Email-Verifier / Create-Lead-If-Missing)", async () => {
+    stubValidEmail("a.com")
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // save_leads omitted → research default. confirmed_credit_use carried so the
+    // gate doesn't re-fire.
+    const result = await dsHandler({ domain: "a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect(result.isError).toBeUndefined()
+    const next = (
+      result.structuredContent as {
+        nextAction: {
+          kind: string
+          tool: string
+          requiresConfirmation?: boolean
+          suggestedArgs: { domain: string; pending_companies: string[]; confirmed_credit_use?: boolean; save_leads?: boolean }
+        }
+      }
+    ).nextAction
+    expect(next.kind).toBe("call_tool")
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+    // No per-email gate in research mode (no save intent to confirm).
+    expect(next.requiresConfirmation).toBeUndefined()
+    expect(next.suggestedArgs.domain).toBe("b.com")
+    expect(next.suggestedArgs.pending_companies).toEqual([])
+    expect(next.suggestedArgs.confirmed_credit_use).toBe(true)
+    // Research mode never accumulates `save_leads` in the carry.
+    expect(next.suggestedArgs.save_leads).toBeUndefined()
+  })
+
+  it("multi-company: empty pending after this company → complete with a table-render instruction (no save tool)", async () => {
+    stubValidEmail("z.com")
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "z.com", pending_companies: [], confirmed_credit_use: true })
+    const next = (result.structuredContent as { nextAction: { kind: string; summary: string } }).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.summary).toMatch(/table/i)
+    // Must not steer toward the save chain.
+    expect(next.summary).not.toContain("Create-Lead-If-Missing")
+  })
+
+  it("single-company research suppresses the per-email verify gate and completes with a table", async () => {
+    // Null verification status would, in SAVE mode, route to Email-Verifier WITH
+    // the confirmation gate. Research mode must instead complete with a table and
+    // no gate (decision #2: verification is tied to lead creation, which research
+    // doesn't do).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { domain: "a.com", emails: [{ value: "user@a.com", verification: { status: null, date: null } }] },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com" }) // no save_leads, no pending → single-company research
+    const next = (
+      result.structuredContent as { nextAction: { kind: string; tool?: string; requiresConfirmation?: boolean; summary?: string } }
+    ).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.requiresConfirmation).toBeUndefined()
+    expect(next.summary).toMatch(/table/i)
+  })
+
+  it("research-mode loopRecoveryAction on a Hunter error stays an ask_user — does NOT enter the save chain", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: { get: () => null },
+        text: () => Promise.resolve("upstream boom"),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect(result.isError).toBe(true)
+    const next = (result.structuredContent as { nextAction: { kind: string; question?: string } }).nextAction
+    expect(next.kind).toBe("ask_user")
+    expect(next.question).toMatch(/skip|retry|stop/i)
+  })
+
+  it("research-mode 0-contact company advances to the next Domain-Search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { domain: "empty.com", emails: [] } })),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "empty.com", pending_companies: ["next.com"], confirmed_credit_use: true })
+    const next = (
+      result.structuredContent as { nextAction: { kind: string; tool: string; suggestedArgs: { domain: string } } }
+    ).nextAction
+    expect(next.kind).toBe("call_tool")
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.suggestedArgs.domain).toBe("next.com")
+  })
+
+  it("save_leads is carried through the loop ONLY when true (research loops never accumulate it)", async () => {
+    stubValidEmail("a.com")
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Save mode: the next-company advance (0-contact or research) would carry it;
+    // here the email-found save path chains to Create-Lead-If-Missing which then
+    // re-advances. Assert the save-mode skip-verify carry keeps save_leads.
+    const saveResult = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    const saveNext = (
+      saveResult.structuredContent as {
+        nextAction: { tool: string; suggestedArgs: { save_leads?: boolean; confirmed_save_use?: boolean } }
+      }
+    ).nextAction
+    expect(saveNext.tool).toBe("Create-Lead-If-Missing")
+    expect(saveNext.suggestedArgs.save_leads).toBe(true)
+    expect(saveNext.suggestedArgs.confirmed_save_use).toBe(true)
+  })
+
+  // HUN-20651 Phase 4: the bulk-consent gate must fire EXACTLY ONCE per research
+  // loop. Hop 1 (unconsented) short-circuits with an approval_required envelope
+  // and makes NO Hunter call; once the user approves, the model re-issues the
+  // SAME call carrying `confirmed_credit_use: true` and that second hop actually
+  // hits Hunter. This is the property that fixes the reporter's "every company
+  // re-prompts" complaint. We also re-assert the copy invariants here so the
+  // unified/bucket-agnostic wording is checked on the literal consent question.
+  it("consent fires once: hop 1 short-circuits (approval_required, unified copy), hop 2 with confirmed_credit_use calls fetch", async () => {
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+
+    // Hop 1: no confirmed_credit_use, research default → approval gate, no fetch.
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const hop1 = await dsHandler({ domain: "a.com", pending_companies: ["b.com"] })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const gated = hop1.structuredContent as {
+      kind: string
+      nextAction: { kind: string; question: string }
+    }
+    expect(gated.kind).toBe("approval_required")
+    expect(gated.nextAction.kind).toBe("ask_user")
+    // Bucket-agnostic unified copy present; dual-bucket terminology absent; no
+    // "saved contact" language in research-mode consent.
+    expect(gated.nextAction.question).toMatch(/Hunter credits/i)
+    expect(gated.nextAction.question).not.toMatch(/search credit|verification credit|enrichment credit/i)
+    expect(gated.nextAction.question).not.toMatch(/saved? contact/i)
+
+    // Hop 2: user approved → re-issue WITH confirmed_credit_use; Hunter is called
+    // and the gate does NOT re-fire.
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [] } })),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const hop2 = await dsHandler({ domain: "a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    expect((hop2.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+
+  // HUN-20651 Phase 4: defense against a mid-loop research→save flip WITHOUT
+  // re-consent. A loop that began in research mode carries no `save_leads` (the
+  // carry is monotonic-toward-save: `carryLoopFilters` only forwards `true`). But
+  // even if a `save_leads: true` is injected onto a chained Domain-Search hop that
+  // was already consented for a BULK batch (confirmed_credit_use carried, but the
+  // bulk consent the user gave was the research-mode estimate with verification:0),
+  // the handler must not start writing leads silently. The two cases below pin the
+  // two arms of that guard.
+  it("a mid-loop hop that carries no save_leads stays in research mode and never chains to a write tool", async () => {
+    stubValidEmail("mid.com")
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Simulate the second hop of a research loop: confirmed_credit_use is carried
+    // (bulk already approved) but save_leads is absent, exactly as carryLoopFilters
+    // forwards it. A high-confidence valid email would, in save mode, skip-verify
+    // straight into Create-Lead-If-Missing; research mode must ignore that.
+    const result = await dsHandler({ domain: "mid.com", pending_companies: ["last.com"], confirmed_credit_use: true })
+    const next = (result.structuredContent as { nextAction: { tool: string } }).nextAction
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+  })
+
+  it("a mid-loop hop arriving without confirmed_credit_use re-fires the consent gate (no silent write)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // A save_leads:true that arrives on a bulk hop WITHOUT the carried
+    // confirmed_save_use cannot proceed to a write — the gate short-circuits to
+    // an approval_required envelope and no Hunter call (and therefore no lead
+    // creation) happens. Re-consent is required.
+    const result = await dsHandler({ domain: "flip.com", pending_companies: ["b.com"], save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    expect((result.structuredContent as { kind?: string }).kind).toBe("approval_required")
+  })
+
+  // HUN-20651 review fix B (the CORE consent-bypass fix): a RESEARCH-scoped consent
+  // (gathered with verification estimate 0) must NOT authorize the save path. A
+  // research loop carries `confirmed_credit_use: true` and NO save_leads; if a
+  // `save_leads: true` then appears on a hop that still only carries the research
+  // consent, the save gate must RE-FIRE with the higher save estimate — never let
+  // Email-Verifier / Create-Lead-If-Missing run on a cost the user never approved.
+  it("research consent carried + save_leads:true injected → save gate re-fires (no write, save-cost estimate)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Exactly the bypass scenario: the carried research consent (confirmed_credit_use)
+    // is present, save_leads flips to true, but the SAVE-scoped confirmed_save_use is
+    // absent (a research loop never carries it).
+    const result = await dsHandler({
+      domain: "flip.com",
+      pending_companies: ["b.com", "c.com"],
+      confirmed_credit_use: true,
+      save_leads: true,
+    })
+    // No Hunter call, so no lead can be created — the bypass is closed.
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+      nextAction: { kind: string; question: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    // The estimate must reflect the SAVE cost (verification per company), not the
+    // research estimate of 0 — the user is approving the higher save spend.
+    expect(structured.estimated_credits?.verification).toBe(3) // 1 + 2 pending
+    // Save consent message mentions deliverability/saving (bucket-agnostic copy).
+    expect(structured.nextAction.question).toMatch(/deliverability|saving/i)
+  })
+
+  // HUN-20651 review fix B: the legitimate save loop is NOT broken — once the
+  // SAVE-scoped consent is granted (confirmed_save_use: true) the gate passes and
+  // Hunter is called.
+  it("save loop with confirmed_save_use:true proceeds — Hunter is called", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [] } })),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      confirmed_save_use: true,
+      save_leads: true,
+    })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+})
+
+// HUN-20651 review fix H + J: two consent-bypass backdoors closed.
+//   H — empty pending_companies in SAVE mode must not be a backdoor: an empty
+//       (but DEFINED) array still routes through advanceLoop's save terminal, so
+//       without a gate it wrote a lead with neither the bulk consent gate nor the
+//       single-company per-email gate. After the fix, empty-pending + save + no
+//       consent fires the bulk gate (approval_required, no fetch); a consented
+//       loop still advances; research empty-pending still just completes.
+//   J — a DIRECT bulk Email-Verifier call (non-empty pending, no carried
+//       confirmed_save_use) must gate at handler-top instead of spending a verify
+//       credit and continuing the loop.
+describe("HUN-20651 review fix H: empty pending_companies save is not an ungated backdoor", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // The core H bug: save_leads + empty pending + NO save consent reached
+  // Create-Lead-If-Missing through advanceLoop with no requiresConfirmation. The
+  // fix must block the write: the bulk gate fires BEFORE any Hunter call.
+  it("empty pending + save_leads + no consent → approval_required, no Hunter call (no ungated write)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", pending_companies: [], save_leads: true })
+    // No Hunter call at all → no Domain-Search credit, and crucially no chained
+    // Create-Lead-If-Missing write can ever happen from this response.
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      nextAction: { kind: string; tool?: string; question?: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    // It must NOT be a call_tool into the write terminal.
+    expect(structured.nextAction.tool).toBeUndefined()
+    // Save-cost copy (bucket-agnostic): mentions deliverability/saving.
+    expect(structured.nextAction.question).toMatch(/deliverability|saving/i)
+  })
+
+  // A legitimate in-progress CONSENTED save loop (confirmed_save_use carried) on
+  // its last hop (empty pending) must still advance — the gate must not re-fire.
+  it("empty pending + save_leads + confirmed_save_use → proceeds (Hunter called, no re-gate)", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            data: { domain: "a.com", emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }] },
+          }),
+        ),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({
+      domain: "a.com",
+      pending_companies: [],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+    // Consented last hop with a saveable email → chains to the create terminal,
+    // and because the save WAS consented, no per-email gate is re-attached.
+    const next = (result.structuredContent as { nextAction: { tool?: string; requiresConfirmation?: boolean } })
+      .nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.requiresConfirmation).toBeUndefined()
+  })
+
+  // Research mode empty-pending must be unaffected: it never gates on empty, just
+  // completes with a table (no write path to protect).
+  it("empty pending in RESEARCH mode still completes with a table (no gate, no write)", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            data: { domain: "a.com", emails: [{ value: "user@a.com", verification: { status: null, date: null } }] },
+          }),
+        ),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", pending_companies: [], confirmed_credit_use: true })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } })
+      .nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.summary).toMatch(/table/i)
+  })
+})
+
+describe("HUN-20651 review fix J: direct bulk Email-Verifier without carried consent gates", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // The J bug: Email-Verifier accepts pending_companies, so a model can call it
+  // directly as a bulk entry. Without the carried confirmed_save_use (proving it
+  // came from a consented Domain-Search), it must NOT spend a verify credit — it
+  // must gate at handler-top.
+  it("direct bulk Email-Verifier (non-empty pending, no confirmed_save_use) → approval_required, no /email-verifier call", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({
+      email: "user@a.com",
+      pending_companies: ["b.com", "c.com"],
+      save_leads: true,
+      // confirmed_save_use intentionally absent → direct, unconsented bulk entry.
+    })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+      nextAction: { kind: string; question: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    expect(structured.estimated_credits?.verification).toBe(3) // 1 + 2 pending
+  })
+
+  // A legitimate handoff from a consented Domain-Search carries confirmed_save_use:
+  // true → Email-Verifier proceeds (no gate) and spends the credit it was approved
+  // for.
+  it("bulk Email-Verifier WITH carried confirmed_save_use proceeds — /email-verifier is called", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+    // Valid email → chains to the create-only terminal, loop continues.
+    const next = (result.structuredContent as { nextAction: { tool?: string } }).nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+  })
+
+  // A normal single Email-Verifier call (no pending_companies) is unaffected by the
+  // J gate — it just verifies.
+  it("single Email-Verifier (no pending_companies) is unaffected — /email-verifier is called", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com" })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+})
+
+// ─── HUN-20651 review fixes K/L/M/N/O — uniform mode + consent across the three
+// multi-company loop tools (Domain-Search, Email-Verifier, Create-Lead-If-Missing).
+//
+//   K — Email-Verifier honors save_leads: a valid result chains to the save
+//       terminal ONLY in save mode; research mode advances/completes and never
+//       chains to a write.
+//   L — a DIRECT bulk Create-Lead-If-Missing (defined pending + save_leads, no
+//       confirmed_save_use) gates at handler-top (approval_required, no write); a
+//       consented loop proceeds; a single save is unaffected.
+//   M — leads_list_id threads through the loop into the chained
+//       Create-Lead-If-Missing suggestedArgs.
+//   N — the approval_required envelope conforms to the PUBLISHED Email-Verifier /
+//       Create-Lead-If-Missing output schemas.
+//   O — an empty-but-DEFINED pending_companies bulk entry in save mode gates the
+//       same way (Email-Verifier AND Create-Lead-If-Missing), consistent with the
+//       Domain-Search H fix.
+describe("HUN-20651 review fix K: Email-Verifier honors research-vs-save mode", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  const stubValid = (email: string) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email, score: 95 } })),
+      }),
+    )
+
+  it("single call, research mode (default): valid result does NOT chain to Create-Lead-If-Missing", async () => {
+    stubValid("user@a.com")
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com" })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string } }).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+  })
+
+  it("single call, save mode: valid result STILL chains to Create-Lead-If-Missing", async () => {
+    stubValid("user@a.com")
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", save_leads: true })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string } }).nextAction
+    expect(next.kind).toBe("call_tool")
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+  })
+
+  it("bulk loop, research mode: a valid result advances to the next Domain-Search (never a write tool)", async () => {
+    stubValid("user@a.com")
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    // confirmed_credit_use carried (research bulk already approved), save_leads absent.
+    const result = await evHandler({
+      email: "user@a.com",
+      pending_companies: ["b.com", "c.com"],
+      confirmed_credit_use: true,
+    })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; suggestedArgs?: { domain?: string } } })
+      .nextAction
+    expect(next.kind).toBe("call_tool")
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+    expect(next.suggestedArgs?.domain).toBe("b.com")
+  })
+
+  it("bulk loop, research mode, last hop (empty pending): completes with a table, never a write tool", async () => {
+    stubValid("user@a.com")
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", pending_companies: [], confirmed_credit_use: true })
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } }).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.summary).toMatch(/table/i)
+  })
+
+  it("bulk loop, save mode (consented): a valid result still chains to Create-Lead-If-Missing", async () => {
+    stubValid("user@a.com")
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    const next = (result.structuredContent as { nextAction: { tool?: string } }).nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+  })
+
+  // A direct bulk EV in RESEARCH mode without the gather token must still gate at
+  // handler-top (no ungated verify credit) — uniform with a direct bulk
+  // Domain-Search. The gate uses the research (gather) token, not the save token.
+  it("direct bulk research EV without confirmed_credit_use → approval_required, no /email-verifier call", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", pending_companies: ["b.com", "c.com"] })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+      nextAction: { kind: string; question: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    // Research consent copy: no "save" language.
+    expect(structured.nextAction.question).not.toMatch(/save/i)
+    // Review fixes V + Y: a research-mode direct bulk EV verifies only THIS email,
+    // then chains Domain-Search → Domain-Search (search, not verify) for the rest.
+    // The estimate must charge exactly one verification (this email), and search
+    // must count only the REMAINING companies (pending_companies.length) — the
+    // current email is verified, not searched (review fix Y: counting 1 + 2 = 3
+    // overstated search by one). The copy must not promise deliverability checks
+    // across all companies.
+    expect(structured.estimated_credits?.verification).toBe(1)
+    expect(structured.estimated_credits?.search).toBe(2) // remaining pending only (review fix Y)
+    expect(structured.nextAction.question).not.toMatch(/across up to/i)
+    expect(structured.nextAction.question).toMatch(/this email/i)
+  })
+})
+
+describe("HUN-20651 review fix L: direct bulk Create-Lead-If-Missing gates without confirmed_save_use", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // L core bug: Create-Lead-If-Missing accepts pending_companies but had no
+  // handler-top gate. A direct bulk save entry without confirmed_save_use could
+  // create a lead and advance the loop before any save-batch approval.
+  it("direct bulk (non-empty pending, save_leads, no confirmed_save_use) → approval_required, no Hunter call (no write)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com", "c.com"],
+      save_leads: true,
+      // confirmed_save_use intentionally absent.
+    })
+    // No Hunter call at all → no /leads/exist, no POST /leads — no lead created.
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+      nextAction: { kind: string; tool?: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    expect(structured.nextAction.tool).toBeUndefined()
+    // Review fix Z: the supplied current contact is saved for free here (no
+    // Domain-Search / Email-Verifier for it), so only the 2 remaining
+    // pending_companies incur a search + a verify — NOT 1 + 2 = 3.
+    expect(structured.estimated_credits?.search).toBe(2) // remaining pending only
+    expect(structured.estimated_credits?.verification).toBe(2) // remaining pending only
+    // Review fix W: Create-Lead-If-Missing is create-only — it saves the provided
+    // contact and never runs Email-Verifier (deliverability is the chain's upstream
+    // step). The consent copy must NOT claim this step checks deliverability; it
+    // describes saving the contact and continuing the loop.
+    const climQuestion = (result.structuredContent as { nextAction: { question?: string } }).nextAction.question
+    expect(climQuestion).not.toMatch(/deliverability/i)
+    expect(climQuestion).toMatch(/save this contact/i)
+  })
+
+  // A legitimately consented loop carries confirmed_save_use → proceeds (creates
+  // the lead and continues the loop).
+  it("consented loop (confirmed_save_use:true) proceeds — Hunter is called, lead created, loop continues", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 77, email: "user@a.com" } })),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2) // exist + POST
+    const structured = result.structuredContent as { kind?: string; nextAction: { tool?: string; suggestedArgs?: { domain?: string } } }
+    expect(structured.kind).not.toBe("approval_required")
+    expect(structured.nextAction.tool).toBe("Domain-Search")
+    expect(structured.nextAction.suggestedArgs?.domain).toBe("b.com")
+  })
+
+  // A normal single Create-Lead-If-Missing (no pending_companies) is unaffected.
+  it("single Create-Lead-If-Missing (no pending_companies) is unaffected — creates the lead", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 88, email: "solo@a.com" } })),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({ email: "solo@a.com" })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+
+  // A direct bulk entry in RESEARCH mode (no save_leads) must NOT gate here — the
+  // gate is save-scoped. (Create-Lead-If-Missing is a save tool, but the carry
+  // could in theory arrive without save_leads; it then just creates the lead — the
+  // model wouldn't route a research loop here.)
+  it("research-mode carry (pending defined, no save_leads) does not fire the save gate", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 91, email: "user@a.com" } })),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({ email: "user@a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+})
+
+describe("HUN-20651 review fix O: empty-defined pending bulk save entry gates (Email-Verifier + Create-Lead-If-Missing)", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // O: pending_companies:[] is still a bulk-shaped save entry. Email-Verifier must
+  // gate it (not verify + chain) when save_leads is set and no save consent.
+  it("Email-Verifier empty pending + save_leads + no consent → approval_required, no /email-verifier call", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", pending_companies: [], save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as { kind?: string; nextAction: { kind: string; tool?: string } }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    expect(structured.nextAction.tool).toBeUndefined()
+  })
+
+  it("Create-Lead-If-Missing empty pending + save_leads + no consent → approval_required, no Hunter call", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({ email: "user@a.com", pending_companies: [], save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as { kind?: string; nextAction: { kind: string; tool?: string } }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    expect(structured.nextAction.tool).toBeUndefined()
+  })
+
+  // Empty-defined pending in RESEARCH mode is NOT a write path — Email-Verifier
+  // must not gate it (requireBulkConsent returns null for research empty pending).
+  it("Email-Verifier empty pending in research mode does not gate (verifies, completes with a table)", async () => {
+    const liveFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", liveFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", pending_companies: [], confirmed_credit_use: true })
+    expect(liveFetch).toHaveBeenCalledTimes(1)
+    const next = (result.structuredContent as { nextAction: { kind: string; summary?: string } }).nextAction
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+    expect(next.kind).toBe("complete")
+    expect(next.summary).toMatch(/table/i)
+  })
+})
+
+describe("HUN-20651 review fix M: leads_list_id threads through the loop into Create-Lead-If-Missing", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // Seed a SAVE loop with leads_list_id set. The chained suggestedArgs at every
+  // hop (Domain-Search → Email-Verifier → Create-Lead-If-Missing → next
+  // Domain-Search) must carry leads_list_id so the saved lead lands in the list.
+  it("Domain-Search save loop carries leads_list_id into the Email-Verifier handoff", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ data: { domain: "a.com", emails: [{ value: "user@a.com", type: "personal" }] } }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const dsResult = await dsHandler({
+      domain: "a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+      leads_list_id: 555,
+    })
+    const dsNext = (dsResult.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    expect(dsNext.tool).toBe("Email-Verifier")
+    expect(dsNext.suggestedArgs.leads_list_id).toBe(555)
+  })
+
+  it("Email-Verifier save loop carries leads_list_id into the Create-Lead-If-Missing handoff", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com" } })),
+      }),
+    )
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+      leads_list_id: 555,
+    })
+    const next = (result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.suggestedArgs.leads_list_id).toBe(555)
+  })
+
+  it("Create-Lead-If-Missing save loop forwards leads_list_id into the next Domain-Search AND saves into the list", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { id: 1234, email: "user@a.com" } })),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+      leads_list_id: 555,
+    })
+    // The POST body must include leads_list_id=555 (the lead lands in the list).
+    const postCall = fetchMock.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === "POST")
+    expect(postCall).toBeDefined()
+    expect(String((postCall?.[1] as { body?: string } | undefined)?.body)).toContain("leads_list_id=555")
+    // The next Domain-Search hop carries leads_list_id forward.
+    const next = (result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.suggestedArgs.leads_list_id).toBe(555)
+  })
+
+  it("research loops never reach a write tool even if leads_list_id is present", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { domain: "a.com", emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }] },
+            }),
+          ),
+      }),
+    )
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Research bulk hop (confirmed_credit_use carried, no save_leads). Even if a
+    // leads_list_id were passed, research advances Domain-Search → Domain-Search
+    // and never reaches a save; the carry forwards it harmlessly, but the model
+    // never sets it in research. Assert the research advance does not produce a
+    // write tool regardless.
+    const result = await dsHandler({ domain: "a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    const next = (result.structuredContent as { nextAction: { tool: string } }).nextAction
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.tool).not.toBe("Create-Lead-If-Missing")
+  })
+})
+
+// HUN-20651 review findings P/Q/R/S — the SINGLE-company save path (no
+// pending_companies) must carry the same fields the multi-company `advanceLoop`
+// already carries: `save_leads` (so the Email-Verifier handoff stays in save mode
+// and actually creates the lead — P/R) and `leads_list_id` (so the saved lead
+// lands in the intended list instead of unlisted — Q/S). It must also keep the
+// per-email `requiresConfirmation` gate that single-company save requires
+// (finding C). Research single-company saves nothing.
+describe("HUN-20651 P/Q/R/S: single-company save path carries save_leads + leads_list_id", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  const stubDomainSearch = (email: { value: string; confidence?: number; verification?: { status: string | null } }) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [email] } })),
+      }),
+    )
+
+  // P/R: a not-yet-valid row in single-company save mode routes to Email-Verifier,
+  // and the handoff MUST carry save_leads:true so EV chains on to
+  // Create-Lead-If-Missing instead of defaulting to research and never saving.
+  it("not-yet-valid row → Email-Verifier handoff carries save_leads:true (so EV saves, not just reports)", async () => {
+    stubDomainSearch({ value: "user@a.com", confidence: 99, verification: { status: null } })
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", save_leads: true })
+    const next = (
+      result.structuredContent as {
+        nextAction: { tool: string; requiresConfirmation?: boolean; suggestedArgs: { email: string; save_leads?: boolean; leads_list_id?: number } }
+      }
+    ).nextAction
+    expect(next.tool).toBe("Email-Verifier")
+    expect(next.suggestedArgs.save_leads).toBe(true)
+    // Finding C: single-company save keeps the per-email confirmation gate.
+    expect(next.requiresConfirmation).toBe(true)
+  })
+
+  // Q/S: when a destination list is set, the not-yet-valid handoff to
+  // Email-Verifier must carry leads_list_id forward so the eventual save lands in
+  // the list.
+  it("not-yet-valid row with leads_list_id → Email-Verifier handoff carries save_leads + leads_list_id", async () => {
+    stubDomainSearch({ value: "user@a.com", confidence: 99, verification: { status: null } })
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", save_leads: true, leads_list_id: 555 })
+    const next = (
+      result.structuredContent as {
+        nextAction: { tool: string; suggestedArgs: { save_leads?: boolean; leads_list_id?: number } }
+      }
+    ).nextAction
+    expect(next.tool).toBe("Email-Verifier")
+    expect(next.suggestedArgs.save_leads).toBe(true)
+    expect(next.suggestedArgs.leads_list_id).toBe(555)
+  })
+
+  // Q/S: an already-valid high-confidence row goes STRAIGHT to
+  // Create-Lead-If-Missing (skip-verify) and the handoff carries leads_list_id so
+  // the lead lands in the list — with the per-email gate kept (finding C).
+  it("already-valid high-confidence row with leads_list_id → Create-Lead-If-Missing directly (with list id + gate)", async () => {
+    stubDomainSearch({ value: "user@a.com", confidence: 97, verification: { status: "valid" } })
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", save_leads: true, leads_list_id: 555 })
+    const next = (
+      result.structuredContent as {
+        nextAction: { tool: string; requiresConfirmation?: boolean; suggestedArgs: { email: string; leads_list_id?: number } }
+      }
+    ).nextAction
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.tool).not.toBe("Email-Verifier")
+    expect(next.suggestedArgs.leads_list_id).toBe(555)
+    expect(next.requiresConfirmation).toBe(true)
+  })
+
+  // End-to-end of the single-company save handoff: the Email-Verifier reached with
+  // save_leads:true + leads_list_id from Domain-Search actually chains to
+  // Create-Lead-If-Missing (save mode) carrying the list id — proving save_leads
+  // reaches the create terminal (P/R) and the list id survives (Q/S).
+  it("Email-Verifier with save_leads + leads_list_id (single) → Create-Lead-If-Missing carrying leads_list_id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com" } })),
+      }),
+    )
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com", save_leads: true, leads_list_id: 555 })
+    const next = (
+      result.structuredContent as { nextAction: { kind: string; tool?: string; suggestedArgs?: { leads_list_id?: number } } }
+    ).nextAction
+    expect(next.kind).toBe("call_tool")
+    expect(next.tool).toBe("Create-Lead-If-Missing")
+    expect(next.suggestedArgs?.leads_list_id).toBe(555)
+  })
+
+  // A single-company RESEARCH request (no save_leads) still returns a table and
+  // never saves — the load-bearing default. Even a stray leads_list_id can't make
+  // research write.
+  it("single-company research (no save_leads) completes with a table and never chains to a write tool", async () => {
+    stubDomainSearch({ value: "user@a.com", confidence: 97, verification: { status: "valid" } })
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const result = await dsHandler({ domain: "a.com", leads_list_id: 555 })
+    const next = (
+      result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string; requiresConfirmation?: boolean } }
+    ).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.tool).toBeUndefined()
+    expect(next.summary).toMatch(/table/i)
+    expect(next.requiresConfirmation).toBeUndefined()
+  })
+})
+
+describe("HUN-20651 review fix N: approval_required envelope conforms to the published EV / CLIM schema", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  // N: the J/L/O gates make Email-Verifier and Create-Lead-If-Missing emit the
+  // approval_required envelope, which their outputSchemas must now declare —
+  // otherwise the .shape-rewrapped closed (additionalProperties:false) schema
+  // rejects it with -32602. Validate against the PUBLISHED schema (the SDK
+  // re-wrap), both as a literal envelope and end-to-end through the real handler.
+  it("Email-Verifier published schema accepts the approval_required envelope (literal + end-to-end)", async () => {
+    const tool = registeredTools.get("Email-Verifier")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() =>
+      schema.parse({
+        kind: "approval_required",
+        ok: true,
+        estimated_credits: { search: 3, verification: 3 },
+        nextAction: { kind: "ask_user", question: "Approve?" },
+      }),
+    ).not.toThrow()
+    // The success + ack + error envelopes still validate (no regression).
+    expect(() => schema.parse({ data: { status: "valid", email: "a@b.com", score: 90 } })).not.toThrow()
+    expect(() => schema.parse({ kind: "ack", ok: true, status: 202, message: "Accepted." })).not.toThrow()
+    expect(() =>
+      schema.parse({ error: { code: "upstream_error", retryable: true, message: "boom" } }),
+    ).not.toThrow()
+
+    // End-to-end: a direct bulk EV without consent emits a conforming envelope.
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const result = await tool.handler({ email: "user@a.com", pending_companies: ["b.com"], save_leads: true })
+    expect((result.structuredContent as { kind?: string }).kind).toBe("approval_required")
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+
+  it("Create-Lead-If-Missing published schema accepts the approval_required envelope (literal + end-to-end)", async () => {
+    const tool = registeredTools.get("Create-Lead-If-Missing")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() =>
+      schema.parse({
+        kind: "approval_required",
+        ok: true,
+        estimated_credits: { search: 3, verification: 3 },
+        nextAction: { kind: "ask_user", question: "Approve?" },
+      }),
+    ).not.toThrow()
+    // Success (create + alreadyExisted) + ack + error envelopes still validate.
+    expect(() => schema.parse({ data: { id: 1, email: "a@b.com" } })).not.toThrow()
+    expect(() => schema.parse({ data: { id: 1, email: "a@b.com", alreadyExisted: true } })).not.toThrow()
+    expect(() =>
+      schema.parse({ error: { code: "not_found", retryable: false, message: "nope" } }),
+    ).not.toThrow()
+
+    // End-to-end: a direct bulk CLIM without consent emits a conforming envelope.
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const result = await tool.handler({ email: "user@a.com", pending_companies: ["b.com"], save_leads: true })
+    expect((result.structuredContent as { kind?: string }).kind).toBe("approval_required")
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+})
+
+// ─── HUN-20651 review fix AA — Create-Or-Update-Lead (Upsert) bulk save gate ──
+//
+// AA: Create-Or-Update-Lead accepts the same `pending_companies` loop carry as
+// Create-Lead-If-Missing but previously had NO handler-top consent gate. Because
+// it OVERWRITES existing leads (DESTRUCTIVE), a direct bulk save entry without
+// `confirmed_save_use` could overwrite leads AND advance the loop before any
+// save-batch approval. The gate now mirrors Create-Lead-If-Missing exactly, and
+// the published outputSchema declares the approval_required envelope (review
+// fix N parity). The estimate uses the per-remaining-company basis (review fix
+// Z): the current contact is saved here with no search/verify of its own.
+describe("HUN-20651 review fix AA: Create-Or-Update-Lead gates direct bulk save without confirmed_save_use", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("direct bulk (non-empty pending, save_leads, no confirmed_save_use) → approval_required, no Hunter call (no overwrite)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com", "c.com"],
+      save_leads: true,
+      // confirmed_save_use intentionally absent → direct, unconsented bulk entry.
+    })
+    // No Hunter call at all → no PUT /leads — no lead overwritten/created.
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+      nextAction: { kind: string; tool?: string }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.nextAction.kind).toBe("ask_user")
+    expect(structured.nextAction.tool).toBeUndefined()
+    // Review fix Z basis: only the 2 remaining pending companies incur a search +
+    // a verify (the supplied current contact is saved for free here).
+    expect(structured.estimated_credits?.search).toBe(2)
+    expect(structured.estimated_credits?.verification).toBe(2)
+  })
+
+  // Review fix CC: Create-Or-Update-Lead performs PUT /leads (OVERWRITES an
+  // existing lead's fields), so its bulk consent copy must disclose the
+  // update/overwrite semantics — distinct from Create-Lead-If-Missing's create-only
+  // "save this contact" wording. The user must not approve an overwrite under copy
+  // that only says "save".
+  it("consent copy discloses update/overwrite, not just 'save this contact' (CC)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com", "c.com"],
+      save_leads: true,
+    })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const question = (result.structuredContent as { nextAction: { question?: string } }).nextAction.question
+    expect(question).toMatch(/update this contact/i)
+    expect(question).toMatch(/overwrit/i) // "overwriting existing fields"
+    // Must NOT reuse Create-Lead-If-Missing's create-only "save this contact" copy.
+    expect(question).not.toMatch(/save this contact/i)
+  })
+
+  // Review fix BB: a bulk save-to-list loop started from Create-Or-Update-Lead must
+  // thread leads_list_id into the next Domain-Search hop's suggestedArgs (exactly
+  // as Create-Lead-If-Missing does) so subsequent contacts land in the same list
+  // instead of unlisted.
+  it("loop carries leads_list_id into the next Domain-Search suggestedArgs (BB)", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 77, email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      leads_list_id: 555,
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1) // PUT /leads
+    // The PUT body saves the current contact into the list.
+    const putCall = fetchMock.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === "PUT")
+    expect(String((putCall?.[1] as { body?: string } | undefined)?.body)).toContain("leads_list_id=555")
+    // The next Domain-Search hop carries leads_list_id forward.
+    const next = (
+      result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }
+    ).nextAction
+    expect(next.tool).toBe("Domain-Search")
+    expect(next.suggestedArgs.leads_list_id).toBe(555)
+  })
+
+  it("consented loop (confirmed_save_use:true) proceeds — Hunter is called (PUT), loop continues", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 77, email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({
+      email: "user@a.com",
+      pending_companies: ["b.com"],
+      save_leads: true,
+      confirmed_save_use: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1) // PUT /leads
+    const putCall = fetchMock.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === "PUT")
+    expect(putCall).toBeDefined()
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+
+  it("single Create-Or-Update-Lead (no pending_companies) is unaffected — performs the upsert", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 88, email: "solo@a.com" } })),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({ email: "solo@a.com" })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+
+  it("research-mode carry (pending defined, no save_leads) does not fire the save gate", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { id: 91, email: "user@a.com" } })),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({ email: "user@a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect((result.structuredContent as { kind?: string }).kind).not.toBe("approval_required")
+  })
+
+  it("empty-defined pending + save_leads + no consent → approval_required, no Hunter call (review fix O parity)", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Or-Update-Lead")!.handler
+    const result = await handler({ email: "user@a.com", pending_companies: [], save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    expect((result.structuredContent as { kind?: string }).kind).toBe("approval_required")
+  })
+
+  // Review fix N parity: the gate makes Create-Or-Update-Lead emit the
+  // approval_required envelope, so its published (closed) outputSchema must
+  // declare it — both as a literal envelope and end-to-end through the handler.
+  it("published schema accepts the approval_required envelope (literal + end-to-end)", async () => {
+    const tool = registeredTools.get("Create-Or-Update-Lead")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() =>
+      schema.parse({
+        kind: "approval_required",
+        ok: true,
+        estimated_credits: { search: 2, verification: 2 },
+        nextAction: { kind: "ask_user", question: "Approve?" },
+      }),
+    ).not.toThrow()
+    // The success + ack + error envelopes still validate (no regression).
+    expect(() => schema.parse({ data: { id: 1, email: "a@b.com" } })).not.toThrow()
+    expect(() => schema.parse({ kind: "ack", ok: true, status: 202, message: "Accepted." })).not.toThrow()
+    expect(() => schema.parse({ error: { code: "not_found", retryable: false, message: "nope" } })).not.toThrow()
+
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const result = await tool.handler({ email: "user@a.com", pending_companies: ["b.com"], save_leads: true })
+    expect((result.structuredContent as { kind?: string }).kind).toBe("approval_required")
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+})
+
+// ─── HUN-20651 review fixes Y + Z — per-remaining-company credit estimates ────
+//
+// Y: a direct bulk Email-Verifier in RESEARCH mode verifies only the current
+//    email (1) and SEARCHES only the remaining pending_companies — the current
+//    email is verified, not searched, so search === pending_companies.length
+//    (NOT 1 + length). Save mode is unchanged (search + verify per company).
+// Z: a direct bulk Create-Lead-If-Missing saves the current contact for free
+//    (no search/verify for it) and the loop searches + verifies only the
+//    remaining pending_companies, so search === verification ===
+//    pending_companies.length (NOT 1 + length).
+describe("HUN-20651 review fix Y: research bulk Email-Verifier estimate counts only remaining searches", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("research direct bulk EV: search === pending_companies.length, verification === 1", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const pending = ["b.com", "c.com", "d.com"]
+    const result = await evHandler({ email: "user@a.com", pending_companies: pending })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.estimated_credits?.search).toBe(pending.length) // remaining only (Y)
+    expect(structured.estimated_credits?.verification).toBe(1) // only the current email
+  })
+
+  // Review fix DD: a direct bulk EV in SAVE mode verifies+saves the current email
+  // HERE (this call) — it does NOT search it. The remaining pending_companies are
+  // reached via Domain-Search hops, which search them. So search === remaining only
+  // (pending_companies.length), NOT 1 + length. Verification stays 1 + length (the
+  // current email is verified here, and each remaining company is verified too).
+  // This matches Domain-Search (current company IS searched there → search includes
+  // it) and CLIM/Upsert (current contact neither searched nor verified → both
+  // buckets remaining-only): each tool counts the current item in a bucket only
+  // when it actually performs that op on the current item.
+  it("save direct bulk EV: search === pending_companies.length (DD), verification === 1 + pending_companies.length", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const pending = ["b.com", "c.com", "d.com"]
+    const result = await evHandler({ email: "user@a.com", pending_companies: pending, save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.estimated_credits?.search).toBe(pending.length) // remaining only (DD)
+    expect(structured.estimated_credits?.verification).toBe(1 + pending.length) // current + each remaining
+  })
+})
+
+describe("HUN-20651 review fix Z: bulk Create-Lead-If-Missing estimate counts only remaining companies", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("direct bulk CLIM: search === verification === pending_companies.length", async () => {
+    const gateFetch = vi.fn()
+    vi.stubGlobal("fetch", gateFetch)
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const pending = ["b.com", "c.com", "d.com"]
+    const result = await handler({ email: "user@a.com", pending_companies: pending, save_leads: true })
+    expect(gateFetch).not.toHaveBeenCalled()
+    const structured = result.structuredContent as {
+      kind?: string
+      estimated_credits?: { search: number; verification: number }
+    }
+    expect(structured.kind).toBe("approval_required")
+    expect(structured.estimated_credits?.search).toBe(pending.length) // remaining only (Z)
+    expect(structured.estimated_credits?.verification).toBe(pending.length) // remaining only (Z)
   })
 })
 
@@ -3170,6 +5058,38 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
     }
   })
 
+  it("stripInjectedFields strips an upstream-injected save_leads so a scraped record can't flip research → save (HUN-20651 Phase 2)", async () => {
+    // `save_leads` is the coordinator-resolved research-vs-save mode flag. A
+    // Hunter response record (e.g. an attacker-controlled lead note or scraped
+    // field) carrying `save_leads: true` must never reach the model, or it could
+    // coerce a research loop into a write loop. The strip closes that vector.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { plan_name: "starter", requests: {}, save_leads: true },
+            }),
+          ),
+      }),
+    )
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const handler = registeredTools.get("Get-Account-Details")!.handler
+      const result = await handler({})
+      const text = result.content[0]?.text ?? ""
+      expect(text).not.toContain("save_leads")
+      const data = (result.structuredContent as { data?: Record<string, unknown> }).data ?? {}
+      expect("save_leads" in data).toBe(false)
+      const warnings = warnSpy.mock.calls.map((c) => String(c[0])).join("\n")
+      expect(warnings).toContain("save_leads")
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it("Person-Enrichment outputSchema accepts a realistic Hunter response with unlisted fields (codex P1 regression guard)", async () => {
     // Real Hunter `/people/find` payloads emit fields outside the privacy-
     // minimization allowlist: `bio`, `timeZone`, `utcOffset`, `phone`,
@@ -3466,6 +5386,72 @@ describe("HUN-20170: slash prompts route saves to Create-Lead-If-Missing", () =>
   )
 })
 
+// HUN-20651 review findings T + U: with research as the new default mode, the
+// slash prompts had to be brought in line with the save chain.
+//   T — `build-list` is an explicit save request, so it must opt into SAVE mode
+//       (set save_leads, thread leads_list_id, verify-then-save) instead of
+//       returning a table or saving raw Domain-Search rows.
+//   U — `prospect` must stop instructing the model to verify EVERY email before
+//       saving; the save chain now skips Email-Verifier for already-valid
+//       high-confidence rows (conditional verify).
+describe("HUN-20651 T/U: slash prompts match research-default + conditional-verify save chain", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registeredResources.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const promptText = async (name: string) => {
+    const handler = registeredPrompts.get(name) as (args: { query?: string; description?: string }) => Promise<{
+      messages: { content: { text: string } }[]
+    }>
+    const result = await handler({ query: "test query", description: "test description" })
+    return result.messages[0]?.content.text ?? ""
+  }
+
+  // T: build-list must opt into save mode explicitly.
+  it("build-list opts into SAVE mode (sets save_leads and threads leads_list_id)", async () => {
+    const text = await promptText("build-list")
+    expect(text).toMatch(/save_leads/)
+    expect(text).toMatch(/leads_list_id/)
+    // It must drive the save chain (verify-then-save), not save raw Domain-Search
+    // rows directly without the deliverability step.
+    expect(text).toMatch(/Email-Verifier/)
+    expect(text).toMatch(/Create-Lead-If-Missing/)
+  })
+
+  // T: build-list verify-then-save must follow the conditional-verify rule, not
+  // blanket re-verification.
+  it("build-list does not instruct blanket re-verification of every email", async () => {
+    const text = await promptText("build-list")
+    expect(text).not.toMatch(/verify each email/i)
+    expect(text).not.toMatch(/verify every email/i)
+    // It explains the conditional rule (only the not-already-valid rows verify).
+    expect(text).toMatch(/already (returns|verified|valid)/i)
+  })
+
+  // U: prospect must no longer instruct verifying every email before saving.
+  it("prospect no longer instructs blanket re-verification before saving", async () => {
+    const text = await promptText("prospect")
+    expect(text).not.toMatch(/verify each email/i)
+    expect(text).not.toMatch(/verify every email/i)
+    // The conditional-verify rule is reflected: already-valid high-confidence rows
+    // are saved directly; only the rest get an Email-Verifier check.
+    expect(text).toMatch(/save_leads/)
+    expect(text).toMatch(/Email-Verifier/)
+    expect(text).toMatch(/aren't already valid/i)
+  })
+
+  // Research stays the default for prospect: it must lead with returning a table
+  // and only save on an explicit request.
+  it("prospect leads with research (return a table) and saves only on explicit request", async () => {
+    const text = await promptText("prospect")
+    expect(text).toMatch(/table/i)
+    expect(text).toMatch(/only save/i)
+  })
+})
+
 // HUN-20170: capabilities-recovery is the model-visible resource referenced by
 // Plan-Prospecting-Flow before ambiguous-title prospecting. Stale tool names
 // inside it instruct the model to call tools that no longer exist (caught by
@@ -3548,6 +5534,78 @@ describe("HUN-20170: model-visible corpus contains no OpenAI-banned phrases", ()
         throw new Error(`capabilities-recovery resource matches banned pattern ${pattern} (${reason})`)
       }
     }
+  })
+})
+
+// HUN-20651 Phase 1: unified-credit copy guard. The dual-bucket credit model
+// ("search credits" + "verification credits" as separate pools) is stale —
+// legacy plans still charge from separate buckets, so a per-plan figure would be
+// wrong for them. The fix makes copy bucket-agnostic by construction. This test
+// iterates the SAME model-visible corpus as the banned-phrase guard above PLUS
+// the rendered bulk-consent question, and asserts none of them name a separate
+// "search/verification/enrichment credit" bucket. It also positive-asserts the
+// unified figures we DO keep (Domain-Search's per-10 granularity is current and
+// correct — issue #1 was a terminology fix, not a granularity change).
+describe("HUN-20651: model-visible corpus uses bucket-agnostic unified credit copy", () => {
+  // The single forbidden pattern: any of the three legacy bucket names. Matches
+  // "search credit", "verification credit", "enrichment credit" (singular or
+  // plural via the optional trailing s), case-insensitive.
+  const DUAL_BUCKET_RE = /(search|verification|enrichment) credits?/i
+
+  beforeEach(async () => {
+    registeredTools.clear()
+    registeredResources.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  it("no tool description names a separate credit bucket", () => {
+    for (const [name, tool] of registeredTools.entries()) {
+      if (DUAL_BUCKET_RE.test(tool.description)) {
+        throw new Error(`Tool "${name}" description uses dual-bucket credit copy: ${tool.description}`)
+      }
+    }
+  })
+
+  it("no slash prompt body names a separate credit bucket", async () => {
+    for (const [name, handler] of registeredPrompts.entries()) {
+      const result = await (
+        handler as (args: { query?: string; description?: string; instructions?: string }) => Promise<{
+          messages: { content: { text: string } }[]
+        }>
+      )({ query: "test query", description: "test description", instructions: "test instructions" })
+      const text = result.messages[0]?.content.text ?? ""
+      if (DUAL_BUCKET_RE.test(text)) {
+        throw new Error(`Prompt "${name}" body uses dual-bucket credit copy: ${text.slice(0, 200)}…`)
+      }
+    }
+  })
+
+  it("capabilities-recovery resource names no separate credit bucket", async () => {
+    const { CAPABILITIES_RECOVERY_MD } = await import("../src/resources/capabilities-recovery")
+    expect(DUAL_BUCKET_RE.test(CAPABILITIES_RECOVERY_MD)).toBe(false)
+  })
+
+  it("rendered bulk-consent question names no separate credit bucket", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // Unapproved bulk → ask_user consent question (no Hunter call).
+    const result = await dsHandler({ domain: "a.com", pending_companies: ["b.com", "c.com"] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const question = (result.structuredContent as { nextAction: { question: string } }).nextAction.question
+    expect(DUAL_BUCKET_RE.test(question)).toBe(false)
+    // Positive: the consent copy still names Hunter credits (descriptive, not a
+    // bucket) and sizes the spend by company count.
+    expect(question).toMatch(/Hunter credits/i)
+    expect(question).toContain("up to 3 companies")
+  })
+
+  it("Domain-Search keeps the current per-10 granularity figure", () => {
+    // Issue #1 was a terminology fix only — the per-10 rule for Domain-Search is
+    // CURRENT (ceil(N/10)) and must NOT regress to a per-email figure.
+    const desc = registeredTools.get("Domain-Search")!.description
+    expect(desc).toContain("1 credit per 10 emails returned")
   })
 })
 
@@ -3695,5 +5753,245 @@ describe("HUN-20460: error and ack envelopes conform to the published output sch
       meta: { email: "mbenioff@salesforce.com" },
     }
     expect(() => schema.parse(found)).not.toThrow()
+  })
+
+  // HUN-20651 review fix D: Domain-Search uses a CUSTOM outputSchema (it mirrors
+  // the bulk-consent approval_required short-circuit), and that custom schema
+  // originally omitted the `{ error }` envelope callHunterApi still emits on a
+  // 4xx/5xx. Because registerTool publishes `.shape` (re-wrapped strict,
+  // additionalProperties:false), the error envelope was an undeclared top-level
+  // key and a schema-validating client rejected it with -32602. Assert the schema
+  // now accepts the error envelope, the approval_required short-circuit, AND the
+  // success shape — plus an end-to-end 500 through the real handler.
+  it("Domain-Search { error } envelope conforms (schema + 500 end-to-end)", async () => {
+    const tool = registeredTools.get("Domain-Search")!
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+
+    // The error envelope shape callHunterApi synthesises on a non-2xx.
+    const errorEnvelope = {
+      error: { code: "upstream_error", retryable: true, message: "Hunter is temporarily unavailable." },
+    }
+    expect(() => schema.parse(errorEnvelope)).not.toThrow()
+
+    // The approval_required short-circuit shape still validates (no regression).
+    expect(() =>
+      schema.parse({
+        kind: "approval_required",
+        ok: true,
+        estimated_credits: { search: 3, verification: 0 },
+        nextAction: { kind: "ask_user", question: "Approve?" },
+      }),
+    ).not.toThrow()
+
+    // The success shape still validates.
+    expect(() => schema.parse({ data: { domain: "a.com", emails: [] } })).not.toThrow()
+
+    // End-to-end: a single-company 500 emits a conforming { error } structuredContent.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: { get: () => null },
+        text: () => Promise.resolve("upstream boom"),
+      }),
+    )
+    const result = await tool.handler({ domain: "a.com" })
+    expect(result.isError).toBe(true)
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+})
+
+// HUN-20651 Phase 2.5 + Phase 3: capture affordance + enrichment guardrail live
+// in the Plan-Prospecting-Flow directives (assistant-only) and the
+// capabilities-recovery resource. These directives are how the model learns to
+// (a) save a research table WITHOUT re-running Domain-Search or re-verifying
+// already-valid rows, and (b) never invent an `enrich` endpoint when a contact
+// tool returns no email. The directive text is the contract — assert on it
+// directly so a future refactor can't silently drop a behaviour without a test
+// failure. (No jargon leaks into the registered description; only directives +
+// .describe() carry implementation detail, so the corpus guards above stay green.)
+describe("HUN-20651 Phase 2.5/3: prospecting capture + enrichment guardrail directives", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registeredResources.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  async function prospectDirectives(): Promise<string[]> {
+    const handler = registeredTools.get("Plan-Prospecting-Flow")!.handler
+    const result = await handler({ query: "Find Heads of Sales at SaaS companies in France" })
+    return (result.structuredContent as { directives: string[] }).directives
+  }
+
+  // Helper: the capture directive is the one that closes the loop by saving a
+  // gathered table through Create-Lead-If-Missing. It keys on each row's
+  // verification STATUS, not on a save-eligible marker (review fix E).
+  const findCaptureDirective = (directives: string[]) =>
+    directives.find((d) => d.includes("Create-Lead-If-Missing") && d.includes("accept_all"))!
+
+  it("capture directive routes a gathered table through Create-Lead-If-Missing without re-running Domain-Search", async () => {
+    const directives = await prospectDirectives()
+    const capture = findCaptureDirective(directives)
+    expect(capture).toBeDefined()
+    // Saves directly via the create-only terminal — never Create-Or-Update-Lead.
+    expect(capture).toContain("Create-Lead-If-Missing")
+    expect(directives.join("\n")).not.toContain("Create-Or-Update-Lead")
+    // No second Domain-Search for companies already searched (loop-closure, not re-search).
+    expect(capture!).toMatch(/do not re-?run Domain-Search/i)
+  })
+
+  // Review fix E: the capture directive must key on the row's actual verification
+  // STATUS + confidence (visible in the table), NOT on the verification_source
+  // marker — because that marker tags accept_all/invalid rows "domain_search"
+  // too, so a marker-keyed save would persist catch-all/invalid contacts that the
+  // bulk SAVE handler path drops. The directive must (a) save valid+high-
+  // confidence rows directly, (b) verify not-yet-valid rows first, and (c) NEVER
+  // save accept_all/invalid rows — surface them back as unsaved.
+  it("capture directive keys on verification status: save valid-high-confidence directly, verify not-yet-valid, never save accept_all/invalid", async () => {
+    const directives = await prospectDirectives()
+    const capture = findCaptureDirective(directives)
+    // (a) valid + high confidence → save directly.
+    expect(capture).toMatch(/valid with high confidence/i)
+    // (b) not-yet-valid rows → Email-Verifier first.
+    expect(capture).toContain("Email-Verifier")
+    expect(capture).toMatch(/not yet valid/i)
+    // (c) accept_all/invalid → never saved, surfaced as unsaved.
+    expect(capture).toContain("accept_all")
+    expect(capture).toContain("invalid")
+    expect(capture).toMatch(/do not save a row whose status is accept_all or invalid/i)
+    expect(capture).toMatch(/not saved/i)
+    // The directive no longer leans on the verification_source marker (which can't
+    // distinguish trusted-valid from accept_all/invalid).
+    expect(capture).not.toContain("verification_source")
+    // One confirmation, only on the net-new deliverability spend.
+    expect(capture).toMatch(/confirm once/i)
+  })
+
+  it("enrichment guardrail redirects to Domain-Search / Email-Finder and says enrichment never returns new emails", async () => {
+    const directives = await prospectDirectives()
+    const guardrail = directives.find((d) => d.includes("never return new email") || d.includes("never returns new email"))
+    expect(guardrail).toBeDefined()
+    expect(guardrail).toContain("Domain-Search")
+    expect(guardrail).toContain("Email-Finder")
+    // The "report and continue" clause that closes the /enrich improvisation gap.
+    expect(guardrail).toMatch(/report that and continue/i)
+    expect(guardrail).toMatch(/never call a tool that is not listed/i)
+  })
+
+  // HUN-20651 review fix X: a "find VERIFIED contacts, return a table" brief is a
+  // gathering-only run, but it must still produce verified statuses — research mode
+  // does NOT auto-fire Email-Verifier, so the directive must instruct the model to
+  // verify the not-already-valid rows (and only those) and put the returned status
+  // in the table, WITHOUT saving. This is a directive-only fix: the Email-Verifier
+  // research path completes (never chains to a write) and the status is in
+  // structuredContent, so the model can verify a row and read it for the table.
+  it("verified-research directive: verify not-already-valid rows for the table without saving", async () => {
+    const directives = await prospectDirectives()
+    const verified = directives.find((d) => d.toLowerCase().includes("verified") && d.includes("Email-Verifier"))
+    expect(verified).toBeDefined()
+    // Trusted-as-is rows (already valid + high confidence) are not re-checked.
+    expect(verified).toMatch(/already valid|already confirmed deliverable/i)
+    // The not-already-valid rows are verified and their status goes in the table.
+    expect(verified).toContain("Email-Verifier")
+    expect(verified).toMatch(/verification column|status in the table|in the table/i)
+    // It must NOT save — gathering-only never creates leads.
+    expect(verified).toMatch(/does not save|never creates? leads/i)
+    // One confirmation on the net-new deliverability spend.
+    expect(verified).toMatch(/confirm once/i)
+  })
+
+  // X executability: the Email-Verifier research path must complete (never chain to
+  // a write) so the model can read the status for the table without saving.
+  it("single Email-Verifier in research mode surfaces the status and never chains to a write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "valid", email: "user@a.com", score: 95 } })),
+      }),
+    )
+    const evHandler = registeredTools.get("Email-Verifier")!.handler
+    const result = await evHandler({ email: "user@a.com" }) // research (no save_leads)
+    const sc = result.structuredContent as {
+      data?: { status?: string }
+      nextAction: { kind: string; tool?: string }
+    }
+    // Status is in structuredContent for the table.
+    expect(sc.data?.status).toBe("valid")
+    // Completes, never chains to a write tool.
+    expect(sc.nextAction.kind).toBe("complete")
+    expect(sc.nextAction.tool).toBeUndefined()
+  })
+
+  // HUN-20651 review fix I: a "create a list of leads" / "add to my list" brief must
+  // not save contacts UNLISTED. The directive must instruct the model to create or
+  // select the list FIRST (Create-Leads-List / List-Leads-Lists) and thread its id
+  // into Create-Lead-If-Missing as `leads_list_id` — so saved contacts land in the
+  // intended list. (Create-Lead-If-Missing already accepts leads_list_id via its
+  // inputSchema — asserted below — so this is purely a directive-level fix.)
+  it("list-request directive: create/select the list first and thread leads_list_id into Create-Lead-If-Missing", async () => {
+    const directives = await prospectDirectives()
+    const listDirective = directives.find((d) => d.includes("leads_list_id"))
+    expect(listDirective).toBeDefined()
+    // Create a new/named list, or find an existing one.
+    expect(listDirective).toContain("Create-Leads-List")
+    expect(listDirective).toContain("List-Leads-Lists")
+    // Pass the list id into the create-only save terminal.
+    expect(listDirective).toContain("Create-Lead-If-Missing")
+    expect(listDirective).toContain("leads_list_id")
+    expect(listDirective).toMatch(/instead of unlisted|land in the intended list/i)
+    // No list requested ⇒ unlisted saving is explicitly fine (don't invent a list).
+    expect(listDirective).toMatch(/unlisted is fine|do not invent a list/i)
+  })
+
+  it("Create-Lead-If-Missing inputSchema accepts leads_list_id so the list directive is executable", () => {
+    const tool = registeredTools.get("Create-Lead-If-Missing")
+    expect(tool).toBeDefined()
+    expect(tool!.inputSchema).toHaveProperty("leads_list_id")
+  })
+
+  it("title post-filter directive keeps non-enum titles (VP Sales / Sales Director / Revenue Lead) as prose, not as a refusal", async () => {
+    const directives = await prospectDirectives()
+    const postFilter = directives.find((d) => d.includes("post-filter"))
+    expect(postFilter).toBeDefined()
+    expect(postFilter).toContain("VP Sales")
+    expect(postFilter).toContain("Sales Director")
+    expect(postFilter).toContain("Revenue Lead")
+  })
+
+  it("capabilities-recovery resource carries the enrichment positive-redirect anti-pattern", async () => {
+    const { CAPABILITIES_RECOVERY_MD } = await import("../src/resources/capabilities-recovery")
+    // Positive redirect: contact tools, not enrichment, return emails.
+    expect(CAPABILITIES_RECOVERY_MD).toMatch(/never return new email/i)
+    expect(CAPABILITIES_RECOVERY_MD).toMatch(/no separate "enrich" lookup/i)
+    expect(CAPABILITIES_RECOVERY_MD).toMatch(/report that and continue/i)
+    // Non-enum titles live in PROSE, not the enum-gated translation table.
+    expect(CAPABILITIES_RECOVERY_MD).toContain("Sales Director")
+    expect(CAPABILITIES_RECOVERY_MD).toContain("Revenue Lead")
+  })
+
+  it("Plan-Prospecting-Flow registered description carries no implementation jargon", () => {
+    const description = registeredTools.get("Plan-Prospecting-Flow")!.description
+    for (const jargon of ["nextAction", "pending_companies", "suggestedArgs", "save_leads", "verification_source"]) {
+      expect(description).not.toContain(jargon)
+    }
+  })
+})
+
+// HUN-20651 Phase 3: both MCP servers cache tools/list keyed on the server
+// version, so a contract change (research mode + save_leads field + copy) must
+// bump the version to invalidate that cache. Assert the bump landed so a future
+// contract edit that forgets it fails here.
+describe("HUN-20651 Phase 3: server version bumped to invalidate tools/list cache", () => {
+  it("chatgpt-mcp server version is at least 2.5.0", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("../src/index.ts", import.meta.url), "utf8"),
+    )
+    const match = src.match(/version:\s*"(\d+)\.(\d+)\.(\d+)"/)
+    expect(match).not.toBeNull()
+    const [major, minor] = [Number(match![1]), Number(match![2])]
+    expect(major > 2 || (major === 2 && minor >= 5)).toBe(true)
   })
 })

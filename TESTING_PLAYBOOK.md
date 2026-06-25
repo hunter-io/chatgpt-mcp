@@ -499,6 +499,39 @@ Investigate the top two
 
 ---
 
+### 3.11 Research-mode table: the reporter's brief (HUN-20651)
+
+**Goal:** Verify the research/return-a-table path end to end. This is the exact brief that surfaced HUN-20651: the model fell out of the bulk loop into per-company confirmations, re-verified already-valid emails, called a non-existent `enrich` endpoint, and never returned after 20+ minutes. The fix (research as the default mode + conditional verify + enrichment guardrail) makes this a fast, gate-light table — no save chain, no re-verification of already-valid rows, no invented endpoints.
+
+**Prompt (one fresh conversation, no slash-command):**
+
+```
+Use Hunter to find 20 SaaS companies in France with 50-200 employees. For each company, find verified email addresses for people in Head of Sales or VP Sales roles. Return the results in a table.
+```
+
+**Expected behaviour:** `Find-Companies` discovers the SaaS companies, the model relays ONE bulk credit-consent prompt, then `Domain-Search` loops company-to-company (carrying `seniority=executive`, `department=sales`) and the run ends with a rendered table. Because the brief says "verified", `Email-Verifier` may run for rows whose Domain-Search verification was NOT already `valid` — but never for rows that were. No `Create-Lead-If-Missing` (the user asked for a table, not a save).
+
+**Pass criteria — five BINARY network-panel checks, all must hold per run:**
+- [ ] The run ends with a **table** rendered to the user (does not stall or trail off).
+- [ ] After the **one** batch-approval prompt, **zero** further confirmation prompts appear before the table is returned.
+- [ ] **No `Email-Verifier` call** for any email whose `Domain-Search` row was already `valid` (cross-check the Domain-Search response `verification.status` / `verification_source: "domain_search"` against the verifier calls in the panel).
+- [ ] **Zero calls to any non-existent endpoint** — nothing named `enrich`, no `/enrich`, no web browse/fetch substituted for a Hunter lookup.
+- [ ] **No `Create-Lead-If-Missing`** (or any other lead-write tool) is called — research mode writes nothing.
+
+**Run protocol:** Repeat in 3 fresh conversations. Behaviour is non-deterministic; **pass = ≥ 2 of 3 runs meet all five criteria**. A `< 2/3` result means the research loop is not holding the default — re-check that `save_leads` stayed unset and that the consent gate carried `confirmed_credit_use` forward.
+
+| Run | Result | Tools fired (paste from network panel) | Notes |
+|-----|--------|----------------------------------------|-------|
+| 1   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
+| 2   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
+| 3   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
+
+**Screenshots (one per run, showing the conversation through the final table):** `<!-- paste 3 screenshots -->`
+
+**Overall:** ☐ Pass (≥ 2/3) ☐ Fail (< 2/3)
+
+---
+
 ## Run summary
 
 After completing all sections, fill this in.
@@ -507,8 +540,8 @@ After completing all sections, fill this in.
 |---------|-------|------|------|---------|
 | 1 — Marketplace prompts | 5 | | | |
 | 2 — Tool coverage matrix | 47 | | | |
-| 3 — Edge cases | 10 | | | |
-| **Total** | **62** | | | |
+| 3 — Edge cases | 11 | | | |
+| **Total** | **63** | | | |
 
 **Overall verdict:** ☐ Ready for app review submission ☐ Needs fixes before submission
 

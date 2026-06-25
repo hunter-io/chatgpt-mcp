@@ -96,7 +96,7 @@ export function registerEnrichmentTools(server: McpServer, apiKey: string, baseU
     TOOL_NAMES.personEnrichment,
     {
       description:
-        "Use this when the user wants to look up a professional contact by email address and see their name, job title, employer, location, phone number, and social profiles. Costs 1 enrichment credit, only charged when data is found. Do not use this for consumer profiles — Hunter's enrichment covers business contacts.",
+        "Use this when the user wants to look up a professional contact by email address and see their name, job title, employer, location, phone number, and social profiles. Uses Hunter credits, charged only when data is found. Do not use this for consumer profiles — Hunter's enrichment covers business contacts.",
       inputSchema: { email: z.string().email().max(254).describe("Email address to enrich") },
       outputSchema: personEnrichmentOutputSchema.shape,
       annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Enrich Person" },
@@ -116,7 +116,7 @@ export function registerEnrichmentTools(server: McpServer, apiKey: string, baseU
     TOOL_NAMES.combinedEnrichment,
     {
       description:
-        "Use this when the user provides an email address or LinkedIn handle and wants both the person's profile and their company's profile in a single response. Costs 1 enrichment credit, only charged when data is found. Do not use this when the user only needs one side of the picture — call Person-Enrichment or Company-Enrichment directly to keep the response narrow.",
+        "Use this when the user provides an email address or LinkedIn handle and wants both the person's profile and their company's profile in a single response. Uses Hunter credits, charged only when data is found. Do not use this when the user only needs one side of the picture — call Person-Enrichment or Company-Enrichment directly to keep the response narrow.",
       inputSchema: {
         email: z.string().email().max(254).optional().describe("Email address of the person to enrich"),
         linkedin_handle: z

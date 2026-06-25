@@ -413,6 +413,19 @@ const INJECTED_FIELD_NAMES = new Set([
   "nextAction",
   "pendingToolCall",
   "viewInHunter",
+  // `save_leads` (HUN-20651 Phase 2): the coordinator-resolved research-vs-save
+  // mode flag. The server treats it like `confirmed_credit_use` — set once at the
+  // consented start and carried forward via `carryLoopFilters`. A Hunter response
+  // record carrying `save_leads` (e.g. an attacker-controlled lead note or
+  // scraped record) must never be able to flip a research loop into a write loop,
+  // so we strip it at any depth before the model ever sees it.
+  "save_leads",
+  // `confirmed_save_use` (HUN-20651 review fix B): the save-SCOPED bulk consent
+  // token. It authorizes the write path (Email-Verifier → Create-Lead-If-Missing
+  // in a bulk loop), so an attacker-controlled Hunter record carrying it must
+  // never reach the model and let a research loop start saving without the
+  // save-cost approval. Strip it like `save_leads`.
+  "confirmed_save_use",
   // Telemetry / internal-ID fields. OpenAI Apps SDK submission privacy
   // guidance: "session IDs, trace IDs, request IDs, timestamps" must not
   // appear in user-facing tool responses. Hunter's Rails API doesn't
@@ -997,6 +1010,33 @@ export interface LoopFilters {
   // entire chain. Carried through chained `suggestedArgs` so subsequent
   // Domain-Search calls in the loop don't re-trigger the server-side guard.
   confirmed_credit_use?: boolean
+  // Save-SCOPED bulk credit-consent flag (HUN-20651 review fix B). Distinct from
+  // `confirmed_credit_use` (the research-scoped consent) so a research-mode
+  // approval — whose estimate carried verification: 0 — can NOT authorize the
+  // save path (search + verify + write). `requireBulkConsent` requires THIS token
+  // in save mode; it's only ever produced by the save loop carry below, so a
+  // research loop's carry can never forge it. One-time-set + carried like the
+  // others. Stripped from upstream Hunter responses (INJECTED_FIELD_NAMES).
+  confirmed_save_use?: boolean
+  // Research-vs-save mode flag (HUN-20651 Phase 2). Coordinator-resolved and
+  // one-time-set, like `confirmed_credit_use`: absent/false ⇒ research (default,
+  // return-a-table; the loop advances Domain-Search → next Domain-Search and
+  // NEVER chains to a write tool); `true` ⇒ save (the loop terminates at
+  // Create-Lead-If-Missing). Carried through chained `suggestedArgs` so the mode
+  // chosen on the first Domain-Search call governs the whole loop and can't be
+  // silently re-decided mid-chain. Stripped from upstream Hunter responses (see
+  // INJECTED_FIELD_NAMES) so a scraped record can't flip the mode.
+  save_leads?: boolean
+  // Destination list for the save loop (HUN-20651 review fix M). When the user
+  // asked to save the gathered contacts INTO a list, the coordinator resolves the
+  // list id once (Create-Leads-List for a new/named list, or List-Leads-Lists for
+  // an existing one) and carries it through every chained Create-Lead-If-Missing
+  // so the saved leads land in the intended list instead of unlisted. Carried
+  // verbatim like the other save fields; only forwarded when present. Domain-Search
+  // and Email-Verifier accept it as a carry-only field (they never read it), and
+  // Create-Lead-If-Missing consumes it as a real lead field. Research loops simply
+  // never set it.
+  leads_list_id?: number
 }
 
 /**
@@ -1012,6 +1052,26 @@ export function carryLoopFilters(args: LoopFilters): Record<string, string | num
   if (args.department) out.department = args.department
   if (args.required_field) out.required_field = args.required_field
   if (args.confirmed_credit_use === true) out.confirmed_credit_use = true
+  // Save-scoped consent carry (HUN-20651 review fix B). Only forwarded inside a
+  // bona-fide save loop (save_leads === true AND the save consent was granted).
+  // A research loop never carries `save_leads`, so it can never propagate
+  // `confirmed_save_use` either — which is exactly what stops a research-scoped
+  // approval from later authorizing the save path. Kept monotonic-toward-save
+  // like `save_leads`.
+  if (args.save_leads === true && args.confirmed_save_use === true) out.confirmed_save_use = true
+  // Only carry `save_leads` when it's explicitly true. Carrying `false`/absent
+  // would be redundant (research is the default) and would also give a mid-loop
+  // `false` a foothold to flip a save loop back to research — keep the carry
+  // monotonic-toward-save-only and let the handler own the one-time-set guard.
+  if (args.save_leads === true) out.save_leads = true
+  // Destination list carry (HUN-20651 review fix M). Forward `leads_list_id`
+  // whenever it's present so the loop-emitted Create-Lead-If-Missing suggestedArgs
+  // carry the intended list id through to the save terminal. It's a passive carry
+  // on Domain-Search/Email-Verifier (they don't read it) and a real lead field on
+  // Create-Lead-If-Missing. Research loops never set it, so it's naturally absent
+  // there. Not mode-bound: a list id without save_leads is inert (no save tool is
+  // ever reached), so no extra guard is needed.
+  if (args.leads_list_id !== undefined) out.leads_list_id = args.leads_list_id
   return out
 }
 
@@ -1110,11 +1170,11 @@ export function stripResponseFields(result: McpTextResult, fieldsToStrip: Readon
 }
 
 /**
- * Server-side bulk credit-consent guard. When `pending_companies` is non-empty
- * AND `confirmed_credit_use !== true`, returns a synthesized `McpTextResult`
- * carrying an `ask_user` nextAction with the credit-cost summary — the caller
- * should `return` it immediately, short-circuiting the Hunter API call.
- * Returns `null` when the call is authorized to proceed.
+ * Server-side bulk credit-consent guard. When the call is an unconsented bulk
+ * (or save) entry, returns a synthesized `McpTextResult` carrying an `ask_user`
+ * nextAction with the credit-cost summary — the caller should `return` it
+ * immediately, short-circuiting the Hunter API call. Returns `null` when the
+ * call is authorized to proceed.
  *
  * Today `Domain-Search` is the only tool that calls this, because it's the
  * only credit-debit entry to bulk loops. As soon as a second tool wants to
@@ -1124,6 +1184,23 @@ export function stripResponseFields(result: McpTextResult, fieldsToStrip: Readon
  * debit" silently breaks. Extracted from the original inline guard so the
  * contract is grep-able (`grep -r requireBulkConsent`).
  *
+ * `pending === undefined` (a genuine single-company call) is always allowed —
+ * single-company save keeps its own per-email `requiresConfirmation` gate in the
+ * handler. The distinction that matters for the gate is "pending is a DEFINED
+ * array" (the model entered the bulk shape) vs "pending is undefined".
+ *
+ * HUN-20651 review fix H — empty-pending save backdoor. `pending: []` (an empty
+ * but DEFINED array) routes the handler through the multi-company `advanceLoop`
+ * path, which chains straight to Create-Lead-If-Missing without a per-email gate.
+ * If the gate early-returned on `length === 0`, a save_leads call with empty
+ * pending and no consent wrote a lead with NEITHER the bulk consent gate NOR the
+ * single-company per-email gate. Fix: in SAVE mode, an empty-but-defined pending
+ * is treated as a 1-company save batch and the gate fires when the save isn't yet
+ * consented (count the current company). Research mode keeps the old behavior —
+ * an empty-pending research call has nothing to charge for beyond this single
+ * company's search (which the model already authorized by entering the loop) and
+ * just completes with a table, so it never gates on empty.
+ *
  * Lives outside the NEXT_ACTION byte-aligned region so each MCP adopts
  * independently. See HUN-20170-v3 plan Phase 1.1c + todo #106.
  */
@@ -1132,8 +1209,31 @@ export function requireBulkConsent(
   confirmed: boolean | undefined,
   summary: string,
   estimatedCredits: { search: number; verification: number },
+  // Mode-binding (HUN-20651 review fix B). The carried consent token is
+  // mode-SCOPED: a research-scoped approval (verification estimate 0) must NOT
+  // authorize the save path (search + verify + write). Without this, a research
+  // batch's `confirmed_credit_use: true` carried forward to a later `save_leads:
+  // true` hop bypassed the gate and Email-Verifier / Create-Lead-If-Missing ran
+  // on the higher save cost the user never approved. So:
+  //   - research mode (saveLeads !== true): the gate is satisfied by
+  //     `confirmed` (the research consent) — unchanged.
+  //   - save mode (saveLeads === true): the gate requires the SAVE-scoped
+  //     `confirmedSave` token. A research consent alone re-fires the gate with
+  //     the (higher) save estimate. `confirmedSave` is only ever produced by the
+  //     server's save loop carry (carryLoopFilters), so a research loop's carry
+  //     can never satisfy the save gate.
+  opts?: { saveLeads?: boolean; confirmedSave?: boolean },
 ): McpTextResult | null {
-  if (!pending || pending.length === 0 || confirmed === true) return null
+  // Genuine single-company call (pending undefined): never gate here; the handler
+  // owns the single-company per-email confirmation.
+  if (!pending) return null
+  const isSave = opts?.saveLeads === true
+  // Research mode + empty pending: nothing to gate (the loop is on its last hop
+  // and just renders a table). Save mode + empty pending IS gated (review fix H):
+  // the current company is a 1-company save batch that still needs save consent.
+  if (pending.length === 0 && !isSave) return null
+  const consented = isSave ? opts?.confirmedSave === true : confirmed === true
+  if (consented) return null
   return embedNextAction(
     {
       content: [{ type: "text" as const, text: summary, annotations: { audience: ["user"] } }],
@@ -1188,6 +1288,159 @@ export function chainOrComplete(
     buildNextAction({
       kind: "complete",
       summary: isLastLoopHop ? copy.loopCompleteSummary : copy.singleCompleteSummary,
+    }),
+  )
+}
+
+// Three-way verification routing outcome (HUN-20651 review fix A). Defined here
+// (not in tools/search.ts) so `advanceLoop` can take it without a circular import
+// — search.ts already imports from helpers.ts. The authoritative producer is
+// `verificationDecision` in tools/search.ts, which re-exports this type.
+//   - "skip_and_use"  : trustworthy as returned (save / include; skip verify)
+//   - "skip_and_drop" : accept_all/invalid (not saveable; skip verify; drop)
+//   - "verify"        : run Email-Verifier first (everything else)
+export type VerificationDecision = "skip_and_use" | "skip_and_drop" | "verify"
+
+/**
+ * Terminal router for a successful Domain-Search hop in the multi-company loop
+ * (HUN-20651 Phase 2). Lives outside the NEXT_ACTION byte-aligned region so each
+ * MCP adopts it independently. The Domain-Search handler funnels BOTH modes
+ * through this one helper so the mode-branch lives in a single, testable place
+ * instead of duplicated inline.
+ *
+ * The original prospecting flow was hardwired toward saving leads: every
+ * Domain-Search success chained into Email-Verifier → Create-Lead-If-Missing.
+ * Research mode (the new default) wants the opposite — a gate-free read loop that
+ * returns a table and writes nothing.
+ *
+ *   - SAVE mode (`filters.save_leads === true`) — unchanged from the shipped
+ *     loop: when this company yielded an email, chain into Create-Lead-If-Missing
+ *     (skip-verify) or Email-Verifier (verify); the create-only terminal is
+ *     preserved (never Create-Or-Update-Lead). When it yielded none, advance to
+ *     the next pending company, or `complete` the loop.
+ *
+ *   - RESEARCH mode (default) — NEVER chains into Email-Verifier or any write
+ *     tool. Whether or not this company yielded an email, advance straight to the
+ *     next pending Domain-Search (carrying the same filters + mode + bulk-consent
+ *     flag), or — when no companies remain — emit `complete` with a table-render
+ *     instruction so the model renders the rows it collected across the loop.
+ *     Research persists nothing; the table IS the deliverable.
+ *
+ * Self-reference dedup and `loopRecoveryAction` recovery are handled by the
+ * caller BEFORE it invokes this (it has already cleaned `pending` of the current
+ * domain and short-circuited on `result.isError`). `email` is `null` when the
+ * company returned no usable contact (the 0-contact advance). This helper is only
+ * reached when `pending !== undefined` (multi-company mode); single-company
+ * routing stays inline in the handler because its terminals differ (`complete`
+ * table vs. the per-email confirmation gate).
+ */
+export function advanceLoop(
+  result: McpTextResult,
+  pending: readonly string[],
+  filters: LoopFilters,
+  ctx: {
+    domain: string
+    email: string | null
+    // Three-way verification routing (HUN-20651 review fix A). `"skip_and_use"`
+    // = trustworthy as returned (save it / skip Email-Verifier). `"verify"` =
+    // run Email-Verifier first. `"skip_and_drop"` = accept_all/invalid — a
+    // re-verify is pointless AND the address is NOT trustworthy to save, so save
+    // mode must advance WITHOUT creating a lead (the 0-contact path). Replaces
+    // the old `skipVerify` boolean, which conflated `skip_and_use` and
+    // `skip_and_drop` and let an invalid/accept_all first contact get SAVED.
+    decision: VerificationDecision
+    reasons: { save: string; verify: string; advanceNoEmail: string; advanceDrop: string; advanceResearch: string }
+    summaries: { loopComplete: string; dropComplete: string; researchComplete: string }
+  },
+): McpTextResult {
+  const filterCarry = carryLoopFilters(filters)
+  const isResearch = filters.save_leads !== true
+
+  // Defense-in-depth per-email gate (HUN-20651 review fix H). The bulk loop only
+  // suppresses the per-email `requiresConfirmation` because the upfront
+  // `requireBulkConsent` already covered the whole save batch via
+  // `confirmed_save_use`. If we reached a SAVE terminal WITHOUT that save consent
+  // (e.g. an empty-pending entry that slipped past the gate, or a direct
+  // Email-Verifier bulk entry — review fix J), the write is uncovered, so we must
+  // NOT suppress the gate: re-attach `requiresConfirmation: true` to the save
+  // terminal. A legitimate consented loop carries `confirmed_save_use: true` and
+  // advances ungated as before.
+  const saveGate = !isResearch && filters.confirmed_save_use !== true ? { requiresConfirmation: true } : {}
+
+  // SAVE mode, `skip_and_drop`, WITH an email in hand (HUN-20651 review fix F): a
+  // contact WAS found at this domain — it's just accept_all/invalid, so we won't
+  // create a lead from it. This is a distinct outcome from the genuine 0-contact
+  // case below, and must NOT reuse the "No contacts found" copy (which would
+  // misreport that Domain-Search found nothing). It gets its own drop-specific
+  // reason/summary. Research mode never sets this (it falls through to the
+  // research advance/complete copy regardless of decision).
+  const isSaveDrop = !isResearch && ctx.email != null && ctx.decision === "skip_and_drop"
+
+  // SAVE mode with a SAVEABLE email in hand: chain to the create-only terminal
+  // (skip_and_use) or to Email-Verifier first (verify). `skip_and_drop`
+  // (accept_all/invalid) falls through to the next-company advance below WITHOUT
+  // saving — surfacing the unsaveable row but never creating a lead from it.
+  // Research mode never enters here — it falls through to the next-company
+  // advance regardless of `email`.
+  if (!isResearch && ctx.email && ctx.decision !== "skip_and_drop") {
+    if (ctx.decision === "skip_and_use") {
+      return embedNextAction(
+        result,
+        buildNextAction({
+          kind: "call_tool",
+          tool: TOOL_NAMES.createLeadIfMissing,
+          reason: ctx.reasons.save,
+          suggestedArgs: { email: ctx.email, pending_companies: pending, ...filterCarry },
+          ...saveGate,
+        }),
+      )
+    }
+    return embedNextAction(
+      result,
+      buildNextAction({
+        kind: "call_tool",
+        tool: TOOL_NAMES.emailVerifier,
+        reason: ctx.reasons.verify,
+        suggestedArgs: { email: ctx.email, pending_companies: pending, ...filterCarry },
+        ...saveGate,
+      }),
+    )
+  }
+
+  // Advance to the next pending company. In research mode this is the ONLY
+  // forward edge (a found email is rendered into the table, not saved); in save
+  // mode this is either the 0-contact advance (no email worth saving) OR the
+  // drop advance (a contact was found but its email was accept_all/invalid, so it
+  // was intentionally not saved — distinct copy, never the "no contacts" copy).
+  if (pending.length > 0) {
+    const [next, ...rest] = pending
+    return embedNextAction(
+      result,
+      buildNextAction({
+        kind: "call_tool",
+        tool: TOOL_NAMES.domainSearch,
+        reason: isResearch
+          ? ctx.reasons.advanceResearch
+          : isSaveDrop
+            ? ctx.reasons.advanceDrop
+            : ctx.reasons.advanceNoEmail,
+        suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
+      }),
+    )
+  }
+
+  // No companies left. Research ends with a table-render instruction; a save run
+  // whose last company was dropped (accept_all/invalid) gets the drop-complete
+  // summary; a genuine no-contact save run gets the loop-complete summary.
+  return embedNextAction(
+    result,
+    buildNextAction({
+      kind: "complete",
+      summary: isResearch
+        ? ctx.summaries.researchComplete
+        : isSaveDrop
+          ? ctx.summaries.dropComplete
+          : ctx.summaries.loopComplete,
     }),
   )
 }

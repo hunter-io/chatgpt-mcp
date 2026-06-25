@@ -218,6 +218,39 @@ export const buildResponseSchema = <T extends z.ZodType, M extends z.ZodType = z
     })
     .loose()
 
+// ─── Bulk-consent approval-required envelope ─────────────────────────────────
+//
+// `requireBulkConsent` (helpers.ts) short-circuits an unconsented bulk/save entry
+// with `structuredContent = { kind: "approval_required", ok: true,
+// estimated_credits: { search, verification } }` plus an `ask_user` nextAction.
+// Every tool that can EMIT this envelope must DECLARE it in its outputSchema —
+// otherwise `registerTool` publishes `.shape` as a closed
+// (`additionalProperties: false`) object and a schema-validating client rejects
+// the approval prompt with -32602 (HUN-20651 review fix N). Domain-Search already
+// had these fields inlined in its custom schema; Email-Verifier and
+// Create-Lead-If-Missing gained the gate (review fixes J/L/O) and so must declare
+// them too.
+//
+// `buildResponseSchema` declares `kind: z.literal("ack")` (the 202/204 path). The
+// bulk-consent path adds `kind: "approval_required"`, so these tools need `kind`
+// to accept BOTH literals AND to declare `estimated_credits`. This helper returns
+// the raw-shape fragment to merge into a `buildResponseSchema(...).extend(...)`
+// (or to spread alongside other fields) so the declaration stays identical across
+// every approval-emitting tool and can't drift. Lives here (outside any byte-
+// locked region) per the cross-MCP constraint.
+export const approvalRequiredShape = {
+  // Widen `kind` to the union both envelopes use. `buildResponseSchema` already
+  // declares `kind: z.literal("ack")`; `.extend` overrides it with this union,
+  // which still admits "ack" so the 202/204 ack envelope keeps validating.
+  kind: z.union([z.literal("approval_required"), z.literal("ack")]).optional(),
+  estimated_credits: z
+    .object({
+      search: z.number().int().nonnegative(),
+      verification: z.number().int().nonnegative(),
+    })
+    .optional(),
+} as const
+
 // `sanitizeUpstreamMessage` (Bearer / api_key scrub for upstream error bodies)
 // is defined directly in `helpers.ts` to avoid a runtime circular import:
 // `schemas/common.ts` imports `TOOL_NAMES` from `helpers.ts`; if `helpers.ts`
