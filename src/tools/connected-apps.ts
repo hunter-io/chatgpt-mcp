@@ -67,7 +67,7 @@ export function registerConnectedAppTools(server: McpServer, apiKey: string, bas
       const params: Record<string, string> = {}
       if (offset !== undefined) params.offset = String(offset)
       if (limit !== undefined) params.limit = String(limit)
-      return callHunterApi({ path: "/connected_apps", apiKey, baseUrl, params })
+      return callHunterApi({ path: "/connected-apps", apiKey, baseUrl, params })
     },
   )
 
@@ -83,7 +83,7 @@ export function registerConnectedAppTools(server: McpServer, apiKey: string, bas
       annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ id }) => {
-      return callHunterApi({ path: `/connected_apps/${id}`, apiKey, baseUrl })
+      return callHunterApi({ path: `/connected-apps/${id}`, apiKey, baseUrl })
     },
   )
 }

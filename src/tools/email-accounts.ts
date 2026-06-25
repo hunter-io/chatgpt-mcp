@@ -49,7 +49,7 @@ export function registerEmailAccountTools(server: McpServer, apiKey: string, bas
       const params: Record<string, string> = {}
       if (offset !== undefined) params.offset = String(offset)
       if (limit !== undefined) params.limit = String(limit)
-      return callHunterApi({ path: "/email_accounts", apiKey, baseUrl, params })
+      return callHunterApi({ path: "/email-accounts", apiKey, baseUrl, params })
     },
   )
 }

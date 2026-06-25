@@ -30,6 +30,11 @@ const listOutputSchema = buildResponseSchema(
 )
 const singleOutputSchema = buildResponseSchema(customAttributeSchema)
 
+// NOTE: the HTTP paths below intentionally use the snake_case `/leads_custom_attributes`.
+// Unlike the other multi-word v2 resources (which the API exposes in kebab-case, e.g.
+// `/leads-lists`, `/email-accounts`), `leads_custom_attributes` has NO kebab alias —
+// `GET /v2/leads-custom-attributes` 404s. Keep the underscore here. This resource is the
+// single allowlisted exception in the "v2 path convention" guard test (HUN-20797).
 export function registerCustomAttributeTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
     TOOL_NAMES.listCustomAttributes,

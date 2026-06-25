@@ -64,7 +64,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
       const params: Record<string, string> = {}
       if (offset !== undefined) params.offset = String(offset)
       if (limit !== undefined) params.limit = String(limit)
-      return callHunterApi({ path: "/leads_lists", apiKey, baseUrl, params })
+      return callHunterApi({ path: "/leads-lists", apiKey, baseUrl, params })
     },
   )
 
@@ -80,7 +80,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
       annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ id }) => {
-      return callHunterApi({ path: `/leads_lists/${id}`, apiKey, baseUrl })
+      return callHunterApi({ path: `/leads-lists/${id}`, apiKey, baseUrl })
     },
   )
 
@@ -96,7 +96,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     },
     async ({ name }) => {
       const result = await callHunterApi({
-        path: "/leads_lists",
+        path: "/leads-lists",
         apiKey,
         baseUrl,
         method: "POST",
@@ -124,7 +124,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     },
     async ({ id, name }) => {
       const result = await callHunterApi({
-        path: `/leads_lists/${id}`,
+        path: `/leads-lists/${id}`,
         apiKey,
         baseUrl,
         method: "PUT",
@@ -147,7 +147,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
       annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
-      return callHunterApi({ path: `/leads_lists/${id}`, apiKey, baseUrl, method: "DELETE" })
+      return callHunterApi({ path: `/leads-lists/${id}`, apiKey, baseUrl, method: "DELETE" })
     },
   )
 
@@ -174,7 +174,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     },
     async ({ id, destination_leads_list_id }) => {
       const result = await callHunterApi({
-        path: `/leads_lists/${id}/merge`,
+        path: `/leads-lists/${id}/merge`,
         apiKey,
         baseUrl,
         method: "POST",

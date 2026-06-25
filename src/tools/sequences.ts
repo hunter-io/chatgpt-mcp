@@ -164,7 +164,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
       const params: Record<string, string> = {}
       if (offset !== undefined) params.offset = String(offset)
       if (limit !== undefined) params.limit = String(limit)
-      return callHunterApi({ path: `/sequences/${sequence_id}/follow_ups`, apiKey, baseUrl, params })
+      return callHunterApi({ path: `/sequences/${sequence_id}/follow-ups`, apiKey, baseUrl, params })
     },
   )
 

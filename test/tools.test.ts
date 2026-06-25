@@ -2826,7 +2826,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
   // "tool annotations" describe block above; no need to duplicate here.
 })
 
-// HUN-18635 / Group 01: List-Email-Accounts. GET /v2/email_accounts returns the
+// HUN-18635 / Group 01: List-Email-Accounts. GET /v2/email-accounts returns the
 // user's connected sending inboxes with a `sending_status` per account. No 422
 // path (read-only, no request body); 401 surfaces as the typed error envelope.
 describe("List-Email-Accounts (Group 01)", () => {
@@ -2835,7 +2835,7 @@ describe("List-Email-Accounts (Group 01)", () => {
     registerAllTools()
   })
 
-  it("calls GET /email_accounts with no params when none supplied", async () => {
+  it("calls GET /email-accounts with no params when none supplied", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 20, offset: 0 } })),
@@ -2845,7 +2845,7 @@ describe("List-Email-Accounts (Group 01)", () => {
     const handler = registeredTools.get("List-Email-Accounts")!.handler
     await handler({})
 
-    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/email_accounts", {
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/email-accounts", {
       method: "GET",
       headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
       body: undefined,
@@ -2863,7 +2863,7 @@ describe("List-Email-Accounts (Group 01)", () => {
     await handler({ limit: 2, offset: 4 })
 
     const [url] = mockFetch.mock.calls[0]
-    expect(url).toBe("https://api.hunter.io/v2/email_accounts?offset=4&limit=2")
+    expect(url).toBe("https://api.hunter.io/v2/email-accounts?offset=4&limit=2")
   })
 
   it("returns the email accounts list with sending_status in structuredContent", async () => {
@@ -2920,7 +2920,7 @@ describe("List-Email-Accounts (Group 01)", () => {
 })
 
 // HUN-18641 / Group 02: List-Sequence-Follow-Ups. GET
-// /v2/sequences/:sequence_id/follow_ups returns the follow-up steps of a
+// /v2/sequences/:sequence_id/follow-ups returns the follow-up steps of a
 // sequence ordered by (step ASC, variant ASC). Read-only (no request body),
 // so no 422 path; 404 surfaces when the sequence does not exist or belongs to
 // another team; 400 pagination_error surfaces on bad offset/limit.
@@ -2930,7 +2930,7 @@ describe("List-Sequence-Follow-Ups (Group 02)", () => {
     registerAllTools()
   })
 
-  it("calls GET /sequences/:id/follow_ups with no pagination params when none supplied", async () => {
+  it("calls GET /sequences/:id/follow-ups with no pagination params when none supplied", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () => Promise.resolve(JSON.stringify({ data: { follow_ups: [] }, meta: { limit: 20, offset: 0 } })),
@@ -2940,7 +2940,7 @@ describe("List-Sequence-Follow-Ups (Group 02)", () => {
     const handler = registeredTools.get("List-Sequence-Follow-Ups")!.handler
     await handler({ sequence_id: 7 })
 
-    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/follow_ups", {
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/follow-ups", {
       method: "GET",
       headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
       body: undefined,
@@ -2958,7 +2958,7 @@ describe("List-Sequence-Follow-Ups (Group 02)", () => {
     await handler({ sequence_id: 7, limit: 5, offset: 10 })
 
     const [url] = mockFetch.mock.calls[0]
-    expect(url).toBe("https://api.hunter.io/v2/sequences/7/follow_ups?offset=10&limit=5")
+    expect(url).toBe("https://api.hunter.io/v2/sequences/7/follow-ups?offset=10&limit=5")
   })
 
   it("returns the follow-up steps with step ordering in structuredContent", async () => {
@@ -4643,9 +4643,9 @@ describe("Company-List Membership (Group 10)", () => {
   })
 })
 
-// HUN-18654 / Group 11: Connected apps (read-only). GET /v2/connected_apps lists
+// HUN-18654 / Group 11: Connected apps (read-only). GET /v2/connected-apps lists
 // the user's third-party integrations (scoped to the team via policy_scope) with
-// `meta: { total, limit, offset }`; GET /v2/connected_apps/:id renders a single
+// `meta: { total, limit, offset }`; GET /v2/connected-apps/:id renders a single
 // app plus its `attribute_mappings`. Both are read-only (no request body), so no
 // 422 path. List returns an empty array when nothing is connected; show surfaces
 // a 404 when the app does not exist or belongs to another team. 401 surfaces as
@@ -4656,7 +4656,7 @@ describe("Connected Apps (Group 11)", () => {
     registerAllTools()
   })
 
-  it("List-Connected-Apps calls GET /connected_apps with no params when none supplied", async () => {
+  it("List-Connected-Apps calls GET /connected-apps with no params when none supplied", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () => Promise.resolve(JSON.stringify({ data: [], meta: { total: 0, limit: 20, offset: 0 } })),
@@ -4666,7 +4666,7 @@ describe("Connected Apps (Group 11)", () => {
     const handler = registeredTools.get("List-Connected-Apps")!.handler
     await handler({})
 
-    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected_apps", {
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected-apps", {
       method: "GET",
       headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
       body: undefined,
@@ -4684,7 +4684,7 @@ describe("Connected Apps (Group 11)", () => {
     await handler({ limit: 5, offset: 10 })
 
     const [url] = mockFetch.mock.calls[0]
-    expect(url).toBe("https://api.hunter.io/v2/connected_apps?offset=10&limit=5")
+    expect(url).toBe("https://api.hunter.io/v2/connected-apps?offset=10&limit=5")
   })
 
   it("List-Connected-Apps returns the apps list with a null name/category in structuredContent", async () => {
@@ -4755,7 +4755,7 @@ describe("Connected Apps (Group 11)", () => {
     expect(err.message).toBe("Invalid API key.")
   })
 
-  it("Get-Connected-App calls GET /connected_apps/:id and returns attribute_mappings in structuredContent", async () => {
+  it("Get-Connected-App calls GET /connected-apps/:id and returns attribute_mappings in structuredContent", async () => {
     const mockData = {
       data: {
         id: 3,
@@ -4780,7 +4780,7 @@ describe("Connected Apps (Group 11)", () => {
     const handler = registeredTools.get("Get-Connected-App")!.handler
     const result = await handler({ id: 3 })
 
-    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected_apps/3", {
+    expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected-apps/3", {
       method: "GET",
       headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
       body: undefined,
@@ -5993,5 +5993,41 @@ describe("HUN-20651 Phase 3: server version bumped to invalidate tools/list cach
     expect(match).not.toBeNull()
     const [major, minor] = [Number(match![1]), Number(match![2])]
     expect(major > 2 || (major === 2 && minor >= 5)).toBe(true)
+  })
+})
+
+// HUN-20797: the public Hunter v2 API standardizes multi-word resource paths on
+// kebab-case (/email-accounts, /connected-apps, /leads-lists, ...). A snake_case path
+// the API does not alias 404s in production — and because the unit tests mock fetch, a
+// wrong-but-consistent path passes silently (that is how the original bug shipped). This
+// guard reads every tool's callHunterApi path literal and fails on a snake_case segment.
+// `${...}` interpolations (runtime ids like ${sequence_id}) are stripped before checking.
+// `leads_custom_attributes` is the SINGLE allowlisted exception: the v2 API serves it
+// only under the underscore form (GET /v2/leads-custom-attributes 404s).
+describe("HUN-20797: callHunterApi paths use kebab-case (snake_case 404s in production)", () => {
+  it("no tool path uses a snake_case segment outside the allowlist", async () => {
+    const fs = await import("node:fs")
+    const ALLOWLIST = new Set(["leads_custom_attributes"])
+    const toolsDir = new URL("../src/tools/", import.meta.url)
+    const sources = fs
+      .readdirSync(toolsDir)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => fs.readFileSync(new URL(f, toolsDir), "utf8"))
+    sources.push(fs.readFileSync(new URL("../src/index.ts", import.meta.url), "utf8"))
+
+    const offenders: string[] = []
+    for (const src of sources) {
+      const re = /path:\s*[`"](\/[^`"]+)[`"]/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(src)) !== null) {
+        const literal = m[1].replace(/\$\{[^}]*\}/g, "")
+        for (const segment of literal.split("/")) {
+          if (segment.includes("_") && !ALLOWLIST.has(segment)) {
+            offenders.push(`${m[1]} (segment "${segment}")`)
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 })
