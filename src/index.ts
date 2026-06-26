@@ -407,6 +407,23 @@ export default {
     }
 
     if (url.pathname === "/mcp") {
+      // A stateless Streamable HTTP server holds no session and has no
+      // server->client messages to push, so it offers no standalone SSE
+      // stream. The SDK's handleGetRequest would nonetheless open a
+      // text/event-stream that is never written to and never closed, so a GET
+      // (a client opening the standalone listening stream) hangs until the
+      // Workers runtime cancels it as a non-responding request ("your Worker's
+      // code had hung and would never generate a response"). The MCP spec lets
+      // a server with no SSE stream answer GET with 405; real traffic (tool
+      // calls) uses POST and is unaffected. Answered before auth because this
+      // server allows keyless discovery, so a keyless GET would hang too.
+      if (request.method === "GET") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { ...corsHeadersFor(request), Allow: "POST" },
+        })
+      }
+
       const apiKey = extractApiKey(request)
 
       const baseUrl = url.hostname === "localhost" ? BASE_API_URL_DEVELOPMENT : BASE_API_URL_PRODUCTION
