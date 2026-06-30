@@ -136,6 +136,7 @@ const ALL_TOOL_NAMES = [
   "Remove-Campaign-Recipients",
   "Start-Campaign",
   "Plan-Prospecting-Flow",
+  "Report-API-Feedback",
 ]
 
 describe("tool registration", () => {
@@ -214,11 +215,14 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     expect(tool!.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
   })
 
-  it.each(billableLookupToolTitles)("tool '%s' has annotations.title === '%s' (HUN-20170-v3 Phase 2.3)", (name, title) => {
-    const tool = registeredTools.get(name)
-    expect(tool).toBeDefined()
-    expect((tool!.annotations as { title?: string }).title).toBe(title)
-  })
+  it.each(billableLookupToolTitles)(
+    "tool '%s' has annotations.title === '%s' (HUN-20170-v3 Phase 2.3)",
+    (name, title) => {
+      const tool = registeredTools.get(name)
+      expect(tool).toBeDefined()
+      expect((tool!.annotations as { title?: string }).title).toBe(title)
+    },
+  )
 
   // PRIVATE_READ: read-only access to the user's private Hunter workspace.
   // readOnly=true, destructive=false, openWorld=false.
@@ -3701,7 +3705,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } })),
+        Promise.resolve(
+          JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -3718,7 +3724,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } })),
+        Promise.resolve(
+          JSON.stringify({ data: { company_lists: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -3733,8 +3741,21 @@ describe("Company-Lists CRUD (Group 07)", () => {
     const mockData = {
       data: {
         company_lists: [
-          { id: 2, name: "SaaS prospects", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: null, created_at: "2026-05-01T00:00:00Z" },
-          { id: 1, name: "Manual picks", type: "static", company_list_folder_id: 9, created_at: "2026-04-01T00:00:00Z" },
+          {
+            id: 2,
+            name: "SaaS prospects",
+            type: "dynamic",
+            filters: { industry: "software" },
+            company_list_folder_id: null,
+            created_at: "2026-05-01T00:00:00Z",
+          },
+          {
+            id: 1,
+            name: "Manual picks",
+            type: "static",
+            company_list_folder_id: 9,
+            created_at: "2026-04-01T00:00:00Z",
+          },
         ],
       },
       meta: { total: 2, params: { limit: 20, offset: 0 } },
@@ -3752,7 +3773,14 @@ describe("Company-Lists CRUD (Group 07)", () => {
 
     expect(result.isError).toBeUndefined()
     const structured = result.structuredContent as {
-      data: { company_lists: { id: number; type: string; filters?: Record<string, unknown>; company_list_folder_id: number | null }[] }
+      data: {
+        company_lists: {
+          id: number
+          type: string
+          filters?: Record<string, unknown>
+          company_list_folder_id: number | null
+        }[]
+      }
       meta: { total: number }
     }
     expect(structured.data.company_lists[0].type).toBe("dynamic")
@@ -3764,7 +3792,14 @@ describe("Company-Lists CRUD (Group 07)", () => {
 
   it("Get-Company-List calls GET /company-lists/:id and returns companies_count", async () => {
     const mockData = {
-      data: { id: 7, name: "Targets", type: "static", company_list_folder_id: null, created_at: "2026-04-01T00:00:00Z", companies_count: 42 },
+      data: {
+        id: 7,
+        name: "Targets",
+        type: "static",
+        company_list_folder_id: null,
+        created_at: "2026-04-01T00:00:00Z",
+        companies_count: 42,
+      },
     }
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -3793,7 +3828,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -3811,7 +3848,18 @@ describe("Company-Lists CRUD (Group 07)", () => {
       ok: true,
       status: 201,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { id: 11, name: "New list", type: "static", company_list_folder_id: null, created_at: "2026-06-01T00:00:00Z", companies_count: 0 } })),
+        Promise.resolve(
+          JSON.stringify({
+            data: {
+              id: 11,
+              name: "New list",
+              type: "static",
+              company_list_folder_id: null,
+              created_at: "2026-06-01T00:00:00Z",
+              companies_count: 0,
+            },
+          }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -3833,7 +3881,19 @@ describe("Company-Lists CRUD (Group 07)", () => {
       ok: true,
       status: 201,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { id: 12, name: "Dynamic", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: null, created_at: "2026-06-01T00:00:00Z", companies_count: 0 } })),
+        Promise.resolve(
+          JSON.stringify({
+            data: {
+              id: 12,
+              name: "Dynamic",
+              type: "dynamic",
+              filters: { industry: "software" },
+              company_list_folder_id: null,
+              created_at: "2026-06-01T00:00:00Z",
+              companies_count: 0,
+            },
+          }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -3856,7 +3916,11 @@ describe("Company-Lists CRUD (Group 07)", () => {
         status: 422,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Name has already been taken." }] })),
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "validation_failed", code: 422, details: "Name has already been taken." }],
+            }),
+          ),
       }),
     )
 
@@ -3919,7 +3983,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -3940,7 +4006,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
         status: 422,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Name can't be blank." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Name can't be blank." }] }),
+          ),
       }),
     )
 
@@ -3998,7 +4066,9 @@ describe("Company-Lists CRUD (Group 07)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -4031,7 +4101,9 @@ describe("Company-List Folders CRUD (Group 08)", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } })),
+        Promise.resolve(
+          JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 20, offset: 0 } } }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -4048,7 +4120,9 @@ describe("Company-List Folders CRUD (Group 08)", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } })),
+        Promise.resolve(
+          JSON.stringify({ data: { folders: [] }, meta: { total: 0, params: { limit: 5, offset: 10 } } }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -4096,7 +4170,17 @@ describe("Company-List Folders CRUD (Group 08)", () => {
       ok: true,
       status: 201,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { id: 11, name: "My Folder", color: "374151", company_lists_count: 0, created_at: "2026-06-01T00:00:00Z" } })),
+        Promise.resolve(
+          JSON.stringify({
+            data: {
+              id: 11,
+              name: "My Folder",
+              color: "374151",
+              company_lists_count: 0,
+              created_at: "2026-06-01T00:00:00Z",
+            },
+          }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -4122,7 +4206,9 @@ describe("Company-List Folders CRUD (Group 08)", () => {
         status: 422,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color can't be blank." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color can't be blank." }] }),
+          ),
       }),
     )
 
@@ -4188,7 +4274,11 @@ describe("Company-List Folders CRUD (Group 08)", () => {
         status: 403,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not allowed to update this folder." }] })),
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "forbidden", code: 403, details: "You are not allowed to update this folder." }],
+            }),
+          ),
       }),
     )
 
@@ -4209,7 +4299,9 @@ describe("Company-List Folders CRUD (Group 08)", () => {
         status: 422,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color is invalid." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "validation_failed", code: 422, details: "Color is invalid." }] }),
+          ),
       }),
     )
 
@@ -4271,7 +4363,11 @@ describe("Company-List Folders CRUD (Group 08)", () => {
         status: 403,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not allowed to delete this folder." }] })),
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "forbidden", code: 403, details: "You are not allowed to delete this folder." }],
+            }),
+          ),
       }),
     )
 
@@ -4367,7 +4463,9 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -4428,7 +4526,9 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -4461,7 +4561,8 @@ describe("Company-List Membership (Group 10)", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 201,
-      text: () => Promise.resolve(JSON.stringify({ data: { id: 42, domain: "example.com", created_at: "2026-06-02" } })),
+      text: () =>
+        Promise.resolve(JSON.stringify({ data: { id: 42, domain: "example.com", created_at: "2026-06-02" } })),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -4471,7 +4572,11 @@ describe("Company-List Membership (Group 10)", () => {
     const [url, opts] = mockFetch.mock.calls[0]
     expect(url).toBe("https://api.hunter.io/v2/company-lists/7/companies")
     expect(opts.method).toBe("POST")
-    expect(opts.headers).toEqual({ "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "Content-Type": "application/x-www-form-urlencoded" })
+    expect(opts.headers).toEqual({
+      "X-SOURCE": "hunter-chatgpt",
+      Authorization: "Bearer test-api-key",
+      "Content-Type": "application/x-www-form-urlencoded",
+    })
     expect(opts.body).toBe("company_id=42")
     expect(result.isError).toBeUndefined()
     const structured = result.structuredContent as { data: { id: number; domain: string; created_at: string } }
@@ -4540,7 +4645,9 @@ describe("Company-List Membership (Group 10)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
       }),
     )
 
@@ -4608,7 +4715,9 @@ describe("Company-List Membership (Group 10)", () => {
         status: 403,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] }),
+          ),
       }),
     )
 
@@ -4629,7 +4738,9 @@ describe("Company-List Membership (Group 10)", () => {
         status: 403,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "forbidden", code: 403, details: "You are not authorized." }] }),
+          ),
       }),
     )
 
@@ -4831,7 +4942,9 @@ describe("Connected Apps (Group 11)", () => {
         status: 404,
         headers: { get: () => null },
         text: () =>
-          Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", details: "This connected app does not exist." }] })),
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This connected app does not exist." }] }),
+          ),
       }),
     )
 

@@ -120,6 +120,7 @@ import { registerConnectedAppTools } from "./tools/connected-apps"
 import { registerCustomAttributeTools } from "./tools/custom-attributes"
 import { registerEmailAccountTools } from "./tools/email-accounts"
 import { registerEnrichmentTools } from "./tools/enrichment"
+import { registerFeedbackTools } from "./tools/feedback"
 import { registerLeadTools } from "./tools/leads"
 import { registerLeadsListTools } from "./tools/leads-lists"
 import { registerProspectingTool } from "./tools/prospecting"
@@ -306,6 +307,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
   registerCustomAttributeTools(server, apiKey, baseUrl)
   registerCampaignTools(server, apiKey, baseUrl)
   registerProspectingTool(server)
+  registerFeedbackTools(server, apiKey, baseUrl)
   registerPrompts(server)
 
   // Capability recovery resource — see docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 5).

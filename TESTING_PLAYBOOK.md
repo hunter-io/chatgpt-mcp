@@ -854,6 +854,7 @@ The 55 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Us
 | Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
 | Connected apps (HUN-20196) | `List-Connected-Apps`, `Get-Connected-App` |
 | Coordinator | `Plan-Prospecting-Flow` |
+| Feedback | `Report-API-Feedback` (free; agents report API/tool friction — missing endpoints, wrong docs, bad data, bugs) |
 | Named prompts | `prospect`, `build-list`, `campaign-prep` |
 | Widgets | `discover-widget`, `company-widget` |
 | Resources | `capabilities-recovery` (used implicitly by `Plan-Prospecting-Flow`) |

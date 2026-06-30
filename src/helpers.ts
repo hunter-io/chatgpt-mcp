@@ -138,6 +138,8 @@ export const TOOL_NAMES = {
   startCampaign: "Start-Campaign",
   // coordinator
   prospecting: "Plan-Prospecting-Flow",
+  // feedback
+  reportFeedback: "Report-API-Feedback",
 } as const satisfies Record<string, string>
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES]
@@ -905,6 +907,17 @@ export const PRIVATE_DESTRUCTIVE_ANNOTATIONS = {
 /** Local plan synthesis only; no Hunter API call. Used by Plan-Prospecting-Flow. */
 export const LOCAL_PLAN_ANNOTATIONS = {
   readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const
+
+/**
+ * Report-API-Feedback. Records a free, non-billable feedback note about the
+ * Hunter API/tools. Not read-only (it writes a feedback row), not destructive
+ * (it never touches user data), and stays inside Hunter (no open-world effect).
+ */
+export const FEEDBACK_ANNOTATIONS = {
+  readOnlyHint: false,
   destructiveHint: false,
   openWorldHint: false,
 } as const

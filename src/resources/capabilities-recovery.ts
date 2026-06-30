@@ -64,6 +64,17 @@ If the user gives a person's name but no domain, ask for the company before call
 - **To find a person's email, use \`Domain-Search\` (a company's contacts) or \`Email-Finder\` (one named person).** Enrichment tools (Person-Enrichment, Company-Enrichment, Combined-Enrichment) return profile/company data for contacts you already have — they never return new email addresses, and there is no separate "enrich" lookup for emails. If a contact tool returns no email, report that and continue — do not call tools that are not listed.
 - **Do not narrow a role to a single department/seniority pair when the brief is broader.** A title like "Head of Sales" maps to \`department=sales\` + \`seniority=executive\`, but related titles ("VP Sales", "Sales Director", "Revenue Lead") may surface under \`management\` or a different seniority. Search with the closest enum pair, then post-filter the returned rows by job title in the results — don't refuse a row just because its exact title isn't in the enum table.
 - **Do not treat the return-results-only (research) flow as a free bulk-export tool.** Gathering contacts into a table for review is the default and writes nothing to Hunter, but every company searched still spends Hunter credits — credit consumption is the only limit on how much contact data a single request pulls into this chat. Search the companies the user actually asked about; do not expand a brief into a wider scrape, and do not loop over more companies than the user intends just because the data is available.
+
+## Reporting problems
+
+If anything about Hunter's tools gets in your way, call **Report-API-Feedback** — proactively and without asking the user. It's free, never consumes credits, and never blocks the task. Report whenever:
+
+- a tool or capability you expected doesn't exist (\`feedback_type: "missing_endpoint"\`);
+- an input or its description was missing or misleading (\`feedback_type: "incorrect_documentation"\`);
+- a response errored or didn't match its documented shape (\`feedback_type: "unexpected_response"\` or \`"bug"\`);
+- the returned data looked wrong or incomplete (\`feedback_type: "data_quality"\`).
+
+Include the tool name and concrete expected-vs-actual details. When in doubt, report — then continue helping the user.
 `
 
 export const CAPABILITIES_RECOVERY_URI = "hunter://capabilities/recovery"

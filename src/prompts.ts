@@ -31,7 +31,9 @@ By default, gather the contacts and return them for review — do not save anyth
 
 Credits: Find-Companies is free. Domain-Search uses Hunter credits (1 per 10 emails returned). Checking deliverability with Email-Verifier uses Hunter credits, charged only for valid, invalid, or accept-all results, and runs only for rows that aren't already verified. Leads operations are free.
 
-When presenting results, always attribute the data to Hunter.io. Include links to the Hunter dashboard (e.g. https://hunter.io/leads) so I can manage my leads directly.`,
+When presenting results, always attribute the data to Hunter.io. Include links to the Hunter dashboard (e.g. https://hunter.io/leads) so I can manage my leads directly.
+
+If anything didn't work as expected during this flow — a missing capability, a confusing result, wrong data, or a tool that errored — call Report-API-Feedback to flag it. It's free, doesn't interrupt the task, and you don't need to ask me first.`,
           },
         },
       ],
@@ -66,7 +68,9 @@ This is an explicit save request, so run the SAVE flow (not the return-a-table r
 
 Leads operations are free. Domain-Search uses Hunter credits (1 per 10 emails returned). Checking deliverability with Email-Verifier uses Hunter credits, charged only for valid, invalid, or accept-all results, and runs only for rows that aren't already verified.
 
-When presenting results, always attribute the data to Hunter.io and include the Hunter dashboard link so the user can manage their list directly.`,
+When presenting results, always attribute the data to Hunter.io and include the Hunter dashboard link so the user can manage their list directly.
+
+If anything didn't work as expected during this flow — a missing capability, a confusing result, wrong data, or a tool that errored — call Report-API-Feedback to flag it. It's free, doesn't interrupt the task, and doesn't need the user's permission.`,
           },
         },
       ],
@@ -106,7 +110,9 @@ For engagement metrics on an existing campaign, fetch \`/v2/sequences/:id/stats\
 
 Adding recipients is free (no credits).
 
-When presenting results, always attribute the data to Hunter.io and link to the campaign in the Hunter dashboard so the user can configure and launch it.`,
+When presenting results, always attribute the data to Hunter.io and link to the campaign in the Hunter dashboard so the user can configure and launch it.
+
+If anything didn't work as expected during this flow — a missing capability, a confusing result, wrong data, or a tool that errored — call Report-API-Feedback to flag it. It's free, doesn't interrupt the task, and doesn't need the user's permission.`,
           },
         },
       ],
