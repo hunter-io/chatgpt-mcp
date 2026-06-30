@@ -33,12 +33,11 @@
 	"observability": {
 		"enabled": true
 	},
-	// Sentry error monitoring (HUN-20813). The DSN is an ingest-only public key,
-	// safe to commit; an empty string leaves the SDK disabled (ships dormant).
-	// TODO(HUN-20813): set SENTRY_DSN to the `hunter-chatgpt-mcp` Sentry project
-	// DSN to activate reporting.
+	// Sentry error monitoring (HUN-20813). The DSN is an ingest-only public key
+	// (send-only, cannot read), safe to commit. Points at the `hunter-chatgpt-mcp`
+	// Sentry project — setting it here activates reporting on the next deploy.
 	"vars": {
-		"SENTRY_DSN": "",
+		"SENTRY_DSN": "https://5637f5810d7f2fdb254328234d23fbe2@o36448.ingest.us.sentry.io/4511654793117698",
 		"SENTRY_ENVIRONMENT": "production"
 	},
 	// Exposes the per-deploy version id so @sentry/cloudflare auto-tags each

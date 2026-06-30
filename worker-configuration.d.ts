@@ -4,7 +4,7 @@ declare namespace Cloudflare {
 	interface Env {
 		ASSETS: Fetcher;
 		CF_VERSION_METADATA: WorkerVersionMetadata;
-		SENTRY_DSN: "";
+		SENTRY_DSN: "https://5637f5810d7f2fdb254328234d23fbe2@o36448.ingest.us.sentry.io/4511654793117698";
 		SENTRY_ENVIRONMENT: "production";
 	}
 }
