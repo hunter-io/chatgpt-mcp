@@ -7,7 +7,11 @@
 	"name": "hunter-chatgpt-mcp",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
-	"compatibility_flags": ["nodejs_compat_v2"],
+	// `nodejs_compat` at a compat date >= 2024-09-23 already implies the v2
+	// behavior the worker previously opted into via `nodejs_compat_v2`, and it
+	// additionally guarantees AsyncLocalStorage — which @sentry/cloudflare needs
+	// to bind its per-request scope (HUN-20813). Matches remote-mcp's flag.
+	"compatibility_flags": ["nodejs_compat"],
 	// The stateless refactor (#12556) dropped the HunterChatGPTMCP Durable
 	// Object, but simply removing the `durable_objects` + `migrations` blocks
 	// is not enough: the previously-deployed `v1` migration left DOs of that
@@ -28,6 +32,19 @@
 	],
 	"observability": {
 		"enabled": true
+	},
+	// Sentry error monitoring (HUN-20813). The DSN is an ingest-only public key,
+	// safe to commit; an empty string leaves the SDK disabled (ships dormant).
+	// TODO(HUN-20813): set SENTRY_DSN to the `hunter-chatgpt-mcp` Sentry project
+	// DSN to activate reporting.
+	"vars": {
+		"SENTRY_DSN": "",
+		"SENTRY_ENVIRONMENT": "production"
+	},
+	// Exposes the per-deploy version id so @sentry/cloudflare auto-tags each
+	// release — works on the Cloudflare Git-integration build with no CI step.
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
 	},
 	"alias": {
 		"ai": "./src/ai-stub.ts"

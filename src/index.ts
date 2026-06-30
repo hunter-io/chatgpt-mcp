@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
+import * as Sentry from "@sentry/cloudflare"
 import { z } from "zod"
 import companyComponent from "../bundle/company.html.ts"
 import discoverComponent from "../bundle/discover.html.ts"
@@ -392,7 +393,61 @@ function addCorsHeaders(response: Response, request: Request): Response {
   })
 }
 
-export default {
+// Sentry `beforeSend` — strip everything sensitive before an event leaves the
+// Worker. Two sinks (HUN-20813):
+//   1. Request headers — @sentry/cloudflare attaches them even with
+//      sendDefaultPii:false, and `x-api-key` is NOT in its default scrub
+//      denylist, so the Hunter API key would ship in plaintext.
+//   2. The request body (`request.data`) — @sentry/cloudflare captures it for
+//      textual POSTs regardless of sendDefaultPii, and the /mcp body is the
+//      JSON-RPC tools/call payload, full of end-user PII (emails, names, phone
+//      numbers, lead notes).
+// We keep url/method + the scrubbed headers for triage; drop the body, cookies,
+// and query string.
+export function scrubSensitive(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
+  const request = event.request
+  if (request) {
+    const headers = request.headers
+    if (headers) {
+      for (const key of Object.keys(headers)) {
+        const k = key.toLowerCase()
+        if (k === "authorization" || k === "x-api-key" || k === "cookie") {
+          delete headers[key]
+        }
+      }
+    }
+
+    delete request.data
+    delete request.cookies
+    delete request.query_string
+
+    // `query_string` above is only the parsed field; the SDK also normalizes
+    // `request.url` from the raw Request.url, which still carries the `?...`
+    // search string. Drop it so no query-string value can leak via the URL.
+    if (request.url) {
+      const queryStart = request.url.indexOf("?")
+      if (queryStart !== -1) request.url = request.url.slice(0, queryStart)
+    }
+  }
+
+  // Fetch breadcrumbs record outgoing api.hunter.io URLs whose query string
+  // carries end-user PII (email/domain/name from Email-Finder, Domain-Search,
+  // …). Those live on event.breadcrumbs, not event.request, so strip the query
+  // here too — keeping the path so the breadcrumb trail stays useful.
+  if (event.breadcrumbs) {
+    for (const crumb of event.breadcrumbs) {
+      const data = crumb.data
+      if (data && typeof data.url === "string") {
+        const queryStart = data.url.indexOf("?")
+        if (queryStart !== -1) data.url = data.url.slice(0, queryStart)
+      }
+    }
+  }
+
+  return event
+}
+
+const handler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 200, headers: corsHeadersFor(request) })
@@ -453,9 +508,26 @@ export default {
             })
           }
           if (!accountResponse.ok) {
+            // Same "upstream validation unavailable" outage as the catch below —
+            // an api.hunter.io 5xx breaks MCP auth for every client, which is
+            // exactly what this monitoring is for, so capture it too (HUN-20813).
+            Sentry.captureMessage(`Upstream account validation returned ${accountResponse.status}`, {
+              level: "error",
+              tags: {
+                worker: "chatgpt-mcp",
+                route: "mcp",
+                phase: "key-validation",
+                upstream_status: String(accountResponse.status),
+              },
+            })
             return new Response("Upstream validation unavailable", { status: 502, headers: corsHeadersFor(request) })
           }
-        } catch {
+        } catch (e) {
+          // Previously swallowed silently — a Hunter API outage or network error
+          // here returned 502 with no trace anywhere (HUN-20813). Capture it.
+          Sentry.captureException(e instanceof Error ? e : new Error(String(e)), {
+            tags: { worker: "chatgpt-mcp", route: "mcp", phase: "key-validation" },
+          })
           return new Response("Upstream validation unavailable", { status: 502, headers: corsHeadersFor(request) })
         }
       }
@@ -504,4 +576,24 @@ export default {
 
     return new Response("Not found", { status: 404 })
   },
-}
+} satisfies ExportedHandler<Env>
+
+// withSentry auto-captures uncaught exceptions / unhandled rejections from the
+// handler (and re-throws, so Cloudflare's own handling is unchanged). The DSN is
+// read from the Worker var; an empty DSN disables the SDK (ships dormant until
+// the `hunter-chatgpt-mcp` Sentry project DSN is set — HUN-20813).
+export default Sentry.withSentry(
+  (env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.SENTRY_ENVIRONMENT,
+    // Errors only — a non-zero trace rate would keep a span open on the
+    // never-closing GET /mcp stream and on streamed tool responses.
+    tracesSampleRate: 0,
+    // Don't buffer incoming request bodies — we always discard them in
+    // beforeSend anyway, so capturing wastes a read + memory on every textual
+    // POST (including unauthenticated ones). beforeSend stays a backstop.
+    integrations: [Sentry.httpServerIntegration({ maxRequestBodySize: "none" })],
+    beforeSend: scrubSensitive,
+  }),
+  handler,
+)

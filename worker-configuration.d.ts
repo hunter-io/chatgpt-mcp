@@ -3,6 +3,9 @@
 declare namespace Cloudflare {
 	interface Env {
 		ASSETS: Fetcher;
+		CF_VERSION_METADATA: WorkerVersionMetadata;
+		SENTRY_DSN: "";
+		SENTRY_ENVIRONMENT: "production";
 	}
 }
 interface Env extends Cloudflare.Env {}

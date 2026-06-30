@@ -17,6 +17,9 @@ importers:
       '@openai/apps-sdk-ui':
         specifier: ^0.2.2
         version: 0.2.2(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(tailwindcss@4.3.0)
+      '@sentry/cloudflare':
+        specifier: ^10.62.0
+        version: 10.62.0
       fs-extra:
         specifier: ^11.3.5
         version: 11.3.5
@@ -62,7 +65,7 @@ importers:
         version: 8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)
       vitest:
         specifier: ^4.1.7
-        version: 4.1.7(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0))
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0))
       wrangler:
         specifier: ^4.94.0
         version: 4.94.0
@@ -572,6 +575,10 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       tailwindcss: ^4.0.10
+
+  '@opentelemetry/api@1.9.1':
+    resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
+    engines: {node: '>=8.0.0'}
 
   '@oxc-project/types@0.133.0':
     resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
@@ -1633,6 +1640,19 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@sentry/cloudflare@10.62.0':
+    resolution: {integrity: sha512-oHDpXXiO3XpBO2cHiTRQpSrtQOQrsU9JsO3TZ6ukdd24IUE6Tkc3l7hWdwzKqId3nTWP1Ef0Fr+offsrEGJ6UA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.x
+    peerDependenciesMeta:
+      '@cloudflare/workers-types':
+        optional: true
+
+  '@sentry/core@10.62.0':
+    resolution: {integrity: sha512-tV69fMg2sS5DUFmQSnS7Jd5qJAp0izxwcsvBVz2ieTM9VMRi99IfOSYW9UYr3p1yfuksk41kefN5PEbeedUE+A==}
+    engines: {node: '>=18'}
 
   '@sindresorhus/is@7.2.0':
     resolution: {integrity: sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw==}
@@ -3610,6 +3630,8 @@ snapshots:
       - react-dom
       - supports-color
 
+  '@opentelemetry/api@1.9.1': {}
+
   '@oxc-project/types@0.133.0': {}
 
   '@oxfmt/binding-android-arm-eabi@0.51.0':
@@ -4545,6 +4567,13 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@sentry/cloudflare@10.62.0':
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+      '@sentry/core': 10.62.0
+
+  '@sentry/core@10.62.0': {}
 
   '@sindresorhus/is@7.2.0': {}
 
@@ -6351,7 +6380,7 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest@4.1.7(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)):
+  vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)):
     dependencies:
       '@vitest/expect': 4.1.7
       '@vitest/mocker': 4.1.7(vite@8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0))
@@ -6374,6 +6403,7 @@ snapshots:
       vite: 8.0.16(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@opentelemetry/api': 1.9.1
       '@types/node': 25.9.1
     transitivePeerDependencies:
       - msw
