@@ -841,8 +841,11 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 // remote-mcp/src/helpers.ts.
 //
 // The five legacy constants above (READ_ONLY_*/PAID_TOOL_*/WRITE_*/DESTRUCTIVE_*/
-// EXTERNAL_SIDE_EFFECT_*) stay exported for backwards compatibility until a
-// follow-up PR migrates remaining callers.
+// EXTERNAL_SIDE_EFFECT_*) stay exported for backwards compatibility. As of
+// HUN-20797 EXTERNAL_SIDE_EFFECT_* (Start-Campaign) and WRITE_* (Resume-Sequence
+// and Add-Campaign-Recipients — both can trigger real outbound email on a started
+// / paused-with-pending campaign) still have callers; DESTRUCTIVE_* is now unused,
+// kept only because it sits inside the byte-locked NEXT_ACTION region above.
 //
 // Matrix mapping:
 //   READ_ONLY_PUBLIC_ANNOTATIONS    → public-data lookups (Find-Companies, Email-Count)
@@ -851,12 +854,13 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 //                                       campaigns reads)
 //   BILLABLE_LOOKUP_ANNOTATIONS      → paid lookups (Domain-Search, Email-Finder,
 //                                       Email-Verifier, Person/Company/Combined-Enrichment)
-//   PRIVATE_WRITE_ANNOTATIONS        → private-workspace create-only writes (Create-Lead,
-//                                       Create-Lead-If-Missing, Save-Company, Create/Update
-//                                       lists & attributes)
+//   PRIVATE_WRITE_ANNOTATIONS        → private-workspace writes (Create-Lead,
+//                                       Create-Lead-If-Missing, Save-Company, Create lists &
+//                                       attributes; Pause-Sequence — HUN-20797)
 //   PRIVATE_DESTRUCTIVE_ANNOTATIONS  → private-workspace overwrite/delete/merge (Update-Lead,
 //                                       Create-Or-Update-Lead, Delete-Lead, Delete/Merge
-//                                       lists, Delete-Custom-Attribute)
+//                                       lists, Delete-Custom-Attribute; Archive-Sequence,
+//                                       Remove-Campaign-Recipients — HUN-20797)
 //   LOCAL_PLAN_ANNOTATIONS           → Plan-Prospecting-Flow (synthesizes a plan locally;
 //                                       no Hunter API call, no external effect)
 

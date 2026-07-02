@@ -2,10 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
   callHunterApi,
-  DESTRUCTIVE_ANNOTATIONS,
+  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   TOOL_NAMES,
   WRITE_ANNOTATIONS,
+  PRIVATE_WRITE_ANNOTATIONS,
 } from "../helpers"
 import { buildResponseSchema, nullableString } from "../schemas/common"
 
@@ -177,7 +178,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
         sequence_id: z.number().int().positive().describe("ID of the sequence to pause"),
       },
       outputSchema: pauseSequenceOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ sequence_id }) => {
       // On 422 (draft/archived → sequence_not_active) or 404 (not found /
@@ -219,8 +220,9 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
       // DESTRUCTIVE: archiving is irreversible via the API — resume rejects an
       // archived sequence (sequence_not_active) and there is no un-archive
       // endpoint — so destructiveHint:true makes the host confirm first. openWorld
-      // stays true (touches the outbound delivery surface). HUN-20196, Codex review.
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      // stays false: archiving toggles state in the user's own account; only
+      // Start-Campaign sends externally. HUN-20797.
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ sequence_id }) => {
       // On 422 (draft → sequence_not_started) or 404 (not found / not owner)

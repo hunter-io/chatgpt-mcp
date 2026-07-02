@@ -301,49 +301,48 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
   })
 
-  // Pause-Sequence: WRITE_ANNOTATIONS — reversible toggle that touches the
-  // outbound delivery surface (stops sending), so openWorld=true but not
-  // destructive (resume re-enables sending).
-  it("tool 'Pause-Sequence' has write annotations (openWorld=true)", () => {
+  // HUN-20797: openWorldHint reflects whether the tool can produce an
+  // externally-visible effect. Pause-Sequence (stops sending), Archive-Sequence
+  // (ends it), and Remove-Campaign-Recipients (blocked on started campaigns;
+  // cancels queued state) only touch the user's own account → openWorld=false.
+  // Resume-Sequence and Add-Campaign-Recipients CAN schedule real outbound email
+  // on a started / paused-with-pending campaign without a separate Start-Campaign
+  // call → openWorld=true. (Codex review on #13429.)
+
+  // Pause-Sequence: PRIVATE_WRITE — stops sending; reversible, not destructive.
+  it("tool 'Pause-Sequence' has private-write annotations (openWorld=false)", () => {
     const tool = registeredTools.get("Pause-Sequence")
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: false })
   })
 
-  // Resume-Sequence: WRITE_ANNOTATIONS — reversible toggle that re-enables the
-  // outbound delivery surface (starts sending), so openWorld=true but not
-  // destructive (pause stops sending again).
-  it("tool 'Resume-Sequence' has write annotations (openWorld=true)", () => {
+  // Resume-Sequence: WRITE — can re-enable outbound delivery on a paused-with-pending sequence.
+  it("tool 'Resume-Sequence' has write annotations (openWorld=true: can send)", () => {
     const tool = registeredTools.get("Resume-Sequence")
     expect(tool).toBeDefined()
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
   })
 
-  // Archive-Sequence: DESTRUCTIVE_ANNOTATIONS — archiving is IRREVERSIBLE via the
-  // API (resume rejects archived sequences with sequence_not_active, and there is
-  // no un-archive endpoint), so destructiveHint=true makes the host confirm before
-  // archiving. openWorld stays true (touches the outbound delivery surface). Codex
-  // review, PR #12958.
-  it("tool 'Archive-Sequence' has destructive annotations (irreversible: no un-archive)", () => {
+  // Archive-Sequence: PRIVATE_DESTRUCTIVE — irreversible via the API (no un-archive),
+  // so destructiveHint=true makes the host confirm; ends the sequence, no send.
+  it("tool 'Archive-Sequence' has private-destructive annotations (irreversible, openWorld=false)", () => {
     const tool = registeredTools.get("Archive-Sequence")
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true })
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
   })
 
-  // Add-Campaign-Recipients: WRITE_ANNOTATIONS (unchanged) — affects active/
-  // outbound campaigns, so openWorld stays true.
-  it("tool 'Add-Campaign-Recipients' has write annotations (openWorld=true)", () => {
+  // Add-Campaign-Recipients: WRITE — on a started campaign, adding a recipient schedules real outbound email.
+  it("tool 'Add-Campaign-Recipients' has write annotations (openWorld=true: can send)", () => {
     const tool = registeredTools.get("Add-Campaign-Recipients")
     expect(tool).toBeDefined()
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
   })
 
-  // Remove-Campaign-Recipients: DESTRUCTIVE (unchanged) — cancels queued
-  // outbound messages.
-  it("tool 'Remove-Campaign-Recipients' has destructive annotations (openWorld=true)", () => {
+  // Remove-Campaign-Recipients: PRIVATE_DESTRUCTIVE — blocked on started campaigns; cancels queued state, no send.
+  it("tool 'Remove-Campaign-Recipients' has private-destructive annotations (openWorld=false)", () => {
     const tool = registeredTools.get("Remove-Campaign-Recipients")
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true })
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
   })
 
   it("tool 'Start-Campaign' has external-side-effect annotations", () => {

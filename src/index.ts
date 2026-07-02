@@ -131,7 +131,7 @@ import { registerSequenceTools } from "./tools/sequences"
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "2.5.10",
+    version: "2.5.12",
   })
 
   // --- ChatGPT widget resources ---

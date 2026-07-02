@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
-  DESTRUCTIVE_ANNOTATIONS,
+  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
   type McpTextResult,
   PRIVATE_READ_ANNOTATIONS,
@@ -176,20 +176,17 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
-  // Add-Campaign-Recipients keeps `openWorldHint: true` (legacy WRITE_ANNOTATIONS)
-  // rather than dropping to PRIVATE_WRITE_ANNOTATIONS like Create-Lead and the
-  // other workspace writes. The distinction: a campaign recipient set is the
-  // staging surface for an outbound delivery — once `Start-Campaign` fires,
-  // every recipient added here triggers a real external email. Treating the
-  // recipient set as private-only would hide that the user's actions on this
-  // tool eventually push state to the public internet, even though the push
-  // itself happens via a different tool (Start-Campaign,
-  // EXTERNAL_SIDE_EFFECT_ANNOTATIONS). See HUN-20170 todo #102.
+  // Add-Campaign-Recipients uses WRITE_ANNOTATIONS (openWorldHint: true): for an
+  // ALREADY-STARTED campaign, adding a recipient enqueues message creation
+  // (Campaigns::CreateMessagesForRecipientJob — app/models/campaign/audience.rb)
+  // so it can schedule real outbound email to external recipients WITHOUT a
+  // separate Start-Campaign call. That externally-visible send is open-world, so
+  // this is NOT a private-only staging write. (HUN-20797; Codex review on #13429)
   server.registerTool(
     TOOL_NAMES.addCampaignRecipients,
     {
       description:
-        "Use this when the user wants to add recipients to an existing campaign by email address or by lead ID. Up to 50 per call; batch larger sets across multiple calls. Adding a recipient does not send email on its own — sending requires Start-Campaign. Free to call.",
+        "Use this when the user wants to add recipients to an existing campaign by email address or by lead ID. Up to 50 per call; batch larger sets across multiple calls. For a draft (not-yet-started) campaign this only stages recipients and does not send email — use Start-Campaign to begin sending. For an ALREADY-STARTED campaign, adding a recipient can immediately schedule a real outbound email to that recipient (no separate Start-Campaign call). Free to call.",
       inputSchema: {
         campaign_id: z.number().int().positive().describe("ID of the campaign"),
         emails: z
@@ -221,11 +218,19 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
-  // Remove-Campaign-Recipients keeps `openWorldHint: true` and
-  // `destructiveHint: true` (legacy DESTRUCTIVE_ANNOTATIONS) for the same
-  // staged-outbound reason as Add-Campaign-Recipients above: removal can
-  // cancel queued messages that were about to be delivered externally.
-  // Messages already sent cannot be recalled, hence destructive.
+  // Remove-Campaign-Recipients uses PRIVATE_DESTRUCTIVE_ANNOTATIONS
+  // (destructiveHint: true, openWorldHint: false). The v2 DELETE handler calls
+  // campaign.cancel_messages_to_recipients (app/models/campaign.rb) — this is
+  // NOT blocked on started campaigns (the started-guard lives in the unused
+  // remove_recipients path, app/models/campaign/audience.rb). It cancels the
+  // recipient's PENDING (not-yet-sent) outbound messages and their future
+  // pending follow-ups; already-sent messages are untouched. destructive: true
+  // captures the lost queued progress. openWorld stays FALSE because canceling
+  // an unsent message creates NO externally-visible artifact: the recipient was
+  // never sent the email and still isn't, so nothing reaches the outside world.
+  // This is the mirror of Add-Campaign-Recipients (open-world — it makes an
+  // email arrive) and the same external-visibility posture as Pause-Sequence.
+  // (HUN-20797; Cursor Bugbot review on #13429)
   server.registerTool(
     TOOL_NAMES.removeCampaignRecipients,
     {
@@ -240,7 +245,7 @@ export function registerCampaignTools(server: McpServer, apiKey: string, baseUrl
           .describe("Email addresses to remove from the campaign"),
       },
       outputSchema: removeRecipientsOutputSchema.shape,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ campaign_id, emails }) => {
       const result = await callHunterApi({
