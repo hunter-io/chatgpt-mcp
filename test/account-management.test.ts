@@ -383,12 +383,7 @@ describe("Create-API-Key", () => {
       jsonOk(
         {
           status: "success",
-          data: {
-            id: 8,
-            name: null,
-            token: "0000111122223333aaaabbbbccccddddeeeeffff",
-            created_at: "2026-07-02T10:00:00Z",
-          },
+          data: { id: 8, name: null, token: "0000111122223333aaaabbbbccccddddeeeeffff", created_at: "2026-07-02T10:00:00Z" },
         },
         201,
       ),

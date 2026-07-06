@@ -69,11 +69,7 @@ describe("scrubSensitive", () => {
       breadcrumbs: [
         {
           category: "fetch",
-          data: {
-            url: "https://api.hunter.io/v2/email-finder?domain=acme.com&full_name=Jane+Doe",
-            method: "GET",
-            status_code: 200,
-          },
+          data: { url: "https://api.hunter.io/v2/email-finder?domain=acme.com&full_name=Jane+Doe", method: "GET", status_code: 200 },
         },
         { category: "console", data: {} },
         { category: "navigation" },

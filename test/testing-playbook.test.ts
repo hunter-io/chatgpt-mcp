@@ -54,10 +54,9 @@ describe("TESTING_PLAYBOOK.md — OpenAI submission autofill script (Section 6)"
   it("keeps every negative test-case field within the limit", () => {
     DATA.negative_test_cases.forEach((tc, i) => {
       ;(["description", "user_prompt"] as const).forEach((key) => {
-        expect(
-          tc[key].length,
-          `negative_test_cases[${i}].${key} is ${tc[key].length}/${FIELD_MAX[key]}`,
-        ).toBeLessThanOrEqual(FIELD_MAX[key])
+        expect(tc[key].length, `negative_test_cases[${i}].${key} is ${tc[key].length}/${FIELD_MAX[key]}`).toBeLessThanOrEqual(
+          FIELD_MAX[key],
+        )
       })
     })
   })
