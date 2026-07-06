@@ -329,9 +329,7 @@ describe("List-Email-Account-Sequences handler", () => {
 
   it("passes a 400 pagination error through with isError true", async () => {
     stubFetchError(400, {
-      errors: [
-        { id: "pagination_error", code: 400, details: "The parameter 'limit' should range between 1 and 100." },
-      ],
+      errors: [{ id: "pagination_error", code: 400, details: "The parameter 'limit' should range between 1 and 100." }],
     })
     const result = await registeredTools.get("List-Email-Account-Sequences")!.handler({
       email_account_id: 12,

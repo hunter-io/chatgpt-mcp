@@ -300,9 +300,7 @@ describe("Lead tags CRUD", () => {
   it("Update-Lead-Tag surfaces a 404 as the typed not_found error envelope", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(railsError(404, [{ id: "not_found", code: 404, details: "This tag does not exist." }])),
+      vi.fn().mockResolvedValue(railsError(404, [{ id: "not_found", code: 404, details: "This tag does not exist." }])),
     )
 
     const result = await registeredTools.get("Update-Lead-Tag")!.handler({ id: 999, name: "Champions" })
