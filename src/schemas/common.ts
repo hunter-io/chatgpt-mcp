@@ -46,15 +46,109 @@ export const hunterUrl = z.url().refine((value) => {
 // (no `as [Foo, ...Foo[]]` cast), so the literal type is derived from the
 // single source of truth and cannot drift.
 //
-// `pendingToolCall.args` is strict per confirmable tool — currently only
-// Start-Campaign. Strict-shape prevents an attacker-controlled upstream tool
-// result from swapping campaign_id under cover of a user-confirmed prompt.
-export const startCampaignArgsSchema = z
+// `pendingToolCall.args` is strict per confirmable tool. Strict-shape prevents
+// an attacker-controlled upstream tool result from swapping resource ids (or
+// smuggling extra fields) under cover of a user-confirmed prompt. Every
+// confirmable tool follows the same gate pattern: the first call (without
+// `confirmed`) returns ask_user + pendingToolCall carrying the original args
+// plus `confirmed: true`; the re-issued call executes. Arg shapes mirror the
+// Rails controllers' permitted params (see each tool's handler for the
+// controller reference).
+export const startSequenceArgsSchema = z
   .object({
-    campaign_id: z.number().int().positive(),
+    sequence_id: z.number().int().positive(),
     confirmed: z.literal(true),
   })
   .strict()
+
+export const deleteSequenceArgsSchema = z
+  .object({
+    sequence_id: z.number().int().positive(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const bulkMoveLeadsArgsSchema = z
+  .object({
+    leads_list_id: z.number().int().positive(),
+    target_leads_list_id: z.number().int().positive(),
+    lead_ids: z.array(z.number().int().positive()).optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const bulkDeleteLeadsArgsSchema = z
+  .object({
+    lead_ids: z.array(z.number().int().positive()).optional(),
+    leads_list_id: z.number().int().positive().optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const bulkMoveCompaniesArgsSchema = z
+  .object({
+    company_list_id: z.number().int().positive(),
+    target_company_list_id: z.number().int().positive(),
+    company_ids: z.array(z.number().int().positive()).optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const bulkCopyCompaniesArgsSchema = z
+  .object({
+    target_company_list_id: z.number().int().positive(),
+    company_list_id: z.number().int().positive().optional(),
+    company_ids: z.array(z.number().int().positive()).optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const bulkDeleteCompaniesArgsSchema = z
+  .object({
+    company_ids: z.array(z.number().int().positive()).optional(),
+    company_list_id: z.number().int().positive().optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const pushLeadsToCrmArgsSchema = z
+  .object({
+    connected_app_id: z.number().int().positive(),
+    lead_ids: z.array(z.number().int().positive()).optional(),
+    leads_list_id: z.number().int().positive().optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const createApiKeyArgsSchema = z
+  .object({
+    name: z.string().max(255).optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+export const deleteApiKeyArgsSchema = z
+  .object({
+    api_key_id: z.number().int().positive(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
+// One entry per ConfirmableToolName (helpers.ts NEXT_ACTION region). A plain
+// union (not discriminatedUnion) because the discriminator lives one level up
+// on `tool` with per-tool args shapes — Zod tries each branch in order.
+export const pendingToolCallSchema = z.union([
+  z.object({ tool: z.literal(TOOL_NAMES.startSequence), args: startSequenceArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.deleteSequence), args: deleteSequenceArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.bulkMoveLeads), args: bulkMoveLeadsArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.bulkDeleteLeads), args: bulkDeleteLeadsArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.bulkMoveCompanies), args: bulkMoveCompaniesArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.bulkCopyCompanies), args: bulkCopyCompaniesArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.bulkDeleteCompanies), args: bulkDeleteCompaniesArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.pushLeadsToCrm), args: pushLeadsToCrmArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.createApiKey), args: createApiKeyArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.deleteApiKey), args: deleteApiKeyArgsSchema }),
+])
 
 export const nextActionSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -67,12 +161,7 @@ export const nextActionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("ask_user"),
     question: z.string().max(300),
-    pendingToolCall: z
-      .object({
-        tool: z.literal(TOOL_NAMES.startCampaign),
-        args: startCampaignArgsSchema,
-      })
-      .optional(),
+    pendingToolCall: pendingToolCallSchema.optional(),
   }),
   z.object({
     kind: z.literal("complete"),

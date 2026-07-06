@@ -10,7 +10,7 @@ import { TOOL_NAMES } from "../src/helpers"
 //   - every registered tool is documented somewhere in the playbook.
 // Counts are explicit so adding/removing a test case (or a tool) is a deliberate
 // edit — bump the constant below when you change the script or the tool surface.
-const EXPECTED_POSITIVE_CASES = 12
+const EXPECTED_POSITIVE_CASES = 16
 const EXPECTED_NEGATIVE_CASES = 3
 
 // OpenAI submission form field-length caps (mirrored from the Section 6 script's MAX).

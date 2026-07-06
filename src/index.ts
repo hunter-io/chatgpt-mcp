@@ -115,15 +115,20 @@ const saveCompanyOutputSchema = buildResponseSchema(
 import { registerPrompts } from "./prompts"
 import { CAPABILITIES_RECOVERY_MD, CAPABILITIES_RECOVERY_URI } from "./resources/capabilities-recovery"
 import { registerAccountTools } from "./tools/account"
-import { registerCampaignTools } from "./tools/campaigns"
+import { registerAccountManagementTools } from "./tools/account-management"
+import { registerBulkOperationTools } from "./tools/bulk-operations"
 import { registerCompanyListTools } from "./tools/company-lists"
 import { registerConnectedAppTools } from "./tools/connected-apps"
 import { registerCustomAttributeTools } from "./tools/custom-attributes"
+import { registerDiscoverTools } from "./tools/discover"
 import { registerEmailAccountTools } from "./tools/email-accounts"
 import { registerEnrichmentTools } from "./tools/enrichment"
 import { registerFeedbackTools } from "./tools/feedback"
+import { registerIntegrationTools } from "./tools/integrations"
+import { registerLeadOrganizationTools } from "./tools/lead-organization"
 import { registerLeadTools } from "./tools/leads"
 import { registerLeadsListTools } from "./tools/leads-lists"
+import { registerMessageTemplateTools } from "./tools/message-templates"
 import { registerProspectingTool } from "./tools/prospecting"
 import { registerSearchTools } from "./tools/search"
 import { registerSequenceTools } from "./tools/sequences"
@@ -131,7 +136,7 @@ import { registerSequenceTools } from "./tools/sequences"
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer({
     name: "Hunter ChatGPT",
-    version: "2.5.12",
+    version: "3.0.0",
   })
 
   // --- ChatGPT widget resources ---
@@ -306,7 +311,12 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
   registerCompanyListTools(server, apiKey, baseUrl)
   registerConnectedAppTools(server, apiKey, baseUrl)
   registerCustomAttributeTools(server, apiKey, baseUrl)
-  registerCampaignTools(server, apiKey, baseUrl)
+  registerMessageTemplateTools(server, apiKey, baseUrl)
+  registerLeadOrganizationTools(server, apiKey, baseUrl)
+  registerBulkOperationTools(server, apiKey, baseUrl)
+  registerDiscoverTools(server, apiKey, baseUrl)
+  registerIntegrationTools(server, apiKey, baseUrl)
+  registerAccountManagementTools(server, apiKey, baseUrl)
   registerProspectingTool(server)
   registerFeedbackTools(server, apiKey, baseUrl)
   registerPrompts(server)

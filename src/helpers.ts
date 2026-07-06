@@ -59,10 +59,13 @@ export const HUNTER_SOURCE_SUFFIX = "\n\nSource: Hunter.io (https://hunter.io)"
 
 // TOOL_NAMES_START
 // Single source of truth for every tool name exposed by Hunter MCPs.
-// All names use PascalCase-Hyphenated for consistency. The only semantic
-// rename is `Email-Enrichment` → `Person-Enrichment` (the operation enriches
-// a person/profile, not an email — the email is just the input). Aligns with
-// claude-plugin/skills/person-enrichment/.
+// All names use PascalCase-Hyphenated for consistency. Semantic renames:
+// `Email-Enrichment` → `Person-Enrichment` (the operation enriches a
+// person/profile, not an email — the email is just the input; aligns with
+// claude-plugin/skills/person-enrichment/), and the HUN-20867/HUN-20869
+// campaign→sequence terminology migration (`List-Campaigns` → `List-Sequences`,
+// `Start-Campaign` → `Start-Sequence`, recipient tools renamed to match) —
+// "sequence" is the canonical product term and the tools hit /v2/sequences/*.
 //
 // This block must be BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and
 // remote-mcp/src/helpers.ts — enforced by scripts/check-tool-names-aligned.mjs.
@@ -83,12 +86,26 @@ export const TOOL_NAMES = {
   account: "Get-Account-Details",
   // email accounts
   listEmailAccounts: "List-Email-Accounts",
+  getEmailAccount: "Get-Email-Account",
+  listEmailAccountSequences: "List-Email-Account-Sequences",
   // sequences
+  listSequences: "List-Sequences",
+  getSequence: "Get-Sequence",
+  createSequence: "Create-Sequence",
+  updateSequence: "Update-Sequence",
+  deleteSequence: "Delete-Sequence",
   listSequenceFollowUps: "List-Sequence-Follow-Ups",
+  getSequenceFollowUp: "Get-Sequence-Follow-Up",
+  createSequenceFollowUp: "Create-Sequence-Follow-Up",
+  deleteSequenceFollowUp: "Delete-Sequence-Follow-Up",
   pauseSequence: "Pause-Sequence",
   resumeSequence: "Resume-Sequence",
   archiveSequence: "Archive-Sequence",
   getSequenceStats: "Get-Sequence-Stats",
+  listSequenceRecipients: "List-Sequence-Recipients",
+  addSequenceRecipients: "Add-Sequence-Recipients",
+  removeSequenceRecipients: "Remove-Sequence-Recipients",
+  startSequence: "Start-Sequence",
   // leads
   listLeads: "List-Leads",
   getLead: "Get-Lead",
@@ -130,12 +147,47 @@ export const TOOL_NAMES = {
   createCustomAttribute: "Create-Custom-Attribute",
   updateCustomAttribute: "Update-Custom-Attribute",
   deleteCustomAttribute: "Delete-Custom-Attribute",
-  // campaigns
-  listCampaigns: "List-Campaigns",
-  listCampaignRecipients: "List-Campaign-Recipients",
-  addCampaignRecipients: "Add-Campaign-Recipients",
-  removeCampaignRecipients: "Remove-Campaign-Recipients",
-  startCampaign: "Start-Campaign",
+  // message templates
+  listMessageTemplates: "List-Message-Templates",
+  getMessageTemplate: "Get-Message-Template",
+  createMessageTemplate: "Create-Message-Template",
+  updateMessageTemplate: "Update-Message-Template",
+  deleteMessageTemplate: "Delete-Message-Template",
+  // lead tags
+  listLeadTags: "List-Lead-Tags",
+  createLeadTag: "Create-Lead-Tag",
+  updateLeadTag: "Update-Lead-Tag",
+  deleteLeadTag: "Delete-Lead-Tag",
+  addTagToLead: "Add-Tag-To-Lead",
+  removeTagFromLead: "Remove-Tag-From-Lead",
+  // leads list folders + favorites
+  listLeadsListFolders: "List-Leads-List-Folders",
+  createLeadsListFolder: "Create-Leads-List-Folder",
+  updateLeadsListFolder: "Update-Leads-List-Folder",
+  deleteLeadsListFolder: "Delete-Leads-List-Folder",
+  favoriteLeadsList: "Favorite-Leads-List",
+  unfavoriteLeadsList: "Unfavorite-Leads-List",
+  // bulk operations
+  bulkMoveLeads: "Bulk-Move-Leads",
+  bulkDeleteLeads: "Bulk-Delete-Leads",
+  bulkMoveCompanies: "Bulk-Move-Companies",
+  bulkCopyCompanies: "Bulk-Copy-Companies",
+  bulkDeleteCompanies: "Bulk-Delete-Companies",
+  // discover people + saved searches
+  findPeople: "Find-People",
+  listSavedSearches: "List-Saved-Searches",
+  getSavedSearch: "Get-Saved-Search",
+  createSavedSearch: "Create-Saved-Search",
+  deleteSavedSearch: "Delete-Saved-Search",
+  // integrations (CRM push + webhooks)
+  pushLeadsToCrm: "Push-Leads-To-CRM",
+  listWebhooks: "List-Webhooks",
+  updateWebhook: "Update-Webhook",
+  // usage + API keys
+  getUsage: "Get-Usage",
+  listApiKeys: "List-API-Keys",
+  createApiKey: "Create-API-Key",
+  deleteApiKey: "Delete-API-Key",
   // coordinator
   prospecting: "Plan-Prospecting-Flow",
   // feedback
@@ -274,10 +326,44 @@ interface MutateOptions {
   baseUrl: string
   method: "POST" | "PUT" | "DELETE"
   params?: FormParams
+  // Optional JSON request body, sent with `Content-Type: application/json`
+  // INSTEAD of form-encoding `params`. Use this when the payload contains a
+  // nested array of objects whose shape must round-trip verbatim: Rails'
+  // `x-www-form-urlencoded` parser (Rack::Utils.parse_nested_query) cannot
+  // rebuild an array-of-hashes from `key[0][..]`/`key[1][..]` (numeric brackets
+  // become a Hash keyed "0","1", not an Array) and MERGES disjoint-key objects
+  // under `key[][..]` (e.g. `[{continent},{country}]` collapses into one hash).
+  // A JSON body preserves arrays exactly, so `params.permit(filters: {})` stores
+  // the same shape it will later return. `params` and `jsonBody` are mutually
+  // exclusive; when both are present `jsonBody` wins.
+  jsonBody?: unknown
   signal?: AbortSignal
+  // Optional caller-supplied Idempotency-Key. When absent, POST requests get
+  // an auto-generated UUID per invocation (HUN-18680 / HUN-20867).
+  idempotencyKey?: string
 }
 
 type CallOptions = GetOptions | MutateOptions
+
+// HUN-18680 / HUN-20867: Idempotency-Key on resource-creating POSTs.
+//
+// The header is sent on EVERY POST — Rails ignores it on endpoints that have
+// not adopted Api::Concerns::Idempotency yet, and the HUN-18680 rollout
+// (sequences, follow-ups, templates, messages, leads, imports) picks it up
+// endpoint by endpoint with no worker change needed.
+//
+// The network-failure RETRY below is scoped to the paths where the server
+// enforces idempotency TODAY (only POST /sequences — the sole controller
+// including the concern as of HUN-18638; widen this regex as the Rails
+// rollout lands on more endpoints). Retrying an unprotected POST could
+// double-create: the first request may have succeeded with the response lost
+// in transit, and without a server-side key check the second request creates
+// a duplicate.
+const IDEMPOTENT_RETRY_PATH_RE = /^\/sequences$/
+
+function isIdempotentRetryPath(path: string): boolean {
+  return IDEMPOTENT_RETRY_PATH_RE.test(path.split("?")[0] ?? "")
+}
 
 function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
   const result = new URLSearchParams()
@@ -369,6 +455,23 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
     }
   }
   // QUOTA_SCRUB_END
+  // HUN-18680: Rails' Api::Concerns::Idempotency returns 409 with
+  // `Retry-After: 2` (IDEMPOTENCY_RETRY_AFTER_SECONDS) while a request
+  // carrying the same Idempotency-Key is still in flight. The original
+  // request may still be processing — or may already have succeeded — so a
+  // blind re-issue risks a duplicate create. Surface it as retryable with an
+  // explicit wait (Retry-After parsing mirrors the 429 branch, defaulting to
+  // 2) and steer the model to verify before re-creating.
+  if (status === 409) {
+    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+    const retryAfterSeconds = Number.isFinite(seconds) && seconds >= 0 ? seconds : 2
+    return {
+      code: "rate_limited",
+      retryable: true,
+      retry_after_seconds: retryAfterSeconds,
+      message: `A previous request with the same Idempotency-Key is still being processed — it may still complete or may have already succeeded. Wait ${retryAfterSeconds} seconds, then check whether the resource already exists (e.g. via List-Sequences) before re-issuing the create.`,
+    }
+  }
   if (status === 401 || status === 403) {
     return { code: "unauthorized", retryable: false, message }
   }
@@ -481,16 +584,19 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   let url: string
   let body: string | undefined
 
+  let isJsonBody = false
   if (isGet) {
     const search = options.params ? new URLSearchParams(options.params).toString() : ""
     url = search ? `${options.baseUrl}${options.path}?${search}` : `${options.baseUrl}${options.path}`
   } else {
-    if (options.params && Object.keys(options.params).length > 0) {
-      const formBody = buildRailsFormBody(options.params)
-      url = `${options.baseUrl}${options.path}`
-      body = formBody.toString()
-    } else {
-      url = `${options.baseUrl}${options.path}`
+    url = `${options.baseUrl}${options.path}`
+    if (options.jsonBody !== undefined) {
+      // JSON body preserves nested array-of-object shape verbatim (Rails parses
+      // it straight into `params`), which form-encoding cannot round-trip.
+      body = JSON.stringify(options.jsonBody)
+      isJsonBody = true
+    } else if (options.params && Object.keys(options.params).length > 0) {
+      body = buildRailsFormBody(options.params).toString()
     }
   }
 
@@ -499,10 +605,51 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     Authorization: `Bearer ${options.apiKey}`,
   }
   if (body !== undefined) {
-    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    headers["Content-Type"] = isJsonBody ? "application/json" : "application/x-www-form-urlencoded"
+  }
+  if (!isGet && options.method === "POST") {
+    // One UUID per tool invocation: duplicate deliveries of the SAME request
+    // (network retry below) are dedupe-safe, while a genuine second tool call
+    // gets a fresh key and is allowed to create a second resource.
+    headers["Idempotency-Key"] = options.idempotencyKey ?? crypto.randomUUID()
   }
 
-  const response = await fetch(url, { method, headers, body, signal: options.signal })
+  let response: Response
+  try {
+    response = await fetch(url, { method, headers, body, signal: options.signal })
+  } catch (e) {
+    // Network-level failure (DNS, connection reset, socket close): the request
+    // may or may not have reached Hunter. For POSTs to idempotency-protected
+    // paths, retry once REUSING the same Idempotency-Key — if the original
+    // actually succeeded, the server replays the stored response instead of
+    // double-creating (HUN-18680). Deliberate aborts and all other requests
+    // propagate unchanged.
+    const aborted = (e instanceof Error && e.name === "AbortError") || options.signal?.aborted === true
+    if (aborted || isGet || options.method !== "POST" || !isIdempotentRetryPath(options.path)) throw e
+    console.warn(`callHunterApi: network failure on POST ${options.path}; retrying once with the same Idempotency-Key`)
+    try {
+      response = await fetch(url, { method, headers, body, signal: options.signal })
+    } catch (retryError) {
+      // A deliberate abort on the retry (caller cancelled, timeout fired between
+      // the two attempts) must propagate exactly like an abort on the initial
+      // fetch — never get masked as an upstream_error. Same guard as above.
+      const retryAborted =
+        (retryError instanceof Error && retryError.name === "AbortError") || options.signal?.aborted === true
+      if (retryAborted) throw retryError
+      // The retry ALSO failed at the network layer. callHunterApi's contract is
+      // to never throw on network failure, so return the same typed error
+      // envelope every other network-ish path returns instead of letting the
+      // exception escape (HUN-18680).
+      const message = `Network failure calling Hunter (${options.path}) and its idempotent retry both failed: ${retryError instanceof Error ? retryError.message : String(retryError)}`
+      return {
+        content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+        structuredContent: {
+          error: { code: "upstream_error" as const, retryable: true, message },
+        },
+        isError: true,
+      }
+    }
+  }
 
   if (!response.ok) {
     let errorText: string
@@ -593,7 +740,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   const sanitized = stripInjectedFields(json) as Record<string, unknown>
   // Defense-in-depth: also scrub credential-shaped tokens out of the
   // user-visible content text. If a saved Hunter record (lead notes, custom-
-  // attribute value, campaign subject) carries `Authorization: Bearer …`,
+  // attribute value, sequence subject) carries `Authorization: Bearer …`,
   // `api_key=…`, or a raw JWT in any string value, the scrub redacts it before
   // the model sees it. `structuredContent` still ships the raw value — that
   // surface is for machine consumption and is harder to use for exfil via the
@@ -637,11 +784,25 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 
 /**
  * Tools whose chained `nextAction` may carry a `pendingToolCall` for hard
- * confirmation. Currently only `Start-Campaign` (sends real emails — Phase 4).
- * Narrowing the type prevents future emissions from steering the model into
- * arbitrary tools under cover of an `ask_user` question.
+ * confirmation. `Start-Sequence` sends real emails (Phase 4); the HUN-20852 /
+ * HUN-20858 / HUN-20861 additions gate bulk mutations, CRM pushes, sequence
+ * deletion, and API-key management behind the same explicit-confirmation
+ * pattern (first call returns ask_user + pendingToolCall; the re-issued call
+ * with `confirmed: true` executes). Narrowing the type prevents future
+ * emissions from steering the model into arbitrary tools under cover of an
+ * `ask_user` question.
  */
-export type ConfirmableToolName = typeof TOOL_NAMES.startCampaign
+export type ConfirmableToolName =
+  | typeof TOOL_NAMES.startSequence
+  | typeof TOOL_NAMES.deleteSequence
+  | typeof TOOL_NAMES.bulkMoveLeads
+  | typeof TOOL_NAMES.bulkDeleteLeads
+  | typeof TOOL_NAMES.bulkMoveCompanies
+  | typeof TOOL_NAMES.bulkCopyCompanies
+  | typeof TOOL_NAMES.bulkDeleteCompanies
+  | typeof TOOL_NAMES.pushLeadsToCrm
+  | typeof TOOL_NAMES.createApiKey
+  | typeof TOOL_NAMES.deleteApiKey
 
 /**
  * The chaining hint a tool emits to tell the model what to do next.
@@ -821,7 +982,7 @@ export const DESTRUCTIVE_ANNOTATIONS = {
 } as const
 
 /**
- * Writes with effects beyond the user's Hunter workspace — `Start-Campaign`
+ * Writes with effects beyond the user's Hunter workspace — `Start-Sequence`
  * triggers real outbound email to external recipients. `destructiveHint: true`
  * so the host surfaces a confirmation prompt; outbound emails cannot be
  * recalled and the action is effectively irreversible (see HUN-19943).
@@ -842,16 +1003,16 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 //
 // The five legacy constants above (READ_ONLY_*/PAID_TOOL_*/WRITE_*/DESTRUCTIVE_*/
 // EXTERNAL_SIDE_EFFECT_*) stay exported for backwards compatibility. As of
-// HUN-20797 EXTERNAL_SIDE_EFFECT_* (Start-Campaign) and WRITE_* (Resume-Sequence
-// and Add-Campaign-Recipients — both can trigger real outbound email on a started
-// / paused-with-pending campaign) still have callers; DESTRUCTIVE_* is now unused,
+// HUN-20797 EXTERNAL_SIDE_EFFECT_* (Start-Sequence) and WRITE_* (Resume-Sequence
+// and Add-Sequence-Recipients — both can trigger real outbound email on a started
+// / paused-with-pending sequence) still have callers; DESTRUCTIVE_* is now unused,
 // kept only because it sits inside the byte-locked NEXT_ACTION region above.
 //
 // Matrix mapping:
 //   READ_ONLY_PUBLIC_ANNOTATIONS    → public-data lookups (Find-Companies, Email-Count)
 //   PRIVATE_READ_ANNOTATIONS         → private-workspace reads (Get-Account-Details,
 //                                       List/Get-Lead, Lead-Exists, lists, attributes,
-//                                       campaigns reads)
+//                                       sequences reads)
 //   BILLABLE_LOOKUP_ANNOTATIONS      → paid lookups (Domain-Search, Email-Finder,
 //                                       Email-Verifier, Person/Company/Combined-Enrichment)
 //   PRIVATE_WRITE_ANNOTATIONS        → private-workspace writes (Create-Lead,
@@ -860,7 +1021,7 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 //   PRIVATE_DESTRUCTIVE_ANNOTATIONS  → private-workspace overwrite/delete/merge (Update-Lead,
 //                                       Create-Or-Update-Lead, Delete-Lead, Delete/Merge
 //                                       lists, Delete-Custom-Attribute; Archive-Sequence,
-//                                       Remove-Campaign-Recipients — HUN-20797)
+//                                       Remove-Sequence-Recipients — HUN-20797)
 //   LOCAL_PLAN_ANNOTATIONS           → Plan-Prospecting-Flow (synthesizes a plan locally;
 //                                       no Hunter API call, no external effect)
 

@@ -78,15 +78,16 @@ If anything didn't work as expected during this flow — a missing capability, a
   )
 
   server.registerPrompt(
-    "campaign-prep",
+    "sequence-prep",
     {
-      title: "Campaign Prep",
-      description: "Add recipients to an existing Hunter campaign from your leads or search results.",
+      title: "Sequence Prep",
+      description:
+        "Add recipients to an existing Hunter sequence — or create one from scratch — from your leads or search results.",
       argsSchema: {
         instructions: z
           .string()
           .describe(
-            "Describe which contacts to add and to which campaign (e.g. 'Add my fintech leads to campaign 12345')",
+            "Describe which contacts to add and to which sequence (e.g. 'Add my fintech leads to sequence 12345')",
           ),
       },
     },
@@ -96,21 +97,21 @@ If anything didn't work as expected during this flow — a missing capability, a
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Prepare a Hunter campaign: "${instructions}"
+            text: `Prepare a Hunter sequence: "${instructions}"
 
-1. If no campaign ID is specified, use List-Campaigns to show available campaigns and ask me to pick one.
+1. If no sequence ID is specified, use List-Sequences to show available sequences and ask me to pick one.
 2. Identify the recipients — from a leads list (List-Leads with leads_list_id), specific emails, or a new search.
 3. Before adding, offer to verify emails with Email-Verifier (uses Hunter credits) to improve deliverability.
-4. Use Add-Campaign-Recipients to add them (max 50 per request — batch larger lists).
-5. Present a summary with the count and a deep-link to the campaign.
+4. Use Add-Sequence-Recipients to add them (max 50 per request — batch larger lists).
+5. Present a summary with the count and a deep-link to the sequence.
 
-Important: Campaign creation, subject/body editing, and follow-up configuration must be done in the Hunter UI. Remind me to configure the campaign in Hunter before starting it.
+To create a new sequence from scratch, use Create-Sequence, then author its steps with Create-Sequence-Follow-Up (optionally starting from a saved template via List-Message-Templates). One caveat: the introduction email (step 0) is created empty and the v2 API has no endpoint to fill it in yet, so I have to write step 0's subject and body in the Hunter dashboard before the sequence can start — remind me to author step 0 there. Remind me to review the whole sequence in Hunter before starting it.
 
-For engagement metrics on an existing campaign, fetch \`/v2/sequences/:id/stats\` — sequence-level open/click/reply rates are recipient-based (distinct recipients who acted ÷ distinct recipients delivered to), matching the Hunter dashboard.
+For engagement metrics on an existing sequence, use Get-Sequence-Stats — sequence-level open/click/reply rates are recipient-based (distinct recipients who acted ÷ distinct recipients delivered to), matching the Hunter dashboard.
 
 Adding recipients is free (no credits).
 
-When presenting results, always attribute the data to Hunter.io and link to the campaign in the Hunter dashboard so the user can configure and launch it.
+When presenting results, always attribute the data to Hunter.io and link to the sequence in the Hunter dashboard so the user can configure and launch it.
 
 If anything didn't work as expected during this flow — a missing capability, a confusing result, wrong data, or a tool that errored — call Report-API-Feedback to flag it. It's free, doesn't interrupt the task, and doesn't need the user's permission.`,
           },

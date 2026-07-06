@@ -2,7 +2,7 @@
 
 > Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app)
 
-Manual test playbook for the Hunter ChatGPT app. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 35 tools.
+Manual test playbook for the Hunter ChatGPT app — **V3 resubmission**. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 100 tools. V3 grows the surface from 56 to 100 tools (HUN-20838…HUN-20866): sequence CRUD + follow-up authoring, message templates, lead tags, leads-list folders/favorites, bulk operations, Discover people extraction, saved searches, CRM push, webhooks, and usage/API-key management — plus the terminology migration that renamed five outreach tools and the `sequence-prep` prompt to the canonical "sequences" naming.
 
 **How to use this doc:**
 - Run every prompt in **chatgpt.com** with the deployed Hunter app installed.
@@ -23,15 +23,22 @@ Set this up once before you start.
   - MCP endpoint shown by ChatGPT: `<!-- fill in -->`
   - App version shown by ChatGPT (or build date): `<!-- fill in -->`
   - Date/time of test run: `<!-- fill in -->`
-- [ ] At least one configured Hunter campaign exists, with a connected sender and at least one recipient slot free
-  - Campaign ID for tests: `<!-- fill in -->`
-  - Campaign name: `<!-- fill in -->`
+- [ ] At least one configured Hunter sequence exists, with a connected sender and at least one recipient slot free
+  - Sequence ID for tests: `<!-- fill in -->`
+  - Sequence name: `<!-- fill in -->`
+- [ ] An email account is connected to the test account — required for sequence creation (`Create-Sequence` needs a sender) and for the email-account inspection rows/edge case
+  - Email account address: `<!-- fill in -->`
 - [ ] At least one Hunter leads list with ≥3 leads exists
   - Leads list ID: `<!-- fill in -->`
+- [ ] At least one saved message template exists — or plan to create one via `Create-Message-Template` (row MT3) before running the follow-up authoring rows
+  - Template ID (if pre-existing): `<!-- fill in -->`
+- [ ] (Optional) Existing lead tags and leads-list folders — not required up front; the tag/folder rows create their own
+- [ ] (If available) A connected CRM app (HubSpot, Salesforce, Pipedrive…) for the CRM-push prompts — if none, mark row IN1 and edge case 3.17 as **Skipped (no connected app)** and verify the graceful "no connected apps" message instead
+  - Connected CRM: `<!-- fill in or "none" -->`
 - [ ] Browser console / DevTools open to capture network errors and widget rendering issues
 - [ ] Fresh ChatGPT conversation per prompt unless explicitly chained — avoids context bleed between tests
 
-> **Cost estimate for one full run:** ~25 credits total across Sections 1, 2, and 3. (Hunter has a single unified credit pool — every paid call deducts from the same balance.)
+> **Cost estimate for one full run:** ~25 credits total across Sections 1, 2, and 3 — unchanged from the previous revision: all 44 tools added in V3 are free, and none of the prompts added for V3 spends credits. (Hunter has a single unified credit pool — every paid call deducts from the same balance.)
 
 ---
 
@@ -144,26 +151,26 @@ Find 10 marketing leads at SaaS companies in Berlin and save them to a new list 
 
 ---
 
-### 4. Campaign recipients
+### 4. Sequence recipients
 
-**Goal:** Verify campaign listing + adding recipients. Pre-req: at least one campaign exists with a free recipient slot (see pre-flight).
+**Goal:** Verify sequence listing + adding recipients. Pre-req: at least one sequence exists with a free recipient slot (see pre-flight).
 
 **Prompt:**
 
 ```
-List my Hunter campaigns, then add patrick@stripe.com and dylan@stripe.com to the one I pick.
+List my Hunter sequences, then add patrick@stripe.com and dylan@stripe.com to the one I pick.
 ```
 
 **Expected tools fired:**
-- [ ] `List-Campaigns`
-- [ ] `Add-Campaign-Recipients` (after user picks a campaign)
+- [ ] `List-Sequences`
+- [ ] `Add-Sequence-Recipients` (after user picks a sequence)
 
 **Pass criteria:**
-- [ ] All campaigns shown with id, name, status
-- [ ] After user picks, `Add-Campaign-Recipients` is called with `campaign_id` and `emails: ["patrick@stripe.com", "dylan@stripe.com"]`
-- [ ] Final message includes deep link to `https://hunter.io/campaigns/<id>`
-- [ ] Recipients visible in Hunter UI under that campaign after the call
-- [ ] Reminder shown that subject/body/sender must be configured in Hunter UI before starting
+- [ ] All sequences shown with id, name, status (the V3 enriched listing also carries recipient/sent counts)
+- [ ] After user picks, `Add-Sequence-Recipients` is called with `sequence_id` and `emails: ["patrick@stripe.com", "dylan@stripe.com"]`
+- [ ] Final message includes deep link to `https://hunter.io/sequences/<id>`
+- [ ] Recipients visible in Hunter UI under that sequence after the call
+- [ ] Reminder shown that subject/body/sender must be configured (in the Hunter UI or via `Create-Sequence-Follow-Up`) before starting
 
 **Screenshot:** `<!-- paste screenshot here -->`
 
@@ -173,25 +180,25 @@ List my Hunter campaigns, then add patrick@stripe.com and dylan@stripe.com to th
 
 ---
 
-### 5. Start-Campaign confirmation gate
+### 5. Start-Sequence confirmation gate
 
 **Goal:** Verify the destructive-action confirmation gate works. We will say **no** at the gate — no real emails are sent.
 
-**Prompt:** (use the campaign id from prompt 4 or pre-flight)
+**Prompt:** (use the sequence id from prompt 4 or pre-flight)
 
 ```
-Start campaign <CAMPAIGN_ID>
+Start sequence <SEQUENCE_ID>
 ```
 
 **Expected tools fired:**
-- [ ] `Start-Campaign` (first call, returns `ask_user` with `pendingToolCall`)
+- [ ] `Start-Sequence` (first call, returns `ask_user` with `pendingToolCall`)
 
 **Pass criteria:**
 - [ ] ChatGPT shows a destructive-hint confirmation UI (per `destructiveHint: true` annotation)
 - [ ] Confirmation question includes the actual recipient count, e.g. *"This will send real emails to N recipients."*
-- [ ] When you respond **"no, don't start it"**, the model stops and does NOT call `Start-Campaign` again
-- [ ] No `POST /campaigns/<id>/start` request appears in the network panel
-- [ ] Campaign in Hunter UI remains in its prior state (paused/draft) — verify after
+- [ ] When you respond **"no, don't start it"**, the model stops and does NOT call `Start-Sequence` again
+- [ ] No `POST /sequences/<id>/start` request appears in the network panel
+- [ ] Sequence in Hunter UI remains in its prior state (paused/draft) — verify after
 
 **Screenshot:** `<!-- paste screenshot of the confirmation prompt -->`
 
@@ -264,22 +271,24 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | CA4 | `Update-Custom-Attribute` | `Rename custom attribute <CA_ID from CA2> to "Playbook Renamed"` | Label updated | ☐ | |
 | CA5 | `Delete-Custom-Attribute` (destructive) | `Delete custom attribute <CA_ID from CA2>` | Confirmation prompt; on accept, removed | ☐ | |
 
-### Campaigns
+### Sequence recipients
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| C1 | `List-Campaign-Recipients` | `Who are the recipients of campaign <CAMPAIGN_ID>?` | Returns recipient list | ☐ | |
-| C2 | `Remove-Campaign-Recipients` (destructive) | `Remove patrick@stripe.com and dylan@stripe.com from campaign <CAMPAIGN_ID>` (use Section 1 prompt 4) | Confirmation prompt; on accept, recipients removed | ☐ | |
+| C1 | `List-Sequence-Recipients` | `Who are the recipients of sequence <SEQUENCE_ID>?` | Returns recipient list | ☐ | |
+| C2 | `Remove-Sequence-Recipients` (destructive) | `Remove patrick@stripe.com and dylan@stripe.com from sequence <SEQUENCE_ID>` (use Section 1 prompt 4) | Confirmation prompt; on accept, recipients removed | ☐ | |
 
-> `List-Campaigns`, `Add-Campaign-Recipients`, and `Start-Campaign` are exercised by Section 1 prompts 4 and 5.
+> `Add-Sequence-Recipients` and `Start-Sequence` are exercised by Section 1 prompts 4 and 5. `List-Sequences` also fires there and has its own enriched-output row (SQ6).
 
-### Email accounts (HUN-20196)
+### Email accounts (HUN-20196 + V3)
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
 | EA1 | `List-Email-Accounts` | `Show me the email accounts connected to my Hunter account and their sending status` | Read-only list of sending accounts: email, name, provider, daily limit, status (active/paused/warming) | ☐ | |
+| EA2 | `Get-Email-Account` (V3) | `How is my sending account <EMAIL_ACCOUNT> set up?` | Full config: signature, sending schedule, daily limit, BCC, reply-to, custom tracking domain, warmup status | ☐ | |
+| EA3 | `List-Email-Account-Sequences` (V3) | `Which sequences use <EMAIL_ACCOUNT>?` | Sequences attached to that account with id, name, status | ☐ | |
 
-### Sequences (HUN-20196)
+### Sequences (HUN-20196 + V3 CRUD/authoring)
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
@@ -288,8 +297,16 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | SQ3 | `Pause-Sequence` (write) | `Pause sequence <SEQUENCE_ID>` | Sequence paused (stops sending), reversible. Draft/archived → invalid_input (`sequence_not_active`) | ☐ | |
 | SQ4 | `Resume-Sequence` (write) | `Resume sequence <SEQUENCE_ID>` | Resumed after validation; surfaces invalid_input if the email account is disconnected or the schedule is empty | ☐ | |
 | SQ5 | `Archive-Sequence` (destructive) | `Archive sequence <SEQUENCE_ID>` | Confirmation prompt (irreversible via API); on accept archived and can't be resumed. Draft → invalid_input (`sequence_not_started`) | ☐ | |
+| SQ6 | `List-Sequences` (V3, enriched) | `Show me all my Hunter sequences` | Enriched listing: id, name, status, email account, recipient/sent counts. Also exercised by Section 1 prompt 4 | ☐ | |
+| SQ7 | `Get-Sequence` (V3) | `Get details for sequence <SEQUENCE_ID>` | One sequence's full record: name, status, email account, schedule, recipient counts | ☐ | |
+| SQ8 | `Create-Sequence` (V3, write) | `Create a sequence called "Playbook Outreach" using my email account <EMAIL_ACCOUNT>` | Draft sequence created, id + deep link to `/sequences/<id>` returned; POST carries an `Idempotency-Key` header (check network panel) | ☐ | |
+| SQ9 | `Update-Sequence` (V3, write) | `Rename sequence <SEQUENCE_ID> to "Playbook Renamed"` | Sequence updated, deep link returned | ☐ | |
+| SQ10 | `Delete-Sequence` (V3, destructive) | `Delete sequence <DRAFT_SEQUENCE_ID>` | Confirmation prompt; drafts only — deleting a started sequence returns invalid_input | ☐ | |
+| SQ11 | `Get-Sequence-Follow-Up` (V3) | `Show step 2 of sequence <SEQUENCE_ID>` | One step: subject, body, wait_days, position | ☐ | |
+| SQ12 | `Create-Sequence-Follow-Up` (V3, write) | `Add a follow-up to sequence <SEQUENCE_ID>: subject "Quick nudge", wait 3 days` | Step appended with automatic step assignment (subject/body/wait_days); model offers a saved message template as the body before drafting from scratch | ☐ | |
+| SQ13 | `Delete-Sequence-Follow-Up` (V3, destructive) | `Delete the last step of sequence <SEQUENCE_ID>` | Confirmation; last step only — deleting a middle step returns an error | ☐ | |
 
-> Tip: use a paused/test sequence for SQ3–SQ5. Archiving (SQ5) cannot be undone via the API — use a disposable sequence.
+> Tip: use a paused/test sequence for SQ3–SQ5 and a disposable draft for SQ8–SQ13. Archiving (SQ5) cannot be undone via the API, and Delete-Sequence (SQ10) only works on drafts — use disposable sequences.
 
 ### Company lists (HUN-20196)
 
@@ -326,7 +343,84 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | CN1 | `List-Connected-Apps` | `What apps are connected to my Hunter account?` | Read-only list: provider, name, category, provider_email, connected_at | ☐ | |
 | CN2 | `Get-Connected-App` | `Show the field mappings for connected app <APP_ID>` | One app + attribute_mappings (target_field ↔ source_field) | ☐ | |
 
-> These 21 rows exercise the HUN-20196 tools. Use a throwaway list/folder/sequence for the destructive rows (CL4/CL5, FO3/FO4, SQ5) so you don't lose real data.
+> The HUN-20196 rows above (EA1, SQ1–SQ5, CL1–CL5, FO1–FO4, ME1–ME4, CN1–CN2) predate V3; rows marked (V3) exercise the HUN-20838…HUN-20866 additions. Use a throwaway list/folder/sequence for the destructive rows (CL4/CL5, FO3/FO4, SQ5/SQ10/SQ13) so you don't lose real data.
+
+### Message templates (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| MT1 | `List-Message-Templates` | `Show my saved message templates` | Templates with id, name, subject | ☐ | |
+| MT2 | `Get-Message-Template` | `Show message template <TEMPLATE_ID>` | One template: name, subject, body | ☐ | |
+| MT3 | `Create-Message-Template` (write) | `Save a message template called "Playbook Intro" with subject "Hello {{first_name}}"` | Template created, id returned | ☐ | |
+| MT4 | `Update-Message-Template` (write) | `Rename message template <TEMPLATE_ID> to "Playbook Renamed"` | Template updated | ☐ | |
+| MT5 | `Delete-Message-Template` (destructive) | `Delete message template <TEMPLATE_ID>` | Confirmation; on accept removed | ☐ | |
+
+> Templates integrate with follow-up authoring: when writing a follow-up (SQ12), the model should offer an existing template as the step body before drafting from scratch.
+
+### Lead tags (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| TG1 | `List-Lead-Tags` | `What tags do I have on my Hunter leads?` | Tags with id + name | ☐ | |
+| TG2 | `Create-Lead-Tag` (write) | `Create a lead tag called "Playbook"` | Tag created, id returned | ☐ | |
+| TG3 | `Update-Lead-Tag` (write) | `Rename tag <TAG_ID> to "Playbook Renamed"` | Tag renamed | ☐ | |
+| TG4 | `Delete-Lead-Tag` (destructive) | `Delete tag <TAG_ID>` | Confirmation; on accept removed from all tagged leads | ☐ | |
+| TG5 | `Add-Tag-To-Lead` (write) | `Tag lead <LEAD_ID> with "Playbook"` | Tag attached to the lead (visible in Hunter UI) | ☐ | |
+| TG6 | `Remove-Tag-From-Lead` (write) | `Remove the "Playbook" tag from lead <LEAD_ID>` | Tag detached (reversible by re-adding) | ☐ | |
+
+### Leads-list folders & favorites (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| LF1 | `List-Leads-List-Folders` | `Show my leads-list folders` | Folders with name + list count | ☐ | |
+| LF2 | `Create-Leads-List-Folder` (write) | `Create a leads-list folder called "Playbook"` | Folder created, id returned | ☐ | |
+| LF3 | `Update-Leads-List-Folder` (write) | `Rename leads-list folder <FOLDER_ID> to "Playbook Renamed"` | Folder renamed | ☐ | |
+| LF4 | `Delete-Leads-List-Folder` (destructive) | `Delete leads-list folder <FOLDER_ID>` | Confirmation; on accept removed (its lists are un-filed, not deleted) | ☐ | |
+| LF5 | `Favorite-Leads-List` (write) | `Mark leads list <LEADS_LIST_ID> as a favorite` | List favorited; reversible | ☐ | |
+| LF6 | `Unfavorite-Leads-List` (write) | `Remove leads list <LEADS_LIST_ID> from my favorites` | List unfavorited | ☐ | |
+
+### Bulk operations (V3)
+
+All five bulk tools are confirmation-gated: the confirmation must state the affected count, and the two deletes require a **second** explicit confirmation.
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| BK1 | `Bulk-Move-Leads` (destructive) | `Move all leads from list <SRC_LEADS_LIST_ID> to list <DEST_LEADS_LIST_ID>` | Confirmation states the lead count; on accept, leads moved | ☐ | |
+| BK2 | `Bulk-Delete-Leads` (destructive) | `Delete all leads in list <DISPOSABLE_LEADS_LIST_ID>` | Double confirmation (count-stating gate + explicit re-confirm); on accept, leads removed | ☐ | |
+| BK3 | `Bulk-Move-Companies` (destructive) | `Move all companies from list <SRC_LIST_ID> to list <DEST_LIST_ID>` | Confirmation states the company count; on accept, companies moved | ☐ | |
+| BK4 | `Bulk-Copy-Companies` (destructive) | `Copy the companies in list <SRC_LIST_ID> into list <DEST_LIST_ID>` | Confirmation states the count; companies copied, source list untouched | ☐ | |
+| BK5 | `Bulk-Delete-Companies` (destructive) | `Delete all companies in list <DISPOSABLE_LIST_ID>` | Double confirmation; on accept, companies removed | ☐ | |
+
+> Use throwaway lists for BK2/BK5 — bulk deletes are irreversible.
+
+### Discover people & saved searches (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| DP1 | `Find-People` | `Which of these companies have marketing contacts?` (after a `Find-Companies` run in the same conversation) | People extraction across the picked companies: email counts + department aggregations. Free, no credits | ☐ | |
+| DP2 | `List-Saved-Searches` | `Show my saved Discover searches` | Saved searches with id + name | ☐ | |
+| DP3 | `Get-Saved-Search` | `Show saved search <SEARCH_ID>` | One saved search + its stored filters | ☐ | |
+| DP4 | `Create-Saved-Search` (write) | `Save this Discover search as "UK Fintech"` | Search saved with the current filters, id returned | ☐ | |
+| DP5 | `Delete-Saved-Search` (destructive) | `Delete saved search <SEARCH_ID>` | Confirmation; on accept removed. No update endpoint exists — to change a search, delete and recreate | ☐ | |
+
+### Integrations (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| IN1 | `Push-Leads-To-CRM` (destructive, open-world) | `Push the leads in list <LEADS_LIST_ID> to my <CRM>` | Confirmation gate (data leaves Hunter); on accept an async job is queued and the model says results will appear in the CRM shortly. No connected app → graceful message; mark **Skipped (no connected app)** | ☐ | |
+| IN2 | `List-Webhooks` | `Show my Hunter webhooks` | Webhooks with id, URL, events, status | ☐ | |
+| IN3 | `Update-Webhook` (destructive) | `Disable webhook <WEBHOOK_ID>` | Webhook updated (reversible) | ☐ | |
+
+### Usage & API keys (V3)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| UK1 | `Get-Usage` | `How many credits have I used this month?` | Usage summary: searches/verifications/credits used vs plan quota. Free, no credits deducted | ☐ | |
+| UK2 | `List-API-Keys` | `List my Hunter API keys` | Masked key values only. Over OAuth → expect the 403 (see caveat below), relayed clearly | ☐ | |
+| UK3 | `Create-API-Key` (destructive) | `Create a new Hunter API key` | Confirmation gate first (security-sensitive); over OAuth → expect the 403, relayed gracefully | ☐ | |
+| UK4 | `Delete-API-Key` (destructive) | `Delete API key <KEY_ID>` | Confirmation gate first; over OAuth → expect the 403, relayed gracefully | ☐ | |
+
+> **OAuth caveat (UK2–UK4):** the ChatGPT app connects via OAuth, and the Hunter API refuses API-key management with an OAuth token — it returns **403 "API keys can't be managed with an OAuth token"**. These rows PASS when the model relays that error cleanly and points the user to the Hunter dashboard — NOT when a key is actually listed/created/deleted. See edge case 3.18.
 
 ---
 
@@ -394,19 +488,19 @@ Then save patrick@stripe.com to my Hunter leads with position "Co-Founder".
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.5 Already-started campaign
+### 3.5 Already-started sequence
 
-**Pre-req:** A campaign that is already running.
+**Pre-req:** A sequence that is already running.
 
 **Prompt:**
 
 ```
-Start campaign <ALREADY_RUNNING_CAMPAIGN_ID>
+Start sequence <ALREADY_RUNNING_SEQUENCE_ID>
 ```
 
 (answer "yes" at the confirmation gate)
 
-- [ ] Confirmation gate shown (gate fires regardless of campaign state)
+- [ ] Confirmation gate shown (gate fires regardless of sequence state)
 - [ ] After confirmation, model surfaces an error like *"Sequence already started."* — not a false success
 - [ ] No deep-link claiming a fresh start
 
@@ -429,7 +523,7 @@ How many Hunter credits do I have?
 
 ### 3.7 Deep link sanity
 
-For each tool that returns a deep link (Save-Company, Create/Update/Create-Or-Update-Lead, Create/Update/Merge-Leads-List, Add/Remove-Campaign-Recipients, Start-Campaign), open the link and confirm:
+For each tool that returns a deep link (Save-Company, Create/Update/Create-Or-Update-Lead, Create/Update/Merge-Leads-List, Create/Update-Sequence, Add/Remove-Sequence-Recipients, Start-Sequence), open the link and confirm:
 
 - [ ] Link opens hunter.io
 - [ ] Page shows the resource that was just created/modified
@@ -453,7 +547,7 @@ If the ChatGPT host surfaces the registered MCP prompts as slash commands or qui
 
 - [ ] `prospect` is selectable
 - [ ] `build-list` is selectable
-- [ ] `campaign-prep` is selectable
+- [ ] `sequence-prep` is selectable (title "Sequence Prep" — renamed in V3; no legacy-named prompt remains)
 - [ ] Each one prefills the expected guidance text and runs end-to-end
 
 **Result/notes:** `<!-- fill in -->`
@@ -532,6 +626,172 @@ Use Hunter to find 20 SaaS companies in France with 50-200 employees. For each c
 
 ---
 
+### 3.12 End-to-end sequence creation in conversation (V3)
+
+**Goal:** V3 makes sequences composable entirely in chat. Verify the full authoring chain: create → author steps (with template offer) → add recipients → start gate.
+
+**Prompt (one conversation):**
+
+```
+Create a new outreach sequence called "Playbook E2E" from my <EMAIL_ACCOUNT> account, write a short intro email, add a follow-up 3 days later, and add patrick@stripe.com as a recipient.
+```
+
+- [ ] `Create-Sequence` fires first — a draft is created, and the POST carries an `Idempotency-Key` header (network panel)
+- [ ] `Create-Sequence-Follow-Up` fires once per step with subject/body/wait_days; step positions are auto-assigned (the model never asks for manual step numbers)
+- [ ] Before drafting a body from scratch, the model checks saved templates (`List-Message-Templates`) and offers one if it exists
+- [ ] `Add-Sequence-Recipients` adds patrick@stripe.com to the draft
+- [ ] `Start-Sequence` is never called uninvited; if you then say "start it", the destructive confirmation gate appears with the recipient count (say no)
+- [ ] Final message deep-links to `https://hunter.io/sequences/<id>`
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.13 Organize-as-you-go tagging (V3)
+
+**Goal:** The model should reuse existing tags before minting new ones.
+
+**Prompt:**
+
+```
+Tag my lead patrick@stripe.com as a priority prospect
+```
+
+- [ ] `List-Lead-Tags` is called first, and a matching existing tag is offered before any create
+- [ ] `Create-Lead-Tag` is only called if no suitable tag exists — and the model says it's creating one
+- [ ] `Add-Tag-To-Lead` attaches the tag; the lead shows it in the Hunter UI
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.14 Bulk gates: count-stating move, double-confirm delete (V3)
+
+**Prompts (fresh conversations):**
+
+```
+Move everything from leads list <SRC_LEADS_LIST_ID> into <DEST_LEADS_LIST_ID>
+```
+
+```
+Delete all the leads in list <DISPOSABLE_LEADS_LIST_ID>
+```
+
+- [ ] `Bulk-Move-Leads` confirmation states the exact number of leads that will move (*"This will move N leads…"*) before executing
+- [ ] Answering "no" aborts — no write request in the network panel
+- [ ] `Bulk-Delete-Leads` requires TWO confirmations: the count-stating gate plus an explicit re-confirm that the delete is irreversible
+- [ ] A single "yes" does not delete — the second confirmation must also be answered
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.15 Find-Companies → Find-People extraction (V3)
+
+**Prompts (same conversation):**
+
+```
+Find fintech companies in Amsterdam with 50+ employees
+```
+
+```
+Which of these have marketing contacts, and how many?
+```
+
+- [ ] `Find-People` is called with the picked companies (no per-company `Domain-Search` loop for this aggregate question)
+- [ ] Response shows per-company email counts and department aggregations
+- [ ] Zero credits deducted — `Find-People` is free (verify balance after)
+- [ ] Model offers `Domain-Search` as the paid next step to reveal actual addresses
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.16 Saved search: save + rerun by name (V3)
+
+**Prompts (two conversations):**
+
+Conversation 1:
+
+```
+Find SaaS companies in Portugal with 11-50 employees, then save this search as "Portugal SaaS"
+```
+
+Conversation 2 (fresh):
+
+```
+Run my saved search "Portugal SaaS"
+```
+
+- [ ] `Create-Saved-Search` stores the Discover filters under the given name
+- [ ] In the fresh conversation, the model resolves the name via `List-Saved-Searches`/`Get-Saved-Search` and reruns `Find-Companies` with the stored filters
+- [ ] If asked to *edit* the saved search, the model explains there is no update endpoint and offers delete + recreate (`Delete-Saved-Search` → `Create-Saved-Search`)
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.17 CRM push: confirm + async messaging (V3)
+
+**Pre-req:** a connected CRM app (see pre-flight). If none, run anyway and verify the graceful path.
+
+**Prompt:**
+
+```
+Push the leads in list <LEADS_LIST_ID> to my CRM
+```
+
+- [ ] Confirmation gate fires before any push — the prompt makes clear data will leave Hunter for the external CRM (open-world)
+- [ ] On accept, the tool returns an async job acknowledgement; the model says the sync runs in the background and results will appear in the CRM shortly — no false "already synced" claim
+- [ ] With no connected app: the model relays a clean "no connected apps" message and points to the Hunter integrations page — no retry loop, no invented CRM. Mark **Skipped (no connected app)** in that case
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.18 API-key management over OAuth: expect the 403, relayed gracefully (V3)
+
+**Prompt:**
+
+```
+List my Hunter API keys, then create a new one called "playbook"
+```
+
+- [ ] `List-API-Keys` (and, past its gate, `Create-API-Key`) return **403** — the ChatGPT app connects via OAuth, and the Hunter API refuses key management with an OAuth token
+- [ ] The model relays the actual reason (*"API keys can't be managed with an OAuth token"*) and suggests managing keys in the Hunter dashboard — it does NOT loop, retry, or hallucinate a key
+- [ ] `Create-API-Key` still shows its confirmation gate BEFORE the call (security-sensitive), even though the call will 403
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.19 Email-account inspection (V3)
+
+**Prompts (same conversation):**
+
+```
+How is my sending account <EMAIL_ACCOUNT> set up?
+```
+
+```
+What's using that account?
+```
+
+- [ ] `Get-Email-Account` returns the full config: signature, sending schedule, daily limit, BCC, reply-to, custom tracking domain, warmup status
+- [ ] `List-Email-Account-Sequences` lists the sequences attached to that account
+- [ ] Both are read-only — no write requests in the network panel
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.20 Terminology regression: no legacy outreach wording (V3)
+
+**Goal:** The V3 terminology migration renamed five outreach tools and the `sequence-prep` prompt. Verify no legacy wording survives anywhere user-visible.
+
+- [ ] The tool list in ChatGPT's app settings shows only `…Sequence…` names for the outreach family
+- [ ] Run Section 1 prompts 4–5 and read every assistant message: the outreach objects are called "sequences" throughout — grep an exported conversation for the legacy term if unsure
+- [ ] The `sequence-prep` prompt (title "Sequence Prep") appears under the app's prompts; no legacy-named prompt remains
+- [ ] Error strings, confirmation prompts, and deep-link labels all say "sequence"
+
+**Result/notes:** `<!-- fill in -->`
+
+### 3.21 Idempotency spot-check (best-effort, manual) (V3)
+
+**Goal:** Every resource-creating POST sends an `Idempotency-Key` header automatically (HUN-18680), and `POST /sequences` retries once on network failure reusing the same key — so a blip never creates duplicate sequences.
+
+- [ ] Network panel shows `Idempotency-Key` on the `Create-Sequence` POST (and on other create calls, e.g. `Create-Leads-List`)
+- [ ] Best-effort: simulate a blip (DevTools → Network → brief offline/throttle) during a `Create-Sequence` and let the retry land — exactly ONE new sequence exists afterwards, not two
+- [ ] If the blip can't be reproduced, mark this **Manual/best-effort — header verified only**; the header check alone is acceptable
+
+**Result/notes:** `<!-- fill in -->`
+
+---
+
 ## Run summary
 
 After completing all sections, fill this in.
@@ -539,9 +799,9 @@ After completing all sections, fill this in.
 | Section | Total | Pass | Fail | Blocked |
 |---------|-------|------|------|---------|
 | 1 — Marketplace prompts | 5 | | | |
-| 2 — Tool coverage matrix | 47 | | | |
-| 3 — Edge cases | 11 | | | |
-| **Total** | **63** | | | |
+| 2 — Tool coverage matrix | 92 | | | |
+| 3 — Edge cases | 21 | | | |
+| **Total** | **118** | | | |
 
 **Overall verdict:** ☐ Ready for app review submission ☐ Needs fixes before submission
 
@@ -558,9 +818,10 @@ After completing all sections, fill this in.
 ## Section 5 — Resubmission notes (paste verbatim into OpenAI submission form)
 
 Use this block when filling out the "Notes for the reviewer" field on the
-OpenAI Apps SDK submission form. Pre-empts the three reviewer-edge-cases
-the v3 implementation knowingly accepts as trade-offs; surfacing them
-proactively beats letting a reviewer discover them on a test run.
+OpenAI Apps SDK submission form. Pre-empts the reviewer-edge-cases the V3
+implementation knowingly accepts as trade-offs, and summarizes what changed
+in this resubmission (note E); surfacing them proactively beats letting a
+reviewer discover them on a test run.
 
 ### A. Bulk credit consent is enforced server-side
 
@@ -579,15 +840,17 @@ and the 50-company prospecting loop becomes user-hostile.
 
 ### B. Hunter MCP scope vs. dashboard parity
 
-Hunter MCP v3 covers email discovery, verification, enrichment, and
-lead/campaign read-write. Campaign **authoring**, async **bulk
-verification**, and a few smaller parity items (Author-Finder, dedicated
-Add/Remove-Lead-To-List primitives, the full Discover filter set) are on
-the roadmap. Reviewers who ask the agent to compose a new campaign, to
-queue a bulk verification job, or to move 10 leads from list A to list B
-will see a clean "I can't do that yet" response from the tool surface —
-that is the surface telling the truth, not a bug. The web app exposes
-these; the MCP will follow in a future cycle.
+Hunter MCP V3 covers email discovery, verification, enrichment,
+lead/sequence read-write, and — new in this submission — full sequence
+authoring, message templates, lead organization (tags, folders,
+favorites), bulk lead/company operations, Discover people extraction,
+saved searches, CRM push, webhooks, and usage/email-account/API-key
+surfaces. Async **bulk verification** and a few smaller parity items
+(Author-Finder, the full Discover filter set) remain on the roadmap.
+Reviewers who ask the agent to queue a bulk verification job will see a
+clean "I can't do that yet" response from the tool surface — that is the
+surface telling the truth, not a bug. The web app exposes these; the MCP
+will follow in a future cycle.
 
 ### C. Title-vs-canonical-name dashboard surface
 
@@ -615,13 +878,53 @@ edit plus the mirrored byte-aligned edit in remote-mcp.
   server-side via the credential-shape regex set and the
   `INJECTED_FIELD_NAMES` strip pass.
 
+### E. V3 scope: sequences terminology migration + 44 new free tools
+
+**Terminology migration.** Five outreach tools were renamed to the
+canonical product term — these tools hit `/v2/sequences/*` and the product
+calls the objects "sequences": `List-Sequences`,
+`List-Sequence-Recipients`, `Add-Sequence-Recipients`,
+`Remove-Sequence-Recipients`, and `Start-Sequence` replace their
+legacy-named predecessors from the previous submission. The matching named
+prompt is now `sequence-prep` (title "Sequence Prep"). Behavior is
+unchanged; only the names moved.
+
+**New tool families and annotation rationale.** 44 tools were added
+(HUN-20838…HUN-20866): sequence CRUD + follow-up authoring, message
+templates, lead tags, leads-list folders/favorites, bulk lead/company
+operations, Discover people extraction (`Find-People`) + saved searches,
+CRM push + webhooks, and usage/email-account/API-key surfaces. Annotations
+follow the established posture:
+
+- **Reads** are `readOnlyHint: true` + `openWorldHint: false` — private
+  reads of the user's own Hunter data.
+- **Creates** are private, non-destructive writes (`destructiveHint:
+  false`, `openWorldHint: false`).
+- **Updates, deletes, and bulk destructive operations** carry
+  `destructiveHint: true` so the host confirms. Bulk confirmations state
+  the affected record count; bulk deletes require a second explicit
+  confirmation.
+- **`Push-Leads-To-CRM`** is the one `openWorldHint: true` write, because
+  lead data leaves Hunter for the user's external CRM. It is
+  confirmation-gated and returns an async job acknowledgement.
+- **`Create-API-Key` / `Delete-API-Key`** are confirmation-gated as
+  security-sensitive. Over the app's OAuth connection the Hunter API
+  refuses key management with a 403 ("API keys can't be managed with an
+  OAuth token"), which the model relays to the user.
+- **Billable lookups are unchanged** — every tool added in V3 is free.
+
+**Idempotency.** Every resource-creating POST now sends an
+`Idempotency-Key` header automatically (HUN-18680), and `POST /sequences`
+retries once on network failure reusing the same key — a retried create
+can never produce a duplicate sequence.
+
 ---
 
 ## Section 6 — OpenAI submission form: test-case autofill script
 
 The OpenAI Apps SDK submission form has a **Test cases** section (positive `version.test_cases.*` + `version.negative_test_cases.*` fields). Paste the snippet below into the browser DevTools console **on the submission-form page** to fill every row at once and length-check it. It mirrors the form's field-name scheme and sets values React-safely via `setNativeValue`.
 
-**Before running:** in the form, add **12 positive** test-case rows and **3 negative** rows (the script fills existing inputs — it does not create rows). Substitute `<ANGLE_BRACKET>` placeholders with real test-account values first. Field limits enforced by the script: `description ≤200`, `user_prompt ≤500`, `tools_triggered ≤200`, `expected_output ≤300`. Cases 1–5 cover the original surface; 6–12 cover the HUN-20196 additions (email accounts, sequences, company lists/folders, membership/favorites, connected apps).
+**Before running:** in the form, add **16 positive** test-case rows and **3 negative** rows (the script fills existing inputs — it does not create rows). Substitute `<ANGLE_BRACKET>` placeholders with real test-account values first. Field limits enforced by the script: `description ≤200`, `user_prompt ≤500`, `tools_triggered ≤200`, `expected_output ≤300`. Cases 1–5 cover the original surface; 6–12 cover the HUN-20196 additions (email accounts, sequences, company lists/folders, membership/favorites, connected apps); 13–16 cover the V3 additions (sequence authoring, bulk operations, Find-People extraction, usage).
 
 ```js
 (() => {
@@ -659,12 +962,12 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
           "A prospecting plan starts with company discovery, asks before bulk credit use, then after approval verifies and saves valid contacts without overwriting existing leads."
       },
       {
-        description: "Review account and campaigns without sending emails",
+        description: "Review account and sequences without sending emails",
         user_prompt:
-          "Using Hunter, show my account details, list my campaigns, and show recipients for one campaign if any exist. Do not add recipients or start a campaign.",
-        tools_triggered: "Get-Account-Details, List-Campaigns, List-Campaign-Recipients",
+          "Using Hunter, show my account details, list my sequences, and show recipients for one sequence if any exist. Do not add recipients or start a sequence.",
+        tools_triggered: "Get-Account-Details, List-Sequences, List-Sequence-Recipients",
         expected_output:
-          "Account/credit details and a campaign list are returned. If a campaign exists, recipient statuses are shown. No recipients are added and no campaign is started."
+          "Account/credit details and a sequence list are returned. If a sequence exists, recipient statuses are shown. No recipients are added and no sequence is started."
       },
       {
         description: "List connected sending accounts before outreach",
@@ -719,6 +1022,37 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
         tools_triggered: "List-Connected-Apps, Get-Connected-App",
         expected_output:
           "A read-only list of connected apps (provider, name, category, connected date) and, for one app, its field mappings (Hunter field to integration field). No changes are made."
+      },
+      {
+        description: "Create a sequence with follow-ups and recipients in chat",
+        user_prompt:
+          "Using Hunter, create a sequence called 'Playbook Outreach' from my connected email account, add a first email and a follow-up after 3 days, then add patrick@stripe.com as a recipient. Do not start it.",
+        tools_triggered: "Create-Sequence, Create-Sequence-Follow-Up, Add-Sequence-Recipients",
+        expected_output:
+          "A draft sequence is created with two authored steps and one recipient, with a Hunter link to review it. The sequence is not started and no emails are sent."
+      },
+      {
+        description: "Bulk move leads with a count-stating confirmation",
+        user_prompt:
+          "Using Hunter, move all leads from leads list <SRC_LIST_ID> to leads list <DEST_LIST_ID>.",
+        tools_triggered: "Bulk-Move-Leads",
+        expected_output:
+          "Before anything moves, a confirmation states how many leads are affected. Only after the user approves are the leads moved to the destination list; declining aborts with no change."
+      },
+      {
+        description: "Extract people availability from discovered companies",
+        user_prompt:
+          "Using Hunter, find fintech companies in Berlin, then tell me which of them have marketing contacts and how many, without spending credits.",
+        tools_triggered: "Find-Companies, Find-People",
+        expected_output:
+          "Company discovery runs first, then Find-People returns per-company email counts and department breakdowns for free. No credits are spent and no addresses are revealed yet."
+      },
+      {
+        description: "Check credit usage without spending credits",
+        user_prompt: "Using Hunter, how many credits have I used this month and how many do I have left?",
+        tools_triggered: "Get-Usage",
+        expected_output:
+          "A free usage summary is returned showing credits used versus the plan quota for the current period. No credits are deducted by the check itself."
       }
     ],
     negative_test_cases: [
@@ -729,7 +1063,7 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
       {
         description: "Sales writing request without lead data lookup",
         user_prompt:
-          "Write a cold email template for a pharmaceutical sales campaign, but do not look up companies or contacts."
+          "Write a cold email template for pharmaceutical sales outreach, but do not look up companies or contacts."
       },
       {
         description: "Consumer discovery outside Hunter prospecting",
@@ -836,25 +1170,30 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
 
 ## Appendix — Tool inventory
 
-The 55 tools exposed by the Hunter ChatGPT MCP, grouped by registration site. Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run.
+The 100 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run. All 44 tools added in V3 (marked "(V3)") are free; the credit cost of a full playbook run is unchanged at ~25 credits, since no V3 prompt spends credits.
 
 | Group | Tools |
 |-------|-------|
 | Search | `Find-Companies`, `Domain-Search`, `Email-Finder`, `Email-Verifier`, `Email-Count` |
 | Enrichment | `Person-Enrichment`, `Company-Enrichment`, `Combined-Enrichment` |
 | Account | `Get-Account-Details` |
-| Leads | `List-Leads`, `Get-Lead`, `Create-Lead`, `Update-Lead`, `Delete-Lead`, `Create-Or-Update-Lead`, `Lead-Exists`, `Save-Company` |
+| Usage & API keys (V3) | `Get-Usage`, `List-API-Keys`, `Create-API-Key`, `Delete-API-Key` |
+| Email accounts | `List-Email-Accounts`, `Get-Email-Account` (V3), `List-Email-Account-Sequences` (V3) |
+| Sequences | `List-Sequences`, `Get-Sequence` (V3), `Create-Sequence` (V3), `Update-Sequence` (V3), `Delete-Sequence` (V3), `List-Sequence-Follow-Ups`, `Get-Sequence-Follow-Up` (V3), `Create-Sequence-Follow-Up` (V3), `Delete-Sequence-Follow-Up` (V3), `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats`, `List-Sequence-Recipients`, `Add-Sequence-Recipients`, `Remove-Sequence-Recipients`, `Start-Sequence` |
+| Message templates (V3) | `List-Message-Templates`, `Get-Message-Template`, `Create-Message-Template`, `Update-Message-Template`, `Delete-Message-Template` |
+| Leads | `List-Leads`, `Get-Lead`, `Create-Lead`, `Update-Lead`, `Delete-Lead`, `Create-Or-Update-Lead`, `Create-Lead-If-Missing`, `Lead-Exists`, `Save-Company` |
+| Lead tags (V3) | `List-Lead-Tags`, `Create-Lead-Tag`, `Update-Lead-Tag`, `Delete-Lead-Tag`, `Add-Tag-To-Lead`, `Remove-Tag-From-Lead` |
 | Leads lists | `List-Leads-Lists`, `Get-Leads-List`, `Create-Leads-List`, `Update-Leads-List`, `Delete-Leads-List`, `Merge-Leads-Lists` |
-| Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
-| Campaigns | `List-Campaigns`, `List-Campaign-Recipients`, `Add-Campaign-Recipients`, `Remove-Campaign-Recipients`, `Start-Campaign` |
-| Email accounts (HUN-20196) | `List-Email-Accounts` |
-| Sequences (HUN-20196) | `List-Sequence-Follow-Ups`, `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats` |
+| Leads-list folders & favorites (V3) | `List-Leads-List-Folders`, `Create-Leads-List-Folder`, `Update-Leads-List-Folder`, `Delete-Leads-List-Folder`, `Favorite-Leads-List`, `Unfavorite-Leads-List` |
 | Company lists (HUN-20196) | `List-Company-Lists`, `Get-Company-List`, `Create-Company-List`, `Update-Company-List`, `Delete-Company-List` |
 | Company list folders (HUN-20196) | `List-Company-List-Folders`, `Create-Company-List-Folder`, `Update-Company-List-Folder`, `Delete-Company-List-Folder` |
 | Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
-| Connected apps (HUN-20196) | `List-Connected-Apps`, `Get-Connected-App` |
+| Bulk operations (V3) | `Bulk-Move-Leads`, `Bulk-Delete-Leads`, `Bulk-Move-Companies`, `Bulk-Copy-Companies`, `Bulk-Delete-Companies` |
+| Discover people & saved searches (V3) | `Find-People`, `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
+| Connected apps & integrations | `List-Connected-Apps`, `Get-Connected-App`, `Push-Leads-To-CRM` (V3), `List-Webhooks` (V3), `Update-Webhook` (V3) |
+| Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
 | Coordinator | `Plan-Prospecting-Flow` |
 | Feedback | `Report-API-Feedback` (free; agents report API/tool friction — missing endpoints, wrong docs, bad data, bugs) |
-| Named prompts | `prospect`, `build-list`, `campaign-prep` |
+| Named prompts | `prospect`, `build-list`, `sequence-prep` |
 | Widgets | `discover-widget`, `company-widget` |
 | Resources | `capabilities-recovery` (used implicitly by `Plan-Prospecting-Flow`) |
