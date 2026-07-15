@@ -851,27 +851,21 @@ describe("HUN-20170-v3: Domain-Search confirmed_credit_use server-side guard", (
 // Email-Verifier straight to the create-only save terminal when it returns false.
 describe("HUN-20651: shouldVerify predicate truth table", () => {
   it("skips verify for fresh-valid + high-confidence (>= threshold)", () => {
-    expect(
-      shouldVerify({ value: "a@x.com", confidence: 95, verification: { status: "valid" } }, {}),
-    ).toBe(false)
+    expect(shouldVerify({ value: "a@x.com", confidence: 95, verification: { status: "valid" } }, {})).toBe(false)
     // Exactly at the threshold (90) also skips.
-    expect(
-      shouldVerify({ value: "a@x.com", confidence: 90, verification: { status: "valid" } }, {}),
-    ).toBe(false)
+    expect(shouldVerify({ value: "a@x.com", confidence: 90, verification: { status: "valid" } }, {})).toBe(false)
   })
 
   it("verifies fresh-valid but LOW confidence (< threshold)", () => {
-    expect(
-      shouldVerify({ value: "a@x.com", confidence: 89, verification: { status: "valid" } }, {}),
-    ).toBe(true)
+    expect(shouldVerify({ value: "a@x.com", confidence: 89, verification: { status: "valid" } }, {})).toBe(true)
     // Valid with no confidence at all defaults to 0 → verify.
     expect(shouldVerify({ value: "a@x.com", verification: { status: "valid" } }, {})).toBe(true)
   })
 
   it("verifies the dominant case: null verification status (no fresh EmailVerification row)", () => {
-    expect(
-      shouldVerify({ value: "a@x.com", confidence: 99, verification: { status: null, date: null } }, {}),
-    ).toBe(true)
+    expect(shouldVerify({ value: "a@x.com", confidence: 99, verification: { status: null, date: null } }, {})).toBe(
+      true,
+    )
     // Verification block entirely absent → also verify.
     expect(shouldVerify({ value: "a@x.com", confidence: 99 }, {})).toBe(true)
   })
@@ -880,9 +874,7 @@ describe("HUN-20651: shouldVerify predicate truth table", () => {
     expect(shouldVerify({ value: "a@x.com", verification: { status: "accept_all" } }, {})).toBe(false)
     expect(shouldVerify({ value: "a@x.com", accept_all: true }, {})).toBe(false)
     // Domain-level accept_all suppresses re-verify even for an otherwise-verifiable row.
-    expect(
-      shouldVerify({ value: "a@x.com", verification: { status: null } }, { domainAcceptAll: true }),
-    ).toBe(false)
+    expect(shouldVerify({ value: "a@x.com", verification: { status: null } }, { domainAcceptAll: true })).toBe(false)
     // invalid → known-bad; re-verifying wouldn't improve it → skip (surface/drop).
     expect(shouldVerify({ value: "a@x.com", verification: { status: "invalid" } }, {})).toBe(false)
   })
@@ -1101,7 +1093,9 @@ describe("HUN-20651: Domain-Search conditional-verify routing + verification_sou
             JSON.stringify({
               data: {
                 domain: "a.com",
-                emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid", date: "2026-06-01" } }],
+                emails: [
+                  { value: "user@a.com", confidence: 97, verification: { status: "valid", date: "2026-06-01" } },
+                ],
               },
             }),
           ),
@@ -1149,9 +1143,8 @@ describe("HUN-20651: Domain-Search conditional-verify routing + verification_sou
     const dsHandler = registeredTools.get("Domain-Search")!.handler
     // Save mode, single company, not consented → the per-email gate still belongs.
     const result = await dsHandler({ domain: "a.com", save_leads: true })
-    const next = (
-      result.structuredContent as { nextAction: { tool: string; requiresConfirmation?: boolean } }
-    ).nextAction
+    const next = (result.structuredContent as { nextAction: { tool: string; requiresConfirmation?: boolean } })
+      .nextAction
     expect(next.tool).toBe("Email-Verifier")
     expect(next.requiresConfirmation).toBe(true)
     const emails = (result.structuredContent as { data: { emails: { verification_source: string }[] } }).data.emails
@@ -1168,7 +1161,9 @@ describe("HUN-20651: Domain-Search conditional-verify routing + verification_sou
             JSON.stringify({
               data: {
                 domain: "a.com",
-                emails: [{ value: "user@a.com", confidence: 95, verification: { status: "valid", date: "2026-06-01" } }],
+                emails: [
+                  { value: "user@a.com", confidence: 95, verification: { status: "valid", date: "2026-06-01" } },
+                ],
               },
             }),
           ),
@@ -1397,7 +1392,9 @@ describe("HUN-20651 Phase 2: research-mode terminal routing", () => {
             JSON.stringify({
               data: {
                 domain,
-                emails: [{ value: `user@${domain}`, confidence: 97, verification: { status: "valid", date: "2026-06-01" } }],
+                emails: [
+                  { value: `user@${domain}`, confidence: 97, verification: { status: "valid", date: "2026-06-01" } },
+                ],
               },
             }),
           ),
@@ -1417,7 +1414,12 @@ describe("HUN-20651 Phase 2: research-mode terminal routing", () => {
           kind: string
           tool: string
           requiresConfirmation?: boolean
-          suggestedArgs: { domain: string; pending_companies: string[]; confirmed_credit_use?: boolean; save_leads?: boolean }
+          suggestedArgs: {
+            domain: string
+            pending_companies: string[]
+            confirmed_credit_use?: boolean
+            save_leads?: boolean
+          }
         }
       }
     ).nextAction
@@ -1465,7 +1467,9 @@ describe("HUN-20651 Phase 2: research-mode terminal routing", () => {
     const dsHandler = registeredTools.get("Domain-Search")!.handler
     const result = await dsHandler({ domain: "a.com" }) // no save_leads, no pending → single-company research
     const next = (
-      result.structuredContent as { nextAction: { kind: string; tool?: string; requiresConfirmation?: boolean; summary?: string } }
+      result.structuredContent as {
+        nextAction: { kind: string; tool?: string; requiresConfirmation?: boolean; summary?: string }
+      }
     ).nextAction
     expect(next.kind).toBe("complete")
     expect(next.tool).toBeUndefined()
@@ -1708,7 +1712,10 @@ describe("HUN-20651 review fix H: empty pending_companies save is not an ungated
       text: () =>
         Promise.resolve(
           JSON.stringify({
-            data: { domain: "a.com", emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }] },
+            data: {
+              domain: "a.com",
+              emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }],
+            },
           }),
         ),
     })
@@ -1881,8 +1888,9 @@ describe("HUN-20651 review fix K: Email-Verifier honors research-vs-save mode", 
       pending_companies: ["b.com", "c.com"],
       confirmed_credit_use: true,
     })
-    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; suggestedArgs?: { domain?: string } } })
-      .nextAction
+    const next = (
+      result.structuredContent as { nextAction: { kind: string; tool?: string; suggestedArgs?: { domain?: string } } }
+    ).nextAction
     expect(next.kind).toBe("call_tool")
     expect(next.tool).toBe("Domain-Search")
     expect(next.tool).not.toBe("Create-Lead-If-Missing")
@@ -1893,7 +1901,8 @@ describe("HUN-20651 review fix K: Email-Verifier honors research-vs-save mode", 
     stubValid("user@a.com")
     const evHandler = registeredTools.get("Email-Verifier")!.handler
     const result = await evHandler({ email: "user@a.com", pending_companies: [], confirmed_credit_use: true })
-    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } }).nextAction
+    const next = (result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string } })
+      .nextAction
     expect(next.kind).toBe("complete")
     expect(next.tool).toBeUndefined()
     expect(next.summary).toMatch(/table/i)
@@ -2009,7 +2018,10 @@ describe("HUN-20651 review fix L: direct bulk Create-Lead-If-Missing gates witho
       confirmed_save_use: true,
     })
     expect(fetchMock).toHaveBeenCalledTimes(2) // exist + POST
-    const structured = result.structuredContent as { kind?: string; nextAction: { tool?: string; suggestedArgs?: { domain?: string } } }
+    const structured = result.structuredContent as {
+      kind?: string
+      nextAction: { tool?: string; suggestedArgs?: { domain?: string } }
+    }
     expect(structured.kind).not.toBe("approval_required")
     expect(structured.nextAction.tool).toBe("Domain-Search")
     expect(structured.nextAction.suggestedArgs?.domain).toBe("b.com")
@@ -2134,7 +2146,9 @@ describe("HUN-20651 review fix M: leads_list_id threads through the loop into Cr
       confirmed_save_use: true,
       leads_list_id: 555,
     })
-    const dsNext = (dsResult.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    const dsNext = (
+      dsResult.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }
+    ).nextAction
     expect(dsNext.tool).toBe("Email-Verifier")
     expect(dsNext.suggestedArgs.leads_list_id).toBe(555)
   })
@@ -2155,7 +2169,9 @@ describe("HUN-20651 review fix M: leads_list_id threads through the loop into Cr
       confirmed_save_use: true,
       leads_list_id: 555,
     })
-    const next = (result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    const next = (
+      result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }
+    ).nextAction
     expect(next.tool).toBe("Create-Lead-If-Missing")
     expect(next.suggestedArgs.leads_list_id).toBe(555)
   })
@@ -2185,7 +2201,9 @@ describe("HUN-20651 review fix M: leads_list_id threads through the loop into Cr
     expect(postCall).toBeDefined()
     expect(String((postCall?.[1] as { body?: string } | undefined)?.body)).toContain("leads_list_id=555")
     // The next Domain-Search hop carries leads_list_id forward.
-    const next = (result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }).nextAction
+    const next = (
+      result.structuredContent as { nextAction: { tool: string; suggestedArgs: { leads_list_id?: number } } }
+    ).nextAction
     expect(next.tool).toBe("Domain-Search")
     expect(next.suggestedArgs.leads_list_id).toBe(555)
   })
@@ -2198,7 +2216,10 @@ describe("HUN-20651 review fix M: leads_list_id threads through the loop into Cr
         text: () =>
           Promise.resolve(
             JSON.stringify({
-              data: { domain: "a.com", emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }] },
+              data: {
+                domain: "a.com",
+                emails: [{ value: "user@a.com", confidence: 97, verification: { status: "valid" } }],
+              },
             }),
           ),
       }),
@@ -2247,7 +2268,11 @@ describe("HUN-20651 P/Q/R/S: single-company save path carries save_leads + leads
     const result = await dsHandler({ domain: "a.com", save_leads: true })
     const next = (
       result.structuredContent as {
-        nextAction: { tool: string; requiresConfirmation?: boolean; suggestedArgs: { email: string; save_leads?: boolean; leads_list_id?: number } }
+        nextAction: {
+          tool: string
+          requiresConfirmation?: boolean
+          suggestedArgs: { email: string; save_leads?: boolean; leads_list_id?: number }
+        }
       }
     ).nextAction
     expect(next.tool).toBe("Email-Verifier")
@@ -2282,7 +2307,11 @@ describe("HUN-20651 P/Q/R/S: single-company save path carries save_leads + leads
     const result = await dsHandler({ domain: "a.com", save_leads: true, leads_list_id: 555 })
     const next = (
       result.structuredContent as {
-        nextAction: { tool: string; requiresConfirmation?: boolean; suggestedArgs: { email: string; leads_list_id?: number } }
+        nextAction: {
+          tool: string
+          requiresConfirmation?: boolean
+          suggestedArgs: { email: string; leads_list_id?: number }
+        }
       }
     ).nextAction
     expect(next.tool).toBe("Create-Lead-If-Missing")
@@ -2306,7 +2335,9 @@ describe("HUN-20651 P/Q/R/S: single-company save path carries save_leads + leads
     const evHandler = registeredTools.get("Email-Verifier")!.handler
     const result = await evHandler({ email: "user@a.com", save_leads: true, leads_list_id: 555 })
     const next = (
-      result.structuredContent as { nextAction: { kind: string; tool?: string; suggestedArgs?: { leads_list_id?: number } } }
+      result.structuredContent as {
+        nextAction: { kind: string; tool?: string; suggestedArgs?: { leads_list_id?: number } }
+      }
     ).nextAction
     expect(next.kind).toBe("call_tool")
     expect(next.tool).toBe("Create-Lead-If-Missing")
@@ -2321,7 +2352,9 @@ describe("HUN-20651 P/Q/R/S: single-company save path carries save_leads + leads
     const dsHandler = registeredTools.get("Domain-Search")!.handler
     const result = await dsHandler({ domain: "a.com", leads_list_id: 555 })
     const next = (
-      result.structuredContent as { nextAction: { kind: string; tool?: string; summary?: string; requiresConfirmation?: boolean } }
+      result.structuredContent as {
+        nextAction: { kind: string; tool?: string; summary?: string; requiresConfirmation?: boolean }
+      }
     ).nextAction
     expect(next.kind).toBe("complete")
     expect(next.tool).toBeUndefined()
@@ -2355,9 +2388,7 @@ describe("HUN-20651 review fix N: approval_required envelope conforms to the pub
     // The success + ack + error envelopes still validate (no regression).
     expect(() => schema.parse({ data: { status: "valid", email: "a@b.com", score: 90 } })).not.toThrow()
     expect(() => schema.parse({ kind: "ack", ok: true, status: 202, message: "Accepted." })).not.toThrow()
-    expect(() =>
-      schema.parse({ error: { code: "upstream_error", retryable: true, message: "boom" } }),
-    ).not.toThrow()
+    expect(() => schema.parse({ error: { code: "upstream_error", retryable: true, message: "boom" } })).not.toThrow()
 
     // End-to-end: a direct bulk EV without consent emits a conforming envelope.
     const gateFetch = vi.fn()
@@ -2381,9 +2412,7 @@ describe("HUN-20651 review fix N: approval_required envelope conforms to the pub
     // Success (create + alreadyExisted) + ack + error envelopes still validate.
     expect(() => schema.parse({ data: { id: 1, email: "a@b.com" } })).not.toThrow()
     expect(() => schema.parse({ data: { id: 1, email: "a@b.com", alreadyExisted: true } })).not.toThrow()
-    expect(() =>
-      schema.parse({ error: { code: "not_found", retryable: false, message: "nope" } }),
-    ).not.toThrow()
+    expect(() => schema.parse({ error: { code: "not_found", retryable: false, message: "nope" } })).not.toThrow()
 
     // End-to-end: a direct bulk CLIM without consent emits a conforming envelope.
     const gateFetch = vi.fn()
@@ -6073,7 +6102,9 @@ describe("HUN-20651 Phase 2.5/3: prospecting capture + enrichment guardrail dire
 
   it("enrichment guardrail redirects to Domain-Search / Email-Finder and says enrichment never returns new emails", async () => {
     const directives = await prospectDirectives()
-    const guardrail = directives.find((d) => d.includes("never return new email") || d.includes("never returns new email"))
+    const guardrail = directives.find(
+      (d) => d.includes("never return new email") || d.includes("never returns new email"),
+    )
     expect(guardrail).toBeDefined()
     expect(guardrail).toContain("Domain-Search")
     expect(guardrail).toContain("Email-Finder")
