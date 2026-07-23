@@ -18,6 +18,7 @@ import {
   pendingCompaniesSchema,
   requireBulkConsent,
   sanitizeUpstreamMessage,
+  stripResponseFields,
 } from "../helpers"
 import {
   approvalRequiredShape,
@@ -403,12 +404,19 @@ function annotateVerificationSource(
   }
 }
 
+// The found-only endpoint (`/domain-search/found`) inherits the Domain Search
+// JSON view, which still emits `data.pattern` — the domain's email-generation
+// template (e.g. "{first}.{last}"). That is exactly the pattern-analysis artifact
+// the found-only surface must never expose (HUN-21313 / Codex review), so strip
+// it from the response before returning. Nothing in the flow reads `pattern`.
+const DOMAIN_SEARCH_FOUND_STRIP_FIELDS = new Set(["pattern"])
+
 export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
     TOOL_NAMES.domainSearch,
     {
       description:
-        "Use this when the user wants the contacts published for a domain — emails with names, positions, and confidence scores. Optional filters: type, seniority, department, required field. Uses Hunter credits: 1 credit per 10 emails returned (rounded up), charged only when emails are found. Do not use this for personal/webmail domains (gmail.com, yahoo.com, etc.) — results will be empty.",
+        "Use this when the user wants the contacts published for a domain — emails with names, positions, and confidence scores. Returns only found (published) email addresses that Hunter has seen on the public web — never pattern-generated or inferred addresses. Optional filters: type, seniority, department, required field. Uses Hunter credits: 1 credit per 10 emails returned (rounded up), charged only when emails are found. Do not use this for personal/webmail domains (gmail.com, yahoo.com, etc.) — results will be empty.",
       inputSchema: {
         domain: domainStringSchema.describe("Domain name to find data for"),
         limit: z.number().optional().describe("Maximum number of email addresses to return"),
@@ -547,13 +555,21 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       if (seniority) params.seniority = seniority
       if (department) params.department = department
       if (required_field) params.required_field = required_field
-      const result = await callHunterApi({ path: "/domain-search", apiKey, baseUrl, params })
+      // Found-only endpoint (HUN-21313): the ChatGPT app must never surface
+      // pattern-generated/inferred addresses, so it hits the found-only variant
+      // (forces source_type=found server-side, ignores caller input) rather than
+      // /domain-search. Same request/response shape, billing, and rate limit —
+      // only the data is constrained. Claude's remote-mcp keeps full-fidelity
+      // Domain-Search and adds a separate Domain-Search-Found tool instead.
+      let result = await callHunterApi({ path: "/domain-search/found", apiKey, baseUrl, params })
       if (result.isError) {
         if (cleanedPending !== undefined && cleanedPending.length > 0) {
           return loopRecoveryAction(result, cleanedPending, `Hunter API error on ${domain}`)
         }
         return result
       }
+      // Never expose the email-generation pattern on the found-only surface.
+      result = stripResponseFields(result, DOMAIN_SEARCH_FOUND_STRIP_FIELDS)
 
       const dsData = parseHunterApiData<DomainSearchData>(result)
       const domainAcceptAll = dsData?.accept_all === true

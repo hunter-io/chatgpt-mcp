@@ -42,8 +42,8 @@ If the user gives a title that doesn't map cleanly (e.g., "Growth Hacker", "Deve
 Domain-Search returns each email with a \`confidence\` field (0-100). Treat:
 
 - **≥90:** Verified or highly likely deliverable. Use directly.
-- **70-89:** Pattern-matched but unverified. **Run \`Email-Verifier\` before saving** if the user wants to send to it.
-- **<70:** Inferred / lower confidence. Surface it but flag the user to manually confirm.
+- **70-89:** Medium confidence, unverified. **Run \`Email-Verifier\` before saving** if the user wants to send to it.
+- **<70:** Lower confidence. Surface it but flag the user to manually confirm.
 
 ## When to use \`Email-Finder\` vs \`Domain-Search\`
 

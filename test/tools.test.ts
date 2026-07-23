@@ -846,6 +846,74 @@ describe("HUN-20170-v3: Domain-Search confirmed_credit_use server-side guard", (
   })
 })
 
+// HUN-21313: the ChatGPT app must never surface pattern-generated/inferred
+// addresses, so Domain-Search hits the found-only endpoint structurally — no
+// caller input can steer it back to the generated-capable path.
+describe("HUN-21313: Domain-Search is found-only", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("Domain-Search calls the found-only endpoint, never /domain-search", async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [] } })),
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    await dsHandler({ domain: "a.com" })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const calledUrl = String(fetchSpy.mock.calls[0]![0])
+    expect(calledUrl).toContain("/domain-search/found")
+    // Must never hit the generated-capable endpoint.
+    expect(calledUrl).not.toContain("/domain-search?")
+    expect(calledUrl).toContain("domain=a.com")
+  })
+
+  // The found-only call is unconditional and precedes all mode branching, so the
+  // multi-company loop path must hit /domain-search/found too — guards against a
+  // future conditional regression routing one mode back to the generated endpoint.
+  it("Domain-Search hits the found-only endpoint on the multi-company loop path too", async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ data: { domain: "a.com", emails: [] } })),
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    // pending_companies + confirmed_credit_use bypasses the consent guard and
+    // enters the multi-company loop branch.
+    await dsHandler({ domain: "a.com", pending_companies: ["b.com"], confirmed_credit_use: true })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const calledUrl = String(fetchSpy.mock.calls[0]![0])
+    expect(calledUrl).toContain("/domain-search/found")
+    expect(calledUrl).not.toContain("/domain-search?")
+  })
+
+  // The found-only endpoint inherits the Domain Search view, which still emits
+  // data.pattern (the email-generation template). Strip it so the ChatGPT
+  // surface never exposes pattern-generation data (Codex review).
+  it("strips data.pattern from the found-only response", async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            data: { domain: "a.com", pattern: "{first}.{last}", emails: [{ value: "jane@a.com", type: "personal" }] },
+          }),
+        ),
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const dsHandler = registeredTools.get("Domain-Search")!.handler
+    const res = await dsHandler({ domain: "a.com" })
+    const data = (res.structuredContent as { data?: Record<string, unknown> }).data
+    expect(data).toBeDefined()
+    expect(data).not.toHaveProperty("pattern")
+    // Not in the user-visible JSON channel either.
+    expect(JSON.stringify(res)).not.toContain("{first}.{last}")
+  })
+})
+
 // HUN-20651 Phase 1: conditional verification. `shouldVerify` is the
 // deterministic server-side predicate; the Domain-Search handler routes past
 // Email-Verifier straight to the create-only save terminal when it returns false.
@@ -3248,7 +3316,11 @@ describe("Pause-Sequence (Group 03)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/pause", {
       method: "POST",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      headers: {
+        "X-SOURCE": "hunter-chatgpt",
+        Authorization: "Bearer test-api-key",
+        "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
+      },
       body: undefined,
     })
   })
@@ -3518,7 +3590,11 @@ describe("Archive-Sequence (Group 05)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/archive", {
       method: "POST",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      headers: {
+        "X-SOURCE": "hunter-chatgpt",
+        Authorization: "Bearer test-api-key",
+        "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
+      },
       body: undefined,
     })
   })
@@ -4545,7 +4621,11 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7/favorite", {
       method: "POST",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      headers: {
+        "X-SOURCE": "hunter-chatgpt",
+        Authorization: "Bearer test-api-key",
+        "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
+      },
       body: undefined,
     })
     expect(result.isError).toBeUndefined()

@@ -229,6 +229,8 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | S3 | `Email-Count` | `How many email addresses does Hunter have for stripe.com?` | Returns total + personal/generic split. Free, no credits | ☐ | |
 | S4 | `Domain-Search` (filtered) | `List the engineering leads at stripe.com — only senior or executive` | Calls `Domain-Search` with `domain=stripe.com`, `department=it`, `seniority=senior,executive` | ☐ | |
 
+> **Found-only (HUN-21313):** on the ChatGPT app, `Domain-Search` hits the found-only endpoint (`/v2/domain-search/found`) — it returns only published (found) addresses and never pattern-generated/inferred ones. There is intentionally **no** separate `Domain-Search-Found` tool to test here; that tool exists only on the Claude connector (`remote-mcp`), where the full-fidelity `Domain-Search` is kept and the found-only variant is added alongside it. Nothing to verify in the ChatGPT app beyond S4 returning found data.
+
 ### Enrichment
 
 | # | Tool | Prompt | Expected | Pass | Notes |

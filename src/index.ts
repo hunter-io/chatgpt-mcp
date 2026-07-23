@@ -136,6 +136,11 @@ import { registerSequenceTools } from "./tools/sequences"
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer({
     name: "Hunter ChatGPT",
+    // Kept at 3.0.0 deliberately (HUN-21313): the ChatGPT app version is bumped as
+    // part of a coordinated OpenAI resubmission, not per dev PR (3.0.0 is the version
+    // tied to the current review). The found-only Domain-Search behavior holds for
+    // every client regardless of the cached tools/list version; only the refreshed
+    // description text waits for that deliberate resubmission bump.
     version: "3.0.0",
   })
 
