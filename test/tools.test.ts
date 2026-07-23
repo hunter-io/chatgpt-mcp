@@ -5561,6 +5561,47 @@ describe("HUN-20170-v3: credential scrub + injected-fields case-insensitive + su
   })
 })
 
+describe("HUN-21347: Email-Finder uses found-only results", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("uses the found-only endpoint and describes inferred matches as not found", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            data: {
+              email: "jane@example.com",
+              score: 95,
+              domain: "example.com",
+              sources: [{ uri: "https://example.com/team" }],
+              verification: { date: null, status: null },
+            },
+          }),
+        ),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const tool = registeredTools.get("Email-Finder")!
+    const result = await tool.handler({ full_name: "Jane Doe", domain: "example.com" })
+
+    expect(result.isError).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const requestUrl = new URL(fetchMock.mock.calls[0]![0] as string)
+    expect(requestUrl.pathname).toBe("/v2/email-finder/found")
+    expect(requestUrl.searchParams.get("full_name")).toBe("Jane Doe")
+    expect(requestUrl.searchParams.get("domain")).toBe("example.com")
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: "Bearer test-api-key" }),
+    })
+    expect(tool.description).toMatch(/found .*public/i)
+    expect(tool.description).toMatch(/inferred.*not found/i)
+  })
+})
+
 // HUN-20170: slash prompts must route save flows through the non-destructive
 // Create-Lead-If-Missing tool, not the now-PRIVATE_DESTRUCTIVE Create-Or-
 // Update-Lead. Otherwise the slash-command UX fires a per-recipient host

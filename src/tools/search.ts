@@ -746,7 +746,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailFinder,
     {
       description:
-        "Use this when the user wants a specific person's email address at a company. Provide the person's full name and the company's domain. Uses Hunter credits, charged only when an email is found. Do not use this when the user already has the email and only wants to confirm it works — call Email-Verifier instead.",
+        "Use this when the user wants a specific person's email address at a company. Provide the person's full name and the company's domain. Returns only found addresses backed by public sources; when Hunter has only an inferred address, it returns not found. Uses Hunter credits, charged only when an email is found. Do not use this when the user already has the email and only wants to confirm it works — call Email-Verifier instead.",
       inputSchema: {
         full_name: z.string().min(1).max(200).describe("Full name of the person to find the email address for"),
         domain: domainStringSchema.describe("Domain name to find the person's email address for"),
@@ -755,7 +755,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Find Person Email" },
     },
     async ({ full_name, domain }) => {
-      return callHunterApi({ path: "/email-finder", apiKey, baseUrl, params: { full_name, domain } })
+      return callHunterApi({ path: "/email-finder/found", apiKey, baseUrl, params: { full_name, domain } })
     },
   )
 
