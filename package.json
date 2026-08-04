@@ -21,7 +21,7 @@
 		"build:widgets:discover": "WIDGET_ENTRY=discover-widget vite build"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@openai/apps-sdk-ui": "^0.2.2",
 		"@sentry/cloudflare": "^10.68.0",
 		"fs-extra": "^11.4.0",
@@ -31,12 +31,12 @@
 	},
 	"devDependencies": {
 		"@tailwindcss/vite": "^4.3.3",
-		"@types/node": "^26.1.1",
+		"@types/node": "^26.1.2",
 		"@types/react": "^19.2.17",
 		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.4",
-		"oxfmt": "^0.60.0",
-		"oxlint": "^1.75.0",
+		"oxfmt": "^0.61.0",
+		"oxlint": "^1.76.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2",
 		"vite": "^8.1.5",
