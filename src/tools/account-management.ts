@@ -31,8 +31,11 @@ import { buildResponseSchema, nullableString, paginationMetaSchema } from "../sc
 // verify], app/app/models/call.rb), keyed by
 // `pretty_request_type(quota).pluralize` — "searches" and "verifications"
 // (app/app/helpers/subscriptions_helper.rb maps :verify → "verification").
-// Teams on a single-credits-bucket plan additionally get a `credits` bucket
-// with `remaining`. Credit values can be FRACTIONAL — `remaining` comes from
+// Each search/verify bucket also reports `remaining`, the live balance
+// (HUN-21880): `available` is the gross period allowance plus extra packs and
+// does NOT decrease as the base quota is spent, so `remaining` is the value to
+// pace work against. Teams on a single-credits-bucket plan additionally get a
+// `credits` bucket with `remaining`. Credit values can be FRACTIONAL — `remaining` comes from
 // Team#last_period_credits_remaining (a float, app/app/models/team/usages.rb)
 // — so bucket values are deliberately NOT constrained to integers.
 // `over_quota` appears on each bucket only when the team is shown overage
@@ -42,6 +45,7 @@ import { buildResponseSchema, nullableString, paginationMetaSchema } from "../sc
 const usageBucketSchema = z.object({
   used: z.number().nonnegative(),
   available: z.number().nonnegative(),
+  remaining: z.number().nonnegative().optional(),
   over_quota: z.number().nonnegative().optional(),
 })
 
@@ -144,7 +148,7 @@ export function registerAccountManagementTools(server: McpServer, apiKey: string
     TOOL_NAMES.getUsage,
     {
       description:
-        "Use this when the user wants to know how many Hunter credits or requests they have left in the current billing period — and proactively BEFORE any large credit-consuming action (a Domain-Search loop over many companies, bulk email verification, bulk enrichment): check the remaining quota first and warn the user when the planned work would exceed it. Reports per-bucket usage — `searches` and `verifications`, plus a `credits` summary (with `remaining`) on plans with a single credits bucket — each with `used` and `available`, and `reset_date` (the day the quota resets, i.e. the end of the current billing period). Reading usage consumes no credits and no requests. Free to call.",
+        "Use this when the user wants to know how many Hunter credits or requests they have left in the current billing period — and proactively BEFORE any large credit-consuming action (a Domain-Search loop over many companies, bulk email verification, bulk enrichment): check the remaining quota first and warn the user when the planned work would exceed it. Reports per-bucket usage — `searches` and `verifications`, plus a `credits` summary on plans with a single credits bucket — each with `used`, `available`, and `remaining`, and `reset_date` (the day the quota resets, i.e. the end of the current billing period). Reading usage consumes no credits and no requests. Free to call.",
       inputSchema: {},
       outputSchema: getUsageOutputSchema.shape,
       annotations: PRIVATE_READ_ANNOTATIONS,
