@@ -311,7 +311,7 @@ const sequenceScheduleSchema = z.object({
   // when the sequence inherits the owner's default sending window.
   time_start: nullableString(),
   time_end: nullableString(),
-  // Days of week as integers 0 (Sunday) .. 6 (Saturday). The backing column
+  // Days of week as integers 0 (Monday) .. 6 (Sunday). The backing column
   // is a nullable integer[] (db/structure.sql), so admit null.
   days: z.union([z.array(z.number().int()), z.null()]),
 })
@@ -455,7 +455,9 @@ const sequenceWriteFields = {
     .array(z.number().int().min(0).max(6))
     .min(1)
     .optional()
-    .describe("Days of the week the sequence may send, as integers 0 (Sunday) through 6 (Saturday)"),
+    .describe(
+      "Days of the week the sequence may send, as integers 0 (Monday) through 6 (Sunday); a Monday-Friday schedule is [0, 1, 2, 3, 4]",
+    ),
   schedule_time_start: z
     .number()
     .int()
@@ -687,7 +689,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSequence,
     {
       description:
-        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Sunday..6=Saturday), the `settings` (open tracking, link tracking, unsubscribe link, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, and the `owner`. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, and the `owner`. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to fetch"),
       },
@@ -714,7 +716,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.createSequence,
     {
       description:
-        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Sunday..6=Saturday), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, and tracking toggles (`tracked_links` requires a premium plan). The introduction email (step 0) is created automatically with an empty subject and body, and the v2 API has no endpoint to fill it in yet — its subject and body currently must be edited in the Hunter dashboard, so a sequence created purely through the API cannot be started until step 0 is authored there (Start-Sequence fails validation while step 0 is blank). Typical next steps: open the sequence in the Hunter dashboard to write the introduction email, author any follow-up steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Free to call.",
+        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Monday..6=Sunday; a Monday-Friday schedule is [0, 1, 2, 3, 4], not [1, 2, 3, 4, 5]), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, and tracking toggles (`tracked_links` requires a premium plan). The introduction email (step 0) is created automatically with an empty subject and body, and the v2 API has no endpoint to fill it in yet — its subject and body currently must be edited in the Hunter dashboard, so a sequence created purely through the API cannot be started until step 0 is authored there (Start-Sequence fails validation while step 0 is blank). Typical next steps: open the sequence in the Hunter dashboard to write the introduction email, author any follow-up steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Free to call.",
       inputSchema: {
         name: z.string().min(1).describe("Name of the new sequence (required; must not be blank)"),
         ...sequenceWriteFields,
