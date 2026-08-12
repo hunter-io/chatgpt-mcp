@@ -307,8 +307,8 @@ describe("List-Sequences (enriched)", () => {
 describe("List-Sequence-Recipients recipient shape", () => {
   // Grounded in app/app/views/api/campaigns/recipients/index.jbuilder: the
   // per-recipient item is exactly email, first_name, last_name, position,
-  // company, website, sending_status, and lead_id (raw nullable column) — no
-  // `id` and no `status` field.
+  // company, website, sending_status, sending_status_comment, and lead_id (raw
+  // nullable column) — no `id` and no `status` field.
   it("published output schema accepts a real recipients/index.jbuilder item", () => {
     const schema = publishedOutputSchema(tool("List-Sequence-Recipients").outputSchema!)
     expect(
@@ -323,10 +323,51 @@ describe("List-Sequence-Recipients recipient shape", () => {
               company: "Acme",
               website: "acme.com",
               sending_status: "pending",
+              sending_status_comment: null,
               lead_id: null,
             },
           ],
         },
+        meta: { limit: 20, offset: 0 },
+      }).success,
+    ).toBe(true)
+  })
+
+  // Pins the declared shape only — the schema does not filter at runtime, so what actually
+  // ships is covered by the Rails request test.
+  it("retains sending_status_comment on a deleted-lead recipient", () => {
+    const schema = publishedOutputSchema(tool("List-Sequence-Recipients").outputSchema!)
+    const reason = "The lead associated with that recipient has been deleted."
+    const parsed = schema.safeParse({
+      data: {
+        recipients: [
+          {
+            email: "jane@acme.com",
+            first_name: "Jane",
+            last_name: "Doe",
+            position: "CTO",
+            company: "Acme",
+            website: "acme.com",
+            sending_status: "canceled",
+            sending_status_comment: reason,
+            lead_id: null,
+          },
+        ],
+      },
+      meta: { limit: 20, offset: 0 },
+    })
+
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toMatchObject({
+      data: { recipients: [{ sending_status_comment: reason, lead_id: null }] },
+    })
+  })
+
+  it("still accepts a payload from an API that has not deployed the field yet", () => {
+    const schema = publishedOutputSchema(tool("List-Sequence-Recipients").outputSchema!)
+    expect(
+      schema.safeParse({
+        data: { recipients: [{ email: "jane@acme.com", sending_status: "pending", lead_id: 7 }] },
         meta: { limit: 20, offset: 0 },
       }).success,
     ).toBe(true)

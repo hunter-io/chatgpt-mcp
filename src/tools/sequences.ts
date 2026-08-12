@@ -75,14 +75,16 @@ const sequenceSchema = z
   })
   .loose()
 
-// Recipient PII categories are disclosed in the OpenAI dashboard data form.
-// The declared set matches app/app/views/api/campaigns/recipients/index.jbuilder
-// EXACTLY: email, first_name, last_name, position, company, website,
-// sending_status, and lead_id (raw nullable column) — the jbuilder emits no
-// `id` or `status` field. Schema uses Zod's default strip-on-parse behavior:
-// any new field Hunter adds to the jbuilder is silently dropped at parse time
-// and never reaches the model. Adding a new recipient field to the surface
-// requires a deliberate schema bump here + disclosure update.
+// Recipient PII categories are disclosed in the OpenAI dashboard data form. Matches
+// app/app/views/api/campaigns/recipients/index.jbuilder exactly; no `id` or `status`.
+//
+// This schema does not filter. It validates and publishes the JSON Schema, but
+// callHunterApi returns the raw envelope, so a field Rails adds and this schema omits
+// still reaches the model. The real gate is server-side.
+//
+// A null `lead_id` is normal, and a non-null one can be stale (HUN-20232).
+// `sending_status_comment` is only ever a cancellation reason -- send-error text is
+// never published. Both fields carry .describe(), so the model sees this too.
 const recipientSchema = z.object({
   email: z.string(),
   first_name: nullableString().optional(),
@@ -91,7 +93,17 @@ const recipientSchema = z.object({
   company: nullableString().optional(),
   website: nullableString().optional(),
   sending_status: nullableString().optional(),
-  lead_id: z.union([z.number().int().positive(), z.null()]).optional(),
+  sending_status_comment: nullableString()
+    .optional()
+    .describe(
+      "Why sending was canceled, when a reason was recorded. Often null, including for send failures. Not a way to tell the lead_id null causes apart.",
+    ),
+  lead_id: z
+    .union([z.number().int().positive(), z.null()])
+    .optional()
+    .describe(
+      "Hunter lead this recipient is linked to. Null is normal, not corruption, and a non-null id can point at a deleted lead. Identify the recipient by email, which is unique within the sequence, and treat a lead you cannot fetch as gone.",
+    ),
 })
 
 const listSequencesDataSchema = z.object({ sequences: z.array(sequenceSchema) }).loose()
