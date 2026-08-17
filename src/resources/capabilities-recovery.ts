@@ -13,7 +13,7 @@ This resource documents how to translate ambiguous user intent into precise Hunt
 
 ## Translating job titles → \`department\` + \`seniority\`
 
-Hunter's \`domain_search\` accepts \`seniority\` ∈ \`{junior, senior, executive}\` and \`department\` ∈ \`{executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations}\`. Common ambiguous user phrasings translate as:
+Hunter's \`domain_search\` accepts \`seniority\` ∈ \`{junior, senior, executive}\` and \`department\` ∈ \`{executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations, product, research, consulting, administrative, procurement}\`. Common ambiguous user phrasings translate as:
 
 | User says | \`department\` | \`seniority\` |
 |---|---|---|

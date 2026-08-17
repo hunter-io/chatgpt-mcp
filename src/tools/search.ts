@@ -432,7 +432,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .string()
           .optional()
           .describe(
-            "Filter by department. Values: executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations. Supports comma-separated multi-values (e.g. 'sales,marketing')",
+            "Filter by department. Values: executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations, product, research, consulting, administrative, procurement. Supports comma-separated multi-values (e.g. 'sales,marketing')",
           ),
         required_field: z
           .enum(["full_name", "position", "phone_number"])
