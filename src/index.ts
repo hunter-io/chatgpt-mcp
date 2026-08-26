@@ -18,6 +18,7 @@ import {
   withDeepLink,
 } from "./helpers"
 import { buildResponseSchema, nullableString, paginationMetaSchema } from "./schemas/common"
+import { stripDialectOnSend } from "./schema-dialect"
 
 // ─── Widget tool output schemas ──────────────────────────────────────────────
 //
@@ -141,6 +142,15 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     // tied to the current review). The found-only Domain-Search behavior holds for
     // every client regardless of the cached tools/list version; only the refreshed
     // description text waits for that deliberate resubmission bump.
+    //
+    // HUN-22545 rides the same hold, and the reasoning has to be redone rather
+    // than inherited: dropping the draft-07 $schema IS a tools/list-only change,
+    // so a client on a cached tool list keeps the old declaration. That is safe
+    // ONLY because the change removes no constraint — the cached schema and the
+    // live one are semantically identical, so validation reaches the same verdict
+    // either way. A change that alters a constraint (a new required field, a
+    // renamed property, a removed tool) needs a bump whatever the resubmission
+    // schedule says.
     version: "3.0.0",
   })
 
@@ -548,6 +558,15 @@ const handler = {
       }
       const server = createServer(apiKey || "", baseUrl)
       const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+      // The SDK publishes every tool schema with a draft-07 `$schema` that no
+      // Hunter code asks for — see schema-dialect.ts for why it is removed here
+      // rather than rewritten (HUN-22545). No `version` bump goes with this: the
+      // ChatGPT app version is tied to an OpenAI resubmission, not a dev PR.
+      stripDialectOnSend(transport, (error) => {
+        Sentry.captureException(error, {
+          tags: { worker: "chatgpt-mcp", route: "mcp", phase: "schema-dialect-strip" },
+        })
+      })
       await server.connect(transport)
       return addCorsHeaders(await transport.handleRequest(request), request)
     }

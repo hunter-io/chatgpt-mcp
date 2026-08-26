@@ -10,6 +10,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // `mock`-prefixed.)
 const mockHandleRequest = vi.fn()
 const mockTransportCtor = vi.fn()
+// The handler wraps `transport.send` to strip the SDK's draft-07 `$schema`
+// (HUN-22545), so the stand-in must carry a `send` like a real Transport does.
+const mockSend = vi.fn()
+const mockTransportInstances: { send: (message: unknown, options?: unknown) => Promise<void> }[] = []
 
 // Permissive McpServer mock: createServer registers many tools/resources, so
 // any method is a no-op and connect resolves. We only care about routing here.
@@ -26,8 +30,10 @@ vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
 vi.mock("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js", () => ({
   WebStandardStreamableHTTPServerTransport: class MockTransport {
     handleRequest = mockHandleRequest
+    send = mockSend
     constructor(opts: unknown) {
       mockTransportCtor(opts)
+      mockTransportInstances.push(this as unknown as { send: (message: unknown, options?: unknown) => Promise<void> })
     }
   },
 }))
@@ -69,5 +75,29 @@ describe("fetch handler /mcp method handling", () => {
     expect(mockTransportCtor).toHaveBeenCalledWith({ sessionIdGenerator: undefined })
     expect(mockHandleRequest).toHaveBeenCalled()
     expect(await res.text()).toBe("mcp ok")
+  })
+
+  it("installs the dialect strip on the transport it serves /mcp with", async () => {
+    // Proves the wiring, not the walker: schema-dialect.test.ts covers the strip
+    // itself against real SDK output. Without this, deleting the
+    // stripDialectOnSend call from src/index.ts leaves the whole suite green
+    // and the fix becomes dead code on this worker (HUN-22545).
+    mockTransportInstances.length = 0
+    await worker.fetch(mcpRequest("POST", { origin: "https://chatgpt.com" }), env, ctx)
+
+    const transport = mockTransportInstances.at(-1)
+    expect(transport).toBeDefined()
+
+    // Real options, not `undefined`: asserting against `undefined` would pin
+    // arity only and pass even if the wrapper dropped `options` entirely.
+    await transport?.send(
+      { result: { tools: [{ name: "T", inputSchema: { $schema: "draft-07", type: "object" } }] } },
+      { relatedRequestId: 7 },
+    )
+
+    expect(mockSend).toHaveBeenCalledWith(
+      { result: { tools: [{ name: "T", inputSchema: { type: "object" } }] } },
+      { relatedRequestId: 7 },
+    )
   })
 })
