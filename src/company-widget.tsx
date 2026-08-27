@@ -37,6 +37,7 @@ type CompanyData = {
   }
   metrics?: {
     employees?: string
+    employeesCount?: number
   }
   site?: {
     emailAddresses?: string[]
@@ -213,12 +214,12 @@ function App() {
               <TextLink href={`https://${company.domain}`} target="_blank">
                 {company.domain}
               </TextLink>
-              {(company.metrics?.employees || company.location) && " · "}
+              {(company.metrics?.employeesCount || company.metrics?.employees || company.location) && " · "}
             </>
           )}
-          {company.metrics?.employees && (
+          {(company.metrics?.employeesCount || company.metrics?.employees) && (
             <>
-              {company.metrics.employees} employees
+              {company.metrics.employeesCount ?? company.metrics.employees} employees
               {company.location && " · "}
             </>
           )}
