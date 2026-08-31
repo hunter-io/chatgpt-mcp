@@ -1,0 +1,652 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "generated_at": "2026-05-06T00:00:00Z",
+  "generator": {
+    "requested_skill": "$chatgpt-app-submission",
+    "execution_note": "The requested skill was not installed in this Codex environment, so this file was generated from repository inspection plus official Apps SDK submission guidance.",
+    "official_docs_used": [
+      "https://developers.openai.com/apps-sdk/deploy/submission",
+      "https://developers.openai.com/apps-sdk/app-submission-guidelines"
+    ]
+  },
+  "review_required_before_upload": true,
+  "app_info": {
+    "app_name": "Hunter",
+    "subtitle": "Find, verify, and manage B2B leads from ChatGPT.",
+    "short_description": "Hunter helps you find companies, discover professional email addresses, verify deliverability, enrich contacts and companies, save leads, and prepare campaign recipients directly from ChatGPT.",
+    "long_description": "Hunter brings Hunter.io's B2B prospecting workflows into ChatGPT. Users can describe the companies or contacts they want, discover matching companies, search domains for relevant contacts, verify email addresses, enrich people or companies, save leads and lead lists, and prepare recipients for existing Hunter campaigns. The app uses Hunter as the authoritative source for company, contact, verification, lead, and campaign data, and links users back to Hunter.io for account management, leads, lists, and campaign configuration.",
+    "category": "PRODUCTIVITY",
+    "secondary_categories": [
+      "Sales",
+      "Business"
+    ],
+    "keywords": [
+      "Hunter",
+      "Hunter.io",
+      "lead generation",
+      "prospecting",
+      "email finder",
+      "email verification",
+      "sales",
+      "B2B",
+      "CRM",
+      "campaigns"
+    ],
+    "developer_name": "Hunter",
+    "company_url": "https://hunter.io",
+    "support_url": "https://hunter.io/contact",
+    "privacy_policy_url": "https://hunter.io/privacy-policy",
+    "terms_url": "https://hunter.io/terms-of-service",
+    "logo_icon": {
+      "status": "manual_upload_required_or_already_uploaded",
+      "notes": "The submission UI screenshot shows a Hunter fox logo already uploaded. Ensure the final asset is a square PNG without added borders or rounded corners."
+    },
+    "dark_mode_icon": {
+      "status": "manual_upload_optional",
+      "notes": "If available, upload a dark-mode variant in the App Info step."
+    }
+  },
+  "mcp_server": {
+    "server_name": "Hunter ChatGPT",
+    "server_version": "2.0.0",
+    "runtime": "Cloudflare Workers with Durable Objects via wrangler",
+    "local_dev_command": "pnpm run dev",
+    "local_mcp_url": "http://localhost:8787/mcp",
+    "production_mcp_url": "TODO: confirm the public production MCP endpoint before submitting; do not use localhost or a tunnel for review.",
+    "authentication": {
+      "type": "api_key_or_oauth_via_deployment_props",
+      "notes": "The server expects a Hunter API key in MCP agent props and sends it to the Hunter API as a Bearer token. Confirm the production ChatGPT connection provides this securely and provide review-safe demo credentials if the public submission flow requires authentication."
+    },
+    "external_domains": {
+      "api_domains": [
+        "https://api.hunter.io",
+        "https://hunter.io"
+      ],
+      "widget_domain": "https://chatgpt.hunter.io",
+      "resource_domains": [
+        "https://*.oaistatic.com",
+        "https://*.hunter.io",
+        "https://hunter.io"
+      ],
+      "connect_domains": [
+        "https://chatgpt.com",
+        "https://hunter.io"
+      ]
+    },
+    "widgets": [
+      {
+        "name": "company-widget",
+        "resource_uri": "ui://widget/company-widget.html",
+        "mime_type": "text/html+skybridge",
+        "description": "Displays enriched company data in an interactive Hunter UI."
+      },
+      {
+        "name": "discover-widget",
+        "resource_uri": "ui://widget/discover-widget.html",
+        "mime_type": "text/html+skybridge",
+        "description": "Displays top company discovery results and links to see all results on Hunter."
+      }
+    ]
+  },
+  "tool_summary": {
+    "primary_user_flows": [
+      "Find companies matching a natural-language B2B prospecting brief.",
+      "Search a company domain for relevant contacts and professional email addresses.",
+      "Verify email deliverability before saving contacts or adding campaign recipients.",
+      "Enrich people and companies with Hunter data.",
+      "Create, update, and organize Hunter leads and leads lists.",
+      "Add or remove recipients from existing Hunter campaigns and start campaigns only after explicit user confirmation."
+    ],
+    "data_source_statement": "Hunter.io is the authoritative source for company, contact, email verification, lead, list, account, and campaign data returned by this app.",
+    "credit_disclosure": "Some Hunter API operations consume Hunter credits when data is found. The tool descriptions disclose expected credit costs for search, verification, and enrichment operations."
+  },
+  "tools": {
+    "Discover": {
+      "purpose": "Find companies matching a natural-language query and render the top results in the Discover widget.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads company discovery results from Hunter and does not modify Hunter resources. It calls an external Hunter service, so openWorldHint is true.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads company discovery results from Hunter and does not modify Hunter resources. It calls an external Hunter service, so openWorldHint is true.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads company discovery results from Hunter and does not modify Hunter resources. It calls an external Hunter service, so openWorldHint is true."
+      }
+    },
+    "Domain-Search": {
+      "purpose": "Return email addresses and contact data for a company domain, with filters for contact type, seniority, department, and required fields.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Retrieves Hunter contact data for an external domain. It does not create, update, or delete resources, but it queries Hunter's external API and may consume search credits according to Hunter's billing rules.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Retrieves Hunter contact data for an external domain. It does not create, update, or delete resources, but it queries Hunter's external API and may consume search credits according to Hunter's billing rules.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Retrieves Hunter contact data for an external domain. It does not create, update, or delete resources, but it queries Hunter's external API and may consume search credits according to Hunter's billing rules."
+      }
+    },
+    "Email-Finder": {
+      "purpose": "Find a specific person's professional email address at a company.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Looks up data from Hunter and does not change resources. It calls an external service and may consume search credits if an email is found.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Looks up data from Hunter and does not change resources. It calls an external service and may consume search credits if an email is found.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Looks up data from Hunter and does not change resources. It calls an external service and may consume search credits if an email is found."
+      }
+    },
+    "Email-Verifier": {
+      "purpose": "Check whether an email address appears deliverable and return Hunter verification status details.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Performs an external verification lookup without modifying Hunter lead resources. It may consume a verification credit.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Performs an external verification lookup without modifying Hunter lead resources. It may consume a verification credit.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Performs an external verification lookup without modifying Hunter lead resources. It may consume a verification credit."
+      }
+    },
+    "Email-Count": {
+      "purpose": "Count known email addresses for a domain, including personal and generic counts.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads aggregate counts from Hunter and does not modify resources.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads aggregate counts from Hunter and does not modify resources.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads aggregate counts from Hunter and does not modify resources."
+      }
+    },
+    "Person-Enrichment": {
+      "purpose": "Enrich a person from an email address with Hunter profile, company, social, location, and phone data where available.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found."
+      }
+    },
+    "Company-Enrichment": {
+      "purpose": "Enrich a company domain with industry, size, location, technologies, funding, and social profile data, rendered in the Company widget.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads company enrichment data from Hunter and does not modify resources. It may consume an enrichment credit if data is found.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads company enrichment data from Hunter and does not modify resources. It may consume an enrichment credit if data is found.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads company enrichment data from Hunter and does not modify resources. It may consume an enrichment credit if data is found."
+      }
+    },
+    "Combined-Enrichment": {
+      "purpose": "Enrich a person and their company in one request using an email address or LinkedIn handle.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads combined enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads combined enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads combined enrichment data from Hunter without modifying resources. It may consume an enrichment credit if data is found."
+      }
+    },
+    "Account": {
+      "purpose": "Return Hunter account details such as remaining credits, plan name, and team information.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads the authenticated user's Hunter account status and does not modify resources.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads the authenticated user's Hunter account status and does not modify resources.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads the authenticated user's Hunter account status and does not modify resources."
+      }
+    },
+    "List-Leads": {
+      "purpose": "List leads from the authenticated Hunter account, optionally filtered by list or pagination parameters.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Retrieves private Hunter lead records without changing them.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Retrieves private Hunter lead records without changing them.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Retrieves private Hunter lead records without changing them."
+      }
+    },
+    "Get-Lead": {
+      "purpose": "Retrieve a single Hunter lead by ID.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads a lead record and does not modify resources.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads a lead record and does not modify resources.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads a lead record and does not modify resources."
+      }
+    },
+    "Create-Lead": {
+      "purpose": "Create a new lead in the user's Hunter account.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Creates a Hunter lead, changing the user's Hunter account state.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Creates a Hunter lead, changing the user's Hunter account state.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Creates a Hunter lead, changing the user's Hunter account state."
+      }
+    },
+    "Update-Lead": {
+      "purpose": "Update an existing Hunter lead by ID.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Modifies an existing Hunter lead, changing account data.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Modifies an existing Hunter lead, changing account data.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Modifies an existing Hunter lead, changing account data."
+      }
+    },
+    "Delete-Lead": {
+      "purpose": "Delete a Hunter lead by ID.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Deletes lead data from the user's Hunter account and should require destructive-action caution.",
+        "destructive_justification": "destructiveHint is true because Deletes lead data from the user's Hunter account and should require destructive-action caution.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Deletes lead data from the user's Hunter account and should require destructive-action caution."
+      }
+    },
+    "Upsert-Lead": {
+      "purpose": "Create or update a Hunter lead by email address, avoiding duplicates when possible.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Creates or updates lead data in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Creates or updates lead data in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Creates or updates lead data in the user's Hunter account."
+      }
+    },
+    "Lead-Exists": {
+      "purpose": "Check whether a Hunter lead exists for a given email address.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads lead existence state without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads lead existence state without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads lead existence state without modification."
+      }
+    },
+    "Save-Company": {
+      "purpose": "Save a company domain as a lead/company record in Hunter.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Creates a saved company/lead entry in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Creates a saved company/lead entry in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Creates a saved company/lead entry in the user's Hunter account."
+      }
+    },
+    "List-Leads-Lists": {
+      "purpose": "List all Hunter leads lists in the authenticated account.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads leads list metadata without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads leads list metadata without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads leads list metadata without modification."
+      }
+    },
+    "Get-Leads-List": {
+      "purpose": "Retrieve a Hunter leads list by ID.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads a leads list without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads a leads list without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads a leads list without modification."
+      }
+    },
+    "Create-Leads-List": {
+      "purpose": "Create a new Hunter leads list.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Creates a new list in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Creates a new list in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Creates a new list in the user's Hunter account."
+      }
+    },
+    "Update-Leads-List": {
+      "purpose": "Rename an existing Hunter leads list.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Modifies leads list metadata in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Modifies leads list metadata in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Modifies leads list metadata in the user's Hunter account."
+      }
+    },
+    "Delete-Leads-List": {
+      "purpose": "Delete a Hunter leads list by ID.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Deletes a list from the user's Hunter account and should require destructive-action caution.",
+        "destructive_justification": "destructiveHint is true because Deletes a list from the user's Hunter account and should require destructive-action caution.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Deletes a list from the user's Hunter account and should require destructive-action caution."
+      }
+    },
+    "Merge-Leads-Lists": {
+      "purpose": "Merge one Hunter leads list into another.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Combines lists and removes or changes the source list organization, so it should be treated as destructive.",
+        "destructive_justification": "destructiveHint is true because Combines lists and removes or changes the source list organization, so it should be treated as destructive.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Combines lists and removes or changes the source list organization, so it should be treated as destructive."
+      }
+    },
+    "List-Custom-Attributes": {
+      "purpose": "List custom lead attributes in the user's Hunter account.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads custom attribute metadata without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads custom attribute metadata without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads custom attribute metadata without modification."
+      }
+    },
+    "Get-Custom-Attribute": {
+      "purpose": "Retrieve a single Hunter lead custom attribute by ID.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads custom attribute metadata without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads custom attribute metadata without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads custom attribute metadata without modification."
+      }
+    },
+    "Create-Custom-Attribute": {
+      "purpose": "Create a custom attribute for Hunter leads.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Creates a new custom attribute in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Creates a new custom attribute in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Creates a new custom attribute in the user's Hunter account."
+      }
+    },
+    "Update-Custom-Attribute": {
+      "purpose": "Rename an existing Hunter lead custom attribute.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Modifies custom attribute metadata in the user's Hunter account.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Modifies custom attribute metadata in the user's Hunter account.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Modifies custom attribute metadata in the user's Hunter account."
+      }
+    },
+    "Delete-Custom-Attribute": {
+      "purpose": "Delete a Hunter lead custom attribute by ID.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Deletes custom attribute metadata and should require destructive-action caution.",
+        "destructive_justification": "destructiveHint is true because Deletes custom attribute metadata and should require destructive-action caution.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Deletes custom attribute metadata and should require destructive-action caution."
+      }
+    },
+    "List-Campaigns": {
+      "purpose": "List campaigns in the user's Hunter account.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads campaign metadata without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads campaign metadata without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads campaign metadata without modification."
+      }
+    },
+    "List-Campaign-Recipients": {
+      "purpose": "List recipients in a Hunter campaign.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Reads campaign recipient data without modification.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Reads campaign recipient data without modification.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Reads campaign recipient data without modification."
+      }
+    },
+    "Add-Campaign-Recipients": {
+      "purpose": "Add recipients to an existing Hunter campaign by email address or lead ID.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Changes campaign recipient state by adding people to a campaign. It does not send emails by itself.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Changes campaign recipient state by adding people to a campaign. It does not send emails by itself.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Changes campaign recipient state by adding people to a campaign. It does not send emails by itself."
+      }
+    },
+    "Remove-Campaign-Recipients": {
+      "purpose": "Remove recipients from a Hunter campaign by email address.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Removes campaign recipients and should require destructive-action caution.",
+        "destructive_justification": "destructiveHint is true because Removes campaign recipients and should require destructive-action caution.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Removes campaign recipients and should require destructive-action caution."
+      }
+    },
+    "Start-Campaign": {
+      "purpose": "Start a Hunter campaign after explicit user confirmation, causing real emails to be sent to configured recipients.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is false because Can send real outbound emails to external recipients and is irreversible once started. The implementation includes a confirmation gate before the POST /start request.",
+        "destructive_justification": "destructiveHint is true because Can send real outbound emails to external recipients and is irreversible once started. The implementation includes a confirmation gate before the POST /start request.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Can send real outbound emails to external recipients and is irreversible once started. The implementation includes a confirmation gate before the POST /start request."
+      }
+    },
+    "Prospecting": {
+      "purpose": "Plan an end-to-end prospecting workflow from a natural-language brief and emit the first next action for ChatGPT to execute.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "justifications": {
+        "read_only_justification": "readOnlyHint is true because Coordinator tool only returns a plan and next action. It does not itself modify Hunter data; subsequent tools may read, spend credits, or write data according to their annotations.",
+        "destructive_justification": "destructiveHint is false because the tool is not intended to perform destructive actions. Coordinator tool only returns a plan and next action. It does not itself modify Hunter data; subsequent tools may read, spend credits, or write data according to their annotations.",
+        "open_world_justification": "openWorldHint is true because this tool interacts with Hunter.io or related external services. Coordinator tool only returns a plan and next action. It does not itself modify Hunter data; subsequent tools may read, spend credits, or write data according to their annotations."
+      }
+    }
+  },
+  "prompts": [
+    {
+      "name": "prospect",
+      "description": "Find and qualify B2B leads matching criteria by discovering companies, searching contacts, verifying emails, and saving to Hunter leads."
+    },
+    {
+      "name": "build-list",
+      "description": "Create a Hunter leads list and populate it with contacts from a search or specific emails."
+    },
+    {
+      "name": "campaign-prep",
+      "description": "Add recipients to an existing Hunter campaign from leads or search results."
+    }
+  ],
+  "testing": {
+    "test_account_required": true,
+    "test_account_notes": "Provide OpenAI reviewers with a fully featured Hunter demo account/API key that has sample leads, lists, campaigns, and enough search, verification, and enrichment credits. Do not require MFA, SMS, email verification, or company-network access for review.",
+    "preflight_checks": [
+      "Confirm the production MCP URL is publicly accessible over HTTPS at the submitted /mcp endpoint.",
+      "Confirm the Hunter demo account has credits for Domain-Search, Email-Finder, Email-Verifier, Person-Enrichment, Company-Enrichment, and Combined-Enrichment.",
+      "Confirm at least one editable campaign exists in the demo account before testing campaign recipient flows.",
+      "Confirm the app works on ChatGPT web and mobile before submitting."
+    ],
+    "test_cases": [
+      {
+        "title": "Check account credits",
+        "prompt": "How many Hunter credits do I have left?",
+        "expected_behavior": "Calls Account and returns plan name plus remaining search, verification, and enrichment credits."
+      },
+      {
+        "title": "Discover companies and ask for selection",
+        "prompt": "Find SaaS companies in Berlin with 50 to 200 employees.",
+        "expected_behavior": "Calls Discover, renders the Discover widget with top matching companies, provides a link to see all Hunter results, and asks which company or companies to investigate instead of auto-selecting the first result."
+      },
+      {
+        "title": "Find and verify a specific email",
+        "prompt": "What is Patrick Collison's email at stripe.com, and is it valid?",
+        "expected_behavior": "Calls Email-Finder for the named person and domain, then Email-Verifier for the returned address if the user confirms any required credit-spend prompt. The response should cite Hunter as the source and include confidence or verification status returned by Hunter."
+      },
+      {
+        "title": "Enrich a company and offer next action",
+        "prompt": "Tell me about stripe.com using Hunter.",
+        "expected_behavior": "Calls Company-Enrichment, renders the company widget, returns relevant company information, and asks whether to save the company, find contacts, or both."
+      },
+      {
+        "title": "Build a leads list",
+        "prompt": "Create a Hunter leads list named Berlin SaaS Marketing and add verified marketing contacts from the companies I choose.",
+        "expected_behavior": "Creates the leads list, uses Discover and Domain-Search with marketing filters after the user selects companies, verifies selected emails, upserts valid contacts into the new list, and returns a Hunter deep link to the list."
+      },
+      {
+        "title": "Add campaign recipients",
+        "prompt": "List my Hunter campaigns, then add patrick@stripe.com and dylan@stripe.com to the one I pick.",
+        "expected_behavior": "Calls List-Campaigns, asks the user to choose a campaign, then calls Add-Campaign-Recipients with the selected campaign ID and emails. It reminds the user that campaign content and sender settings must be configured in Hunter."
+      },
+      {
+        "title": "Start campaign confirmation gate",
+        "prompt": "Start campaign <CAMPAIGN_ID>.",
+        "expected_behavior": "First Start-Campaign call returns an explicit confirmation question with the recipient count if available. The campaign is not started unless the user explicitly confirms, after which the tool is reissued with confirmed=true."
+      },
+      {
+        "title": "Negative test: no unsupported web fallback for Hunter data",
+        "prompt": "Find engineering leads at example.com and use LinkedIn if Hunter has no contacts.",
+        "expected_behavior": "Uses Hunter tools only for company contact discovery and does not substitute LinkedIn, web search, or third-party listings for Hunter contact data. If Hunter has no contacts, it says so and offers a Hunter-appropriate next step."
+      }
+    ]
+  },
+  "screenshots": {
+    "status": "manual_capture_required",
+    "recommended_screenshots": [
+      "Discover widget showing top company results and the Hunter link for all results.",
+      "Company enrichment widget showing enriched company details and a Save company action.",
+      "Lead-list creation or campaign-recipient flow showing a successful Hunter deep link.",
+      "Start-Campaign confirmation gate showing that real-email sending requires explicit approval."
+    ]
+  },
+  "global_availability": {
+    "requested_countries": "TODO: choose availability countries in the submission UI based on Hunter's legal/commercial availability and privacy policy coverage.",
+    "age_rating_notes": "The app is intended for general B2B productivity use and should be suitable for users 13+, subject to Hunter's terms and OpenAI review."
+  },
+  "privacy_and_safety": {
+    "personal_data_processed": [
+      "Professional email addresses",
+      "Names",
+      "Job titles",
+      "Company names and domains",
+      "Professional social/profile URLs when returned by Hunter",
+      "Lead list and campaign recipient metadata from the user's Hunter account"
+    ],
+    "data_minimization_notes": "Tools request task-specific fields such as domain, email, name, list ID, lead ID, campaign ID, and filters. The app should not request full chat transcripts, credentials, payment-card data, government identifiers, PHI, or precise GPS location.",
+    "user_controls": [
+      "Users choose which discovered companies to investigate before follow-up contact search.",
+      "Write operations create, update, delete, or organize records only in the user's Hunter account.",
+      "Starting a campaign includes an explicit confirmation gate before real emails are sent."
+    ],
+    "policy_notes": "The app supports B2B prospecting and sales-productivity workflows. It should not be used for spam, harassment, prohibited goods or services, or privacy-invasive activity."
+  },
+  "known_todos_before_final_submit": [
+    "Confirm and replace production_mcp_url with the real public HTTPS MCP endpoint.",
+    "Provide review-safe Hunter demo credentials or an OAuth/API-key flow that OpenAI reviewers can complete without MFA or extra setup.",
+    "Upload final light and optional dark logo PNG assets in the dashboard.",
+    "Capture and upload required screenshots after testing the production endpoint in ChatGPT Developer Mode.",
+    "Choose final country availability settings based on Hunter policy/legal review.",
+    "Review all generated descriptions, tool justifications, privacy statements, and test cases for accuracy before uploading this JSON."
+  ]
+}
