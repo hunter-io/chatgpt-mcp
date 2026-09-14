@@ -97,6 +97,7 @@ export const TOOL_NAMES = {
   listSequenceFollowUps: "List-Sequence-Follow-Ups",
   getSequenceFollowUp: "Get-Sequence-Follow-Up",
   createSequenceFollowUp: "Create-Sequence-Follow-Up",
+  updateSequenceFollowUp: "Update-Sequence-Follow-Up",
   deleteSequenceFollowUp: "Delete-Sequence-Follow-Up",
   pauseSequence: "Pause-Sequence",
   resumeSequence: "Resume-Sequence",

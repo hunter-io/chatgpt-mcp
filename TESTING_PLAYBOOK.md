@@ -2,7 +2,7 @@
 
 > Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app)
 
-Manual test playbook for the Hunter ChatGPT app — **V3 resubmission**. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 100 tools. V3 grows the surface from 56 to 100 tools (HUN-20838…HUN-20866): sequence CRUD + follow-up authoring, message templates, lead tags, leads-list folders/favorites, bulk operations, Discover people extraction, saved searches, CRM push, webhooks, and usage/API-key management — plus the terminology migration that renamed five outreach tools and the `sequence-prep` prompt to the canonical "sequences" naming.
+Manual test playbook for the Hunter ChatGPT app — **V3 resubmission**. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 101 tools. V3 grows the surface from 56 to 101 tools (HUN-20838…HUN-20866, plus Update-Sequence-Follow-Up in HUN-23065): sequence CRUD + follow-up authoring, message templates, lead tags, leads-list folders/favorites, bulk operations, Discover people extraction, saved searches, CRM push, webhooks, and usage/API-key management — plus the terminology migration that renamed five outreach tools and the `sequence-prep` prompt to the canonical "sequences" naming.
 
 **How to use this doc:**
 - Run every prompt in **chatgpt.com** with the deployed Hunter app installed.
@@ -170,7 +170,7 @@ List my Hunter sequences, then add patrick@stripe.com and dylan@stripe.com to th
 - [ ] After user picks, `Add-Sequence-Recipients` is called with `sequence_id` and `emails: ["patrick@stripe.com", "dylan@stripe.com"]`
 - [ ] Final message includes deep link to `https://hunter.io/sequences/<id>`
 - [ ] Recipients visible in Hunter UI under that sequence after the call
-- [ ] Reminder shown that subject/body/sender must be configured (in the Hunter UI or via `Create-Sequence-Follow-Up`) before starting
+- [ ] Reminder shown that subject/body/sender must be configured before starting — step content via `Update-Sequence-Follow-Up` (step 0) and `Create-Sequence-Follow-Up` (later steps); only CONNECTING a sending account still needs the Hunter UI
 
 **Screenshot:** `<!-- paste screenshot here -->`
 
@@ -306,9 +306,10 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | SQ10 | `Delete-Sequence` (V3, destructive) | `Delete sequence <DRAFT_SEQUENCE_ID>` | Confirmation prompt; drafts only — deleting a started sequence returns invalid_input | ☐ | |
 | SQ11 | `Get-Sequence-Follow-Up` (V3) | `Show step 2 of sequence <SEQUENCE_ID>` | One step: subject, body, wait_days, position | ☐ | |
 | SQ12 | `Create-Sequence-Follow-Up` (V3, write) | `Add a follow-up to sequence <SEQUENCE_ID>: subject "Quick nudge", wait 3 days` | Step appended with automatic step assignment (subject/body/wait_days); model offers a saved message template as the body before drafting from scratch | ☐ | |
-| SQ13 | `Delete-Sequence-Follow-Up` (V3, destructive) | `Delete the last step of sequence <SEQUENCE_ID>` | Confirmation; last step only — deleting a middle step returns an error | ☐ | |
+| SQ13 | `Update-Sequence-Follow-Up` (V3, destructive) | `Write the introduction email for sequence <DRAFT_SEQUENCE_ID>: subject "Quick question about {{company:"your team"}}", body "Hi {{first_name:"there"}} — ..."` | Model calls List-Sequence-Follow-Ups for the step-0 id, then PUTs subject + body; step 0 comes back authored, and Start-Sequence then passes validation provided the draft already has recipients and a connected sender. Re-run on an actively sending sequence → invalid_input (`sequence_active`) | ☐ | |
+| SQ14 | `Delete-Sequence-Follow-Up` (V3, destructive) | `Delete the last step of sequence <SEQUENCE_ID>` | Confirmation; last step only — deleting a middle step returns an error | ☐ | |
 
-> Tip: use a paused/test sequence for SQ3–SQ5 and a disposable draft for SQ8–SQ13. Archiving (SQ5) cannot be undone via the API, and Delete-Sequence (SQ10) only works on drafts — use disposable sequences.
+> Tip: use a paused/test sequence for SQ3–SQ5 and a disposable draft for SQ8–SQ14. Archiving (SQ5) cannot be undone via the API, and Delete-Sequence (SQ10) only works on drafts — use disposable sequences. SQ8 → SQ13 → SQ12 → `Add-Sequence-Recipients` → Start-Sequence is the end-to-end build: it proves a sequence can be authored and launched with no dashboard visit (HUN-23065). Do not omit the recipients step — `Campaign::Validation#validate_recipients_count` rejects a sequence with zero recipients, so skipping it makes Start-Sequence fail on an unrelated prerequisite and hides whether step-0 authoring actually worked. The sending account must already be connected too; the API cannot connect one.
 
 ### Company lists (HUN-20196)
 
@@ -345,7 +346,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | CN1 | `List-Connected-Apps` | `What apps are connected to my Hunter account?` | Read-only list: provider, name, category, provider_email, connected_at | ☐ | |
 | CN2 | `Get-Connected-App` | `Show the field mappings for connected app <APP_ID>` | One app + attribute_mappings (target_field ↔ source_field) | ☐ | |
 
-> The HUN-20196 rows above (EA1, SQ1–SQ5, CL1–CL5, FO1–FO4, ME1–ME4, CN1–CN2) predate V3; rows marked (V3) exercise the HUN-20838…HUN-20866 additions. Use a throwaway list/folder/sequence for the destructive rows (CL4/CL5, FO3/FO4, SQ5/SQ10/SQ13) so you don't lose real data.
+> The HUN-20196 rows above (EA1, SQ1–SQ5, CL1–CL5, FO1–FO4, ME1–ME4, CN1–CN2) predate V3; rows marked (V3) exercise the HUN-20838…HUN-20866 additions. Use a throwaway list/folder/sequence for the destructive rows (CL4/CL5, FO3/FO4, SQ5/SQ10/SQ13/SQ14) so you don't lose real data.
 
 ### Message templates (V3)
 
@@ -630,7 +631,7 @@ Use Hunter to find 20 SaaS companies in France with 50-200 employees. For each c
 
 ### 3.12 End-to-end sequence creation in conversation (V3)
 
-**Goal:** V3 makes sequences composable entirely in chat. Verify the full authoring chain: create → author steps (with template offer) → add recipients → start gate.
+**Goal:** V3 makes sequences composable entirely in chat. Verify the full authoring chain: create → author step 0 via List-Sequence-Follow-Ups + Update-Sequence-Follow-Up → append steps (with template offer) → add recipients → start gate.
 
 **Prompt (one conversation):**
 
@@ -639,7 +640,8 @@ Create a new outreach sequence called "Playbook E2E" from my <EMAIL_ACCOUNT> acc
 ```
 
 - [ ] `Create-Sequence` fires first — a draft is created, and the POST carries an `Idempotency-Key` header (network panel)
-- [ ] `Create-Sequence-Follow-Up` fires once per step with subject/body/wait_days; step positions are auto-assigned (the model never asks for manual step numbers)
+- [ ] `List-Sequence-Follow-Ups` then `Update-Sequence-Follow-Up` author the INTRO email — `Create-Sequence` leaves step 0 empty and `Create-Sequence-Follow-Up` can only append, so the model must look up the step-0 id and PUT it. A run that writes the intro with `Create-Sequence-Follow-Up` is a failure, not a pass
+- [ ] `Create-Sequence-Follow-Up` then fires once per ADDITIONAL step with subject/body/wait_days; step positions are auto-assigned (the model never asks for manual step numbers)
 - [ ] Before drafting a body from scratch, the model checks saved templates (`List-Message-Templates`) and offers one if it exists
 - [ ] `Add-Sequence-Recipients` adds patrick@stripe.com to the draft
 - [ ] `Start-Sequence` is never called uninvited; if you then say "start it", the destructive confirmation gate appears with the recipient count (say no)
@@ -1029,9 +1031,10 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
         description: "Create a sequence with follow-ups and recipients in chat",
         user_prompt:
           "Using Hunter, create a sequence called 'Playbook Outreach' from my connected email account, add a first email and a follow-up after 3 days, then add patrick@stripe.com as a recipient. Do not start it.",
-        tools_triggered: "Create-Sequence, Create-Sequence-Follow-Up, Add-Sequence-Recipients",
+        tools_triggered:
+          "Create-Sequence, List-Sequence-Follow-Ups, Update-Sequence-Follow-Up, Create-Sequence-Follow-Up, Add-Sequence-Recipients",
         expected_output:
-          "A draft sequence is created with two authored steps and one recipient, with a Hunter link to review it. The sequence is not started and no emails are sent."
+          "A draft sequence is created with two authored steps and one recipient, with a Hunter link to review it. The first email is written by updating the auto-created step 0; the follow-up is appended. The sequence is not started and no emails are sent."
       },
       {
         description: "Bulk move leads with a count-stating confirmation",
@@ -1172,7 +1175,7 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
 
 ## Appendix — Tool inventory
 
-The 100 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run. All 44 tools added in V3 (marked "(V3)") are free; the credit cost of a full playbook run is unchanged at ~25 credits, since no V3 prompt spends credits.
+The 101 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run. All 45 tools added in V3 (marked "(V3)") are free; the credit cost of a full playbook run is unchanged at ~25 credits, since no V3 prompt spends credits.
 
 | Group | Tools |
 |-------|-------|
@@ -1181,7 +1184,7 @@ The 100 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirr
 | Account | `Get-Account-Details` |
 | Usage & API keys (V3) | `Get-Usage`, `List-API-Keys`, `Create-API-Key`, `Delete-API-Key` |
 | Email accounts | `List-Email-Accounts`, `Get-Email-Account` (V3), `List-Email-Account-Sequences` (V3) |
-| Sequences | `List-Sequences`, `Get-Sequence` (V3), `Create-Sequence` (V3), `Update-Sequence` (V3), `Delete-Sequence` (V3), `List-Sequence-Follow-Ups`, `Get-Sequence-Follow-Up` (V3), `Create-Sequence-Follow-Up` (V3), `Delete-Sequence-Follow-Up` (V3), `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats`, `List-Sequence-Recipients`, `Add-Sequence-Recipients`, `Remove-Sequence-Recipients`, `Start-Sequence` |
+| Sequences | `List-Sequences`, `Get-Sequence` (V3), `Create-Sequence` (V3), `Update-Sequence` (V3), `Delete-Sequence` (V3), `List-Sequence-Follow-Ups`, `Get-Sequence-Follow-Up` (V3), `Create-Sequence-Follow-Up` (V3), `Update-Sequence-Follow-Up` (V3), `Delete-Sequence-Follow-Up` (V3), `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats`, `List-Sequence-Recipients`, `Add-Sequence-Recipients`, `Remove-Sequence-Recipients`, `Start-Sequence` |
 | Message templates (V3) | `List-Message-Templates`, `Get-Message-Template`, `Create-Message-Template`, `Update-Message-Template`, `Delete-Message-Template` |
 | Leads | `List-Leads`, `Get-Lead`, `Create-Lead`, `Update-Lead`, `Delete-Lead`, `Create-Or-Update-Lead`, `Create-Lead-If-Missing`, `Lead-Exists`, `Save-Company` |
 | Lead tags (V3) | `List-Lead-Tags`, `Create-Lead-Tag`, `Update-Lead-Tag`, `Delete-Lead-Tag`, `Add-Tag-To-Lead`, `Remove-Tag-From-Lead` |

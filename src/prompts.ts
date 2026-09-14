@@ -105,7 +105,7 @@ If anything didn't work as expected during this flow — a missing capability, a
 4. Use Add-Sequence-Recipients to add them (max 50 per request — batch larger lists).
 5. Present a summary with the count and a deep-link to the sequence.
 
-To create a new sequence from scratch, use Create-Sequence, then author its steps with Create-Sequence-Follow-Up (optionally starting from a saved template via List-Message-Templates). One caveat: the introduction email (step 0) is created empty and the v2 API has no endpoint to fill it in yet, so I have to write step 0's subject and body in the Hunter dashboard before the sequence can start — remind me to author step 0 there. Remind me to review the whole sequence in Hunter before starting it.
+To create a new sequence from scratch, use Create-Sequence. It auto-creates the introduction email (step 0) empty: call List-Sequence-Follow-Ups for the id of the step whose step is 0, then write its subject and body with Update-Sequence-Follow-Up — the sequence can't start while step 0 is blank. Append the remaining steps with Create-Sequence-Follow-Up (optionally starting from a saved template via List-Message-Templates), and use Update-Sequence-Follow-Up again to reword any step. Remind me to review the whole sequence in Hunter before starting it.
 
 For engagement metrics on an existing sequence, use Get-Sequence-Stats — sequence-level open/click/reply rates are recipient-based (distinct recipients who acted ÷ distinct recipients delivered to), matching the Hunter dashboard.
 

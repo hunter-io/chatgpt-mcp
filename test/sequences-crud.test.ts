@@ -66,6 +66,9 @@ const UUID_RE = /^[0-9a-f-]{36}$/
 // that; leaf sub-objects keep their own Zod behavior. (See test/tools.test.ts.)
 const publishedOutputSchema = (shape: Record<string, z.ZodTypeAny>) => z.object(shape).strict()
 
+// Message::MAX_SUBJECT_LENGTH — codepoints, matching Ruby's String#length.
+const MAX_SUBJECT_CODEPOINTS = 250
+
 function tool(name: string): RegisteredTool {
   const registered = registeredTools.get(name)
   if (!registered) throw new Error(`tool ${name} is not registered`)
@@ -138,6 +141,7 @@ describe("sequence CRUD registration", () => {
     "Delete-Sequence",
     "Get-Sequence-Follow-Up",
     "Create-Sequence-Follow-Up",
+    "Update-Sequence-Follow-Up",
     "Delete-Sequence-Follow-Up",
   ]
 
@@ -201,6 +205,20 @@ describe("sequence CRUD registration", () => {
     expect(description).toContain("wait_days")
   })
 
+  // The description is the only defence against echoing back the RESOLVED subject
+  // that List-Sequence-Follow-Ups emits — the sentinel form is guarded in code,
+  // this one cannot be. Drop the wording and an agent editing a body silently
+  // breaks A/B subject threading. The fallback syntax matters for the same
+  // reason: the pipe form renders empty instead of erroring.
+  it("Update-Sequence-Follow-Up warns against echoing a subject and names the A/B arm", () => {
+    const description = tool("Update-Sequence-Follow-Up").description
+    expect(description).toContain("never echo back a subject")
+    expect(description).toContain("List-Sequence-Follow-Ups")
+    expect(description).toContain("variant")
+    expect(description).toContain('{{first_name:\"there\"}}')
+    expect(description).toContain("sequence_active")
+  })
+
   it("Delete-Sequence-Follow-Up documents the last-step-only rule", () => {
     const description = tool("Delete-Sequence-Follow-Up").description
     expect(description).toContain("LAST step")
@@ -220,7 +238,12 @@ describe("sequence CRUD registration", () => {
   })
 
   it("update/delete tools use private-destructive annotations", () => {
-    for (const name of ["Update-Sequence", "Delete-Sequence", "Delete-Sequence-Follow-Up"]) {
+    for (const name of [
+      "Update-Sequence",
+      "Delete-Sequence",
+      "Update-Sequence-Follow-Up",
+      "Delete-Sequence-Follow-Up",
+    ]) {
       expect(tool(name).annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
     }
   })
@@ -683,8 +706,7 @@ describe("Create-Sequence-Follow-Up", () => {
   })
 
   // Rails accepts a body-less follow-up at create time (the body-presence check
-  // only fires at Start-Sequence), and there is no update-follow-up tool, so a
-  // blank step would be unfixable except by delete + recreate. Fail fast locally.
+  // only fires at Start-Sequence), so an unguarded create can block the launch.
   it("rejects a step with neither body nor message_template_id before any fetch", async () => {
     const mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
@@ -723,6 +745,230 @@ describe("Create-Sequence-Follow-Up", () => {
     const mockFetch = vi.fn().mockResolvedValue(okJson(CREATED_FOLLOW_UP))
     vi.stubGlobal("fetch", mockFetch)
     const result = await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, body: "<p>Hi again</p>" })
+    expect(mockFetch).toHaveBeenCalledOnce()
+    expect(result.isError).toBeUndefined()
+  })
+})
+
+describe("Update-Sequence-Follow-Up", () => {
+  // update.jbuilder emits `data` FLAT — create nests under `follow_up`, update
+  // does not — with no messages_sent or variant.
+  const UPDATED_FOLLOW_UP = {
+    data: {
+      id: 9,
+      step: 1,
+      subject: "Checking back in",
+      body: "<p>Any thoughts?</p>",
+      wait_days: 4,
+      message_format: "html",
+    },
+  }
+
+  it("PUTs only the provided fields, without an Idempotency-Key, and deep-links the sequence", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(UPDATED_FOLLOW_UP))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      subject: "Checking back in",
+      wait_days: 4,
+    })
+    const { url, opts } = fetchCall(mockFetch)
+    expect(url).toBe(`${BASE}/sequences/42/follow-ups/9`)
+    expect(opts.method).toBe("PUT")
+    expect(opts.headers["Idempotency-Key"]).toBeUndefined()
+    const body = new URLSearchParams(opts.body)
+    expect(body.get("subject")).toBe("Checking back in")
+    expect(body.get("wait_days")).toBe("4")
+    expect(body.has("body")).toBe(false)
+    expect(body.has("message_format")).toBe(false)
+    expect(result.isError).toBeUndefined()
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/sequences/42")
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // THE REGRESSION THIS TOOL EXISTS TO PREVENT (HUN-23065): unlike #destroy,
+  // #update has no step-0 guard, so the blank introduction email is authorable.
+  it("authors step 0 — the introduction email — with subject and body", async () => {
+    const introAuthored = {
+      data: {
+        id: 7,
+        step: 0,
+        subject: 'Quick question about {{company:"your team"}}',
+        body: '<p>Hi {{first_name:"there"}},</p>',
+        wait_days: 0,
+        message_format: "html",
+      },
+    }
+    const mockFetch = vi.fn().mockResolvedValue(okJson(introAuthored))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 7,
+      subject: 'Quick question about {{company:"your team"}}',
+      body: '<p>Hi {{first_name:"there"}},</p>',
+    })
+    const { url, opts } = fetchCall(mockFetch)
+    expect(url).toBe(`${BASE}/sequences/42/follow-ups/7`)
+    expect(opts.method).toBe("PUT")
+    expect(result.isError).toBeUndefined()
+    expect((result.structuredContent as { data: { step: number } }).data.step).toBe(0)
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // create_first_follow_up inserts step 0 with subject and body NULL, and a draft
+  // can be filled one field at a time, so the response still carries nulls.
+  it("published output schema accepts the never-authored step-0 nulls", () => {
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(
+      schema.safeParse({
+        data: { id: 7, step: 0, subject: null, body: null, wait_days: 0, message_format: null },
+      }).success,
+    ).toBe(true)
+  })
+
+  it("passes the sequence_active 422 through as a typed error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(railsError(422, "sequence_active", "Cannot update follow-up while the sequence is active")),
+    )
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      body: "<p>x</p>",
+    })
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field?: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("sequence_active")
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // A field-less PUT is a 200 no-op that reads as a successful edit.
+  it("rejects a call with no writable field before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({ sequence_id: 42, follow_up_id: 9 })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("subject")
+    expect(error.message).toContain("at least one of")
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // Get-Sequence-Follow-Up returns the raw sentinel, which the controller then
+  // 422s on the way back in.
+  it("rejects the inheritance placeholder as a subject before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      subject: "{{__previous_subject__}}",
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("subject")
+    expect(error.message).toContain("Omit `subject`")
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // A blank body is accepted on a draft, so it clears authored copy and succeeds.
+  it("rejects a blank body before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      body: "   ",
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("body")
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  // A blank SUBJECT is an operation, not an error: above step 0
+  // set_default_subject_line swaps it for the previous step's subject, which is
+  // the only way back to a threaded subject. Rejecting it removes a capability.
+  it("forwards an empty subject — it restores inheritance on a step above 0", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(UPDATED_FOLLOW_UP))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      subject: "",
+    })
+    expect(mockFetch).toHaveBeenCalledOnce()
+    const { opts } = fetchCall(mockFetch)
+    expect(new URLSearchParams(opts.body).get("subject")).toBe("")
+    expect(result.isError).toBeUndefined()
+  })
+
+  // The limits are enforced only at start/resume, so an over-long PUT returns 200
+  // and fails later at Start-Sequence.
+  it.each([
+    ["subject", 251, 250],
+    ["body", 50_001, 50_000],
+  ] as const)("rejects an over-long %s before any fetch", async (field, length, max) => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      [field]: "x".repeat(length),
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe(field)
+    expect(error.message).toContain(String(max))
+    const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it.each([
+    ["subject", 250],
+    ["body", 50_000],
+  ] as const)("accepts a %s exactly at the limit", async (field, length) => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(UPDATED_FOLLOW_UP))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      [field]: "x".repeat(length),
+    })
+    expect(mockFetch).toHaveBeenCalledOnce()
+    expect(result.isError).toBeUndefined()
+  })
+
+  // Ruby's String#length counts CODEPOINTS: a `.length` check would see 500 units
+  // for a 250-emoji subject and reject content Rails accepts.
+  it("measures the limits in codepoints, not UTF-16 code units", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(UPDATED_FOLLOW_UP))
+    vi.stubGlobal("fetch", mockFetch)
+    const emojiSubject = "\u{1F600}".repeat(MAX_SUBJECT_CODEPOINTS)
+    expect(emojiSubject.length).toBe(MAX_SUBJECT_CODEPOINTS * 2) // UTF-16 units — over the limit
+    const result = await tool("Update-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      follow_up_id: 9,
+      subject: emojiSubject,
+    })
     expect(mockFetch).toHaveBeenCalledOnce()
     expect(result.isError).toBeUndefined()
   })

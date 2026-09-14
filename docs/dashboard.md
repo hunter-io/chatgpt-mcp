@@ -1,7 +1,7 @@
 # OpenAI Apps SDK Dashboard — Hunter ChatGPT MCP
 
 This file is a **pointer**, not the dashboard source-of-truth. The **current**
-annotation posture is the **V3** pass (HUN-20838…HUN-20869: 100 tools, the
+annotation posture is the **V3** pass (HUN-20838…HUN-20869 plus HUN-23065: 101 tools, the
 campaigns→sequences terminology migration, and the new sequence-authoring /
 lead-organization / bulk / discover-people / integrations / account-management
 tool families). It carries forward, unchanged:
@@ -49,9 +49,9 @@ file.
 - [ ] Bump `McpServer.version` in `chatgpt-mcp/src/index.ts` so ChatGPT's `tools/list` cache invalidates (V3 shipped as `3.0.0`).
 - [ ] Deploy: `pnpm --filter chatgpt-mcp run deploy`.
 - [ ] In the OpenAI Developer dashboard, **create a new app version** (do NOT edit the existing one; in-place edits do not refresh `tools/list`). Then click **Scan Tools** explicitly.
-- [ ] Confirm the dashboard shows **100 tools** and the `Read Only` / `Open World` / `Destructive` flags match the posture note above. Any mismatch → fix code & redeploy before pasting justifications.
+- [ ] Confirm the dashboard shows **101 tools** and the `Read Only` / `Open World` / `Destructive` flags match the posture note above. Any mismatch → fix code & redeploy before pasting justifications.
 - [ ] Verify each renamed-via-title tool surfaces the verb-form label on its card (`Find Emails By Domain`, `Find Person Email`, `Verify Email`, `Enrich Person`, `Enrich Company`, `Enrich Person And Company`). If the dashboard shows only the canonical `name`, execute the canonical-rename contingency described in the 2026-05-28 v3 plan's Phase 5.3.
-- [ ] For **every** tool, paste the Description (no edits) and the three justification lines from `chatgpt-mcp/.context/v3-resubmission/tool-justifications.md` verbatim (or run `chatgpt-mcp/.context/v3-resubmission/justifications-autofill.console.js` in the dashboard console to fill all 100×3 fields). Each justification stays ≤200 chars.
+- [ ] For **every** tool, paste the Description (no edits) and the three justification lines from `chatgpt-mcp/.context/v3-resubmission/tool-justifications.md` verbatim (or run `chatgpt-mcp/.context/v3-resubmission/justifications-autofill.console.js` in the dashboard console to fill all 101×3 fields). Each justification stays ≤200 chars.
 - [ ] Verify zero "Recommended: Add an `outputSchema`" warnings remain.
 - [ ] Wire-format annotation completeness: confirm the deployed `tools/list` response includes `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null`/omitted) on every tool. See the `curl + jq` check in the 2026-05-28 v3 plan's Phase 5.2.
 - [ ] CSP / widget verification: `_meta.ui.csp.connectDomains` includes `https://api.hunter.io`, `frameDomains` is `[]` (explicit empty), and both widgets render without CSP errors after Scan Tools completes.

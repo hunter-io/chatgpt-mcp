@@ -100,6 +100,7 @@ const ALL_TOOL_NAMES = [
   "List-Sequence-Follow-Ups",
   "Get-Sequence-Follow-Up",
   "Create-Sequence-Follow-Up",
+  "Update-Sequence-Follow-Up",
   "Delete-Sequence-Follow-Up",
   "Pause-Sequence",
   "Resume-Sequence",

@@ -50,6 +50,17 @@ const ALREADY_STARTED_MESSAGE = "Sequence already started."
 // there's nothing to overlap. See HUN-19943 todos/020.
 const RECIPIENT_COUNT_TIMEOUT_MS = 1500
 
+// FollowUp::SUBJECT_INHERITANCE_PLACEHOLDER. Get-Sequence-Follow-Up returns an
+// inheriting step's subject as this raw sentinel and the controller 422s it on
+// the way back in, so a read-modify-write agent needs catching locally.
+const SUBJECT_INHERITANCE_PLACEHOLDER = "{{__previous_subject__}}"
+
+// Message::MAX_SUBJECT_LENGTH / MAX_BODY_LENGTH. Campaign::Validation enforces
+// these only at start/resume, so an over-long PUT succeeds and fails later at
+// Start-Sequence. Keep in lockstep with the Rails constants.
+const MAX_SUBJECT_LENGTH = 250
+const MAX_BODY_LENGTH = 50_000
+
 // Hunter sequence + recipient shapes. .loose() at envelope level via
 // buildResponseSchema; leaves are strict so jbuilder typos surface in vitest.
 // Per-item shape from app/app/views/api/sequences/index.jbuilder: the jbuilder
@@ -446,6 +457,21 @@ const createSequenceFollowUpOutputSchema = buildResponseSchema(
   createSequenceFollowUpMetaSchema,
 )
 
+// Updated-step shape from app/app/views/api/sequences/follow_ups/update.jbuilder.
+// FLAT under `data` — unlike create, it does NOT nest under `follow_up`.
+// `subject`/`body` are nullable because Campaign#create_first_follow_up inserts
+// step 0 with both NULL.
+const updateSequenceFollowUpSchema = z.object({
+  id: z.number().int().positive(),
+  step: z.number().int().nonnegative(),
+  subject: nullableString(),
+  body: nullableString(),
+  wait_days: z.number().int().nonnegative(),
+  message_format: z.union([z.enum(["text", "html"]), z.null()]),
+})
+
+const updateSequenceFollowUpOutputSchema = buildResponseSchema(updateSequenceFollowUpSchema)
+
 // Shared writable fields for Create-Sequence / Update-Sequence, mirroring the
 // permitted params in Api::SequencesController#build_sequence_params plus the
 // request-shape validations in
@@ -728,7 +754,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.createSequence,
     {
       description:
-        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Monday..6=Sunday; a Monday-Friday schedule is [0, 1, 2, 3, 4], not [1, 2, 3, 4, 5]), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, and tracking toggles (`tracked_links` requires a premium plan). The introduction email (step 0) is created automatically with an empty subject and body, and the v2 API has no endpoint to fill it in yet — its subject and body currently must be edited in the Hunter dashboard, so a sequence created purely through the API cannot be started until step 0 is authored there (Start-Sequence fails validation while step 0 is blank). Typical next steps: open the sequence in the Hunter dashboard to write the introduction email, author any follow-up steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Free to call.",
+        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Monday..6=Sunday; a Monday-Friday schedule is [0, 1, 2, 3, 4], not [1, 2, 3, 4, 5]), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, and tracking toggles (`tracked_links` requires a premium plan). The introduction email (step 0) is created automatically with an empty subject and body, and Start-Sequence fails validation while it is blank — fill it in with Update-Sequence-Follow-Up, targeting the step whose `step` is 0 (get its id from List-Sequence-Follow-Ups). Typical next steps: write the introduction email with Update-Sequence-Follow-Up, append any further steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Given a sending account that is already connected, the whole sequence can be built this way without opening the Hunter dashboard. Connecting a sending inbox is the one step that still needs the dashboard — the API only attaches an ALREADY-connected account, and email-account settings are read-only here. Free to call.",
       inputSchema: {
         name: z.string().min(1).describe("Name of the new sequence (required; must not be blank)"),
         ...sequenceWriteFields,
@@ -896,13 +922,14 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
   // team's saved template for whichever of those params are blank
   // (apply_template_defaults) — a non-existent template id is silently
   // ignored, not an error. The model rejects creation on an actively-sending
-  // or archived sequence and caps wait_days at 30. callHunterApi adds the
+  // or archived sequence and caps wait_days at FollowUp::MAX_WAIT_DAYS (999),
+  // which the dashboard picker also uses. callHunterApi adds the
   // Idempotency-Key header automatically on every POST.
   server.registerTool(
     TOOL_NAMES.createSequenceFollowUp,
     {
       description:
-        "Use this when the user wants to add an email step to a sequence. Author the sequence step-by-step in conversation: draft the `subject` and `body` with the user, set `wait_days` (days after the previous step, 0-30), create the step, then show the updated step list with List-Sequence-Follow-Ups. Also offer the team's saved templates (List-Message-Templates): passing `message_template_id` pre-fills whichever of `subject`, `body`, and `message_format` are left blank. The step number is assigned automatically after the current last step, so this tool always appends a new follow-up and can never target step 0 — the introduction email (step 0), created together with the sequence with an empty subject and body, has no v2 API endpoint to fill it in yet and currently must be authored in the Hunter dashboard before Start-Sequence will pass validation. Omitting `subject` makes the step inherit the previous step's subject so the emails thread together. A sequence holds at most 6 steps in total (the introduction plus up to 5 follow-ups); exceeding that, or adding to an actively sending sequence (pause it first) or an archived one, is rejected with an invalid_input error. Free to call.",
+        "Use this when the user wants to add an email step to a sequence. Author the sequence step-by-step in conversation: draft the `subject` and `body` with the user, set `wait_days` (days after the previous step, 0-999), create the step, then show the updated step list with List-Sequence-Follow-Ups. Also offer the team's saved templates (List-Message-Templates): passing `message_template_id` pre-fills whichever of `subject`, `body`, and `message_format` are left blank. The step number is assigned automatically after the current last step, so this tool always appends a new follow-up and can never target step 0 — to author the introduction email (step 0), or to rewrite any existing step, use Update-Sequence-Follow-Up instead. Omitting `subject` makes the step inherit the previous step's subject so the emails thread together. A sequence holds at most 6 steps in total (the introduction plus up to 5 follow-ups); exceeding that, or adding to an actively sending sequence (pause it first) or an archived one, is rejected with an invalid_input error. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to add the step to"),
         subject: z
@@ -921,9 +948,9 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
           .number()
           .int()
           .min(0)
-          .max(30)
+          .max(999)
           .optional()
-          .describe("Days to wait after the previous step before this one sends (0-30, default 0)"),
+          .describe("Days to wait after the previous step before this one sends (0-999, default 0)"),
         message_format: z
           .enum(["text", "html"])
           .optional()
@@ -944,14 +971,14 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
       // Fail fast when neither a body nor a template that supplies one is given.
       // The Rails FollowUp create path (Api::Campaigns::FollowUpsController#create)
       // accepts a blank body — the body-presence check only runs at Start-Sequence
-      // time (FollowUp#validate_subject_and_body_presence, on :update). Since the
-      // v2 API exposes no update-follow-up endpoint, a body-less step created here
-      // is unfixable except by delete + recreate, so reject it locally before the
-      // round-trip. `message_template_id` is accepted even with a blank body
-      // because apply_template_defaults fills body from the template server-side.
+      // time (FollowUp#validate_subject_and_body_presence, on :update), so without
+      // this guard the model can create a step that silently blocks the launch.
+      // Update-Sequence-Follow-Up can repair one, but a complete create is cheaper.
+      // `message_template_id` passes with a blank body because
+      // apply_template_defaults fills it server-side.
       if ((body === undefined || body.trim() === "") && message_template_id === undefined) {
         const message =
-          "Provide `body` (a non-empty email body) or `message_template_id` — a step created without either has no body, cannot be started, and the v2 API has no update-follow-up tool to fix it (you would have to delete and recreate the step)."
+          "Provide `body` (a non-empty email body) or `message_template_id` — a step created without either has no body and blocks Start-Sequence. Include the body in this call, or fill it in afterwards with Update-Sequence-Follow-Up."
         return {
           content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
           structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "body", message } },
@@ -972,6 +999,138 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
         apiKey,
         baseUrl,
         method: "POST",
+        params,
+      })
+      return withDeepLink(result, `/sequences/${sequence_id}`)
+    },
+  )
+
+  // PUT /sequences/:sequence_id/follow-ups/:id
+  // (Api::Sequences::FollowUpsController#update). The ONLY write path that can
+  // reach step 0: unlike #destroy there is no step-0 guard, so the introduction
+  // email Create-Sequence leaves blank is authorable through the API (HUN-18644).
+  //
+  // The endpoint sits behind the `v2_api_extended_endpoints` flag and 404s when
+  // it is off. The flag's catch-all group is at 100%, so it is live for everyone
+  // — kept out of the description, where the model could not act on it anyway.
+  server.registerTool(
+    TOOL_NAMES.updateSequenceFollowUp,
+    {
+      description:
+        'Use this when the user wants to change the wording, timing, or format of an existing sequence step, or to write the introduction email. This is the only tool that can author the introduction email (step 0). Create-Sequence makes step 0 with an empty subject and body; fetch its id with List-Sequence-Follow-Ups, then set `subject` and `body` here — with a sending account already connected, that leaves nothing to do in the Hunter dashboard. Omitted fields are left unchanged on the step you target, with two documented side effects to relay to the user. First, changing a `subject` also rewrites the subject of every LATER step that still holds the old value verbatim (Hunter propagates a subject edit down the chain), and on a started sequence that regenerates the pending messages of the affected steps. This includes the ordinary build order: steps appended with no `subject` of their own are stored empty, so authoring step 0 afterwards propagates into every one of them. ALWAYS re-read the step list with List-Sequence-Follow-Ups after a subject change and tell the user which other steps moved. Second, setting `message_format` to text on a step that is currently html makes Hunter CONVERT the stored body even if you omit `body`: images are dropped, links collapse to bare URLs, and most HTML is stripped. That conversion is not reversible by setting the format back, so confirm it first, and show the user the converted `body` that comes back in the response. Editing is allowed on a draft or a paused sequence and is rejected with an invalid_input error while the sequence is actively sending (id sequence_active — pause it first), while it is scheduled to start (id sequence_planned), or once it is archived. `wait_days` accepts 0-999. Send 0 or omit it for step 0: the introduction always goes out first so the delay never delays anything, but a non-zero value still persists and inflates the delivery-time estimate Hunter shows for the sequence. CRITICAL — only pass `subject` when you are deliberately rewriting the subject line: never echo back a subject you just read from List-Sequence-Follow-Ups or Get-Sequence-Follow-Up while editing the body or the timing. On a step that inherits its subject from an earlier step, writing the value you read (the resolved text from the list, or the raw internal placeholder from the detail view) replaces the inheritance link with a fixed string and silently breaks subject threading for A/B recipients. Omit `subject` to keep inheriting. `body` must be non-blank when given. An empty-string `subject` is meaningful instead of invalid: on any step above 0 it RESTORES inheritance from the previous step, which is the only way to undo a concrete subject and re-thread the step. Never send an empty `subject` for step 0 — it has no previous step to inherit from, so it just clears the introduction subject and blocks Start-Sequence. Both fields are capped at 250 and 50000 characters respectively, because Hunter accepts a longer write and only rejects it at Start-Sequence. Note that Hunter normalizes a saved body even when you omit `body`: smart quotes are straightened and malformed links repaired. Merge fields must carry a fallback in the form {{first_name:"there"}}; a bare {{first_name}} or a pipe form like {{first_name|there}} is rejected or renders empty. Step 0 is created with `message_format` html, so send HTML in `body` or set `message_format` to text alongside a plain-text body. If the step you target has a non-null `variant` (an A/B test — visible in List-Sequence-Follow-Ups), this edits ONLY that arm; tell the user which arm changed. Requires that you own the sequence or are a team admin/owner. Returns the updated step. Returns a not-found error if the sequence or the step does not exist or belongs to another team. Free to call.',
+      inputSchema: {
+        sequence_id: z.number().int().positive().describe("ID of the sequence the step belongs to"),
+        follow_up_id: z
+          .number()
+          .int()
+          .positive()
+          .describe(
+            "ID of the step to rewrite (from List-Sequence-Follow-Ups). The step with `step: 0` is the introduction email",
+          ),
+        subject: z
+          .string()
+          .optional()
+          .describe(
+            "New email subject. Pass it ONLY to deliberately rewrite the subject; omit it to leave the current subject untouched. Never echo back a subject read from List-Sequence-Follow-Ups or Get-Sequence-Follow-Up — on a step that inherits its subject that write breaks threading, and the raw placeholder form is rejected outright. An empty string is not a mistake here: on a step above 0 it restores inheritance from the previous step, but on step 0 it clears the introduction subject and blocks Start-Sequence",
+          ),
+        body: z
+          .string()
+          .optional()
+          .describe(
+            'New email body — HTML or plain text, matching the step\'s message_format (step 0 defaults to html, so send HTML or switch message_format to text in the same call). Must be non-blank. Merge fields need a fallback: {{first_name:"there"}}, not {{first_name}}. Omit to leave the current body alone — Hunter still normalizes it on save (smart quotes straightened, malformed links repaired) and converts it outright if this call switches message_format to text',
+          ),
+        wait_days: z
+          .number()
+          .int()
+          .min(0)
+          .max(999)
+          .optional()
+          .describe(
+            "Days to wait after the previous step before this one sends (0-999). Leave at 0 for step 0 — the introduction sends first regardless, but a non-zero value is still stored and inflates Hunter's delivery-time estimate",
+          ),
+        message_format: z
+          .enum(["text", "html"])
+          .optional()
+          .describe(
+            "New body format. Omit to leave it unchanged. Switching an html step to text makes Hunter rewrite the stored body (images dropped, links flattened, HTML stripped) even when `body` is omitted, and switching back does not restore it — confirm with the user before doing this alone",
+          ),
+      },
+      outputSchema: updateSequenceFollowUpOutputSchema.shape,
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+    },
+    async ({ sequence_id, follow_up_id, subject, body, wait_days, message_format }) => {
+      // Rails permits all four params as optional, so an empty PUT is a 200 no-op
+      // that reads to the model as a successful edit.
+      if (subject === undefined && body === undefined && wait_days === undefined && message_format === undefined) {
+        const message =
+          "Provide at least one of `subject`, `body`, `wait_days`, or `message_format` — a call with none of them changes nothing."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "subject", message } },
+          isError: true,
+        }
+      }
+      // A blank body is accepted on a draft (the presence check only fires once the
+      // campaign has started), so it silently empties authored copy and reports
+      // success.
+      //
+      // A blank SUBJECT is deliberately NOT rejected. On any step above 0 it is how
+      // you restore subject inheritance: set_default_subject_line swaps it for the
+      // previous step's subject before saving. Only step 0 has nothing to inherit
+      // from, and a follow-up id cannot be resolved to a step number without an
+      // extra GET — so that case is handled in the description. Do not "fix" this
+      // by rejecting every blank subject; it removes the only route back to a
+      // threaded subject.
+      if (body !== undefined && body.trim() === "") {
+        const message =
+          "`body` cannot be blank. Omit `body` to leave it unchanged, or pass real content — writing an empty body clears the step and blocks Start-Sequence."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "body", message } },
+          isError: true,
+        }
+      }
+      // Count CODEPOINTS, not UTF-16 code units: Campaign::Validation compares
+      // against Ruby's String#length. Do not simplify to `value.length` — it
+      // double-counts astral characters and rejects content Rails accepts (a
+      // 250-emoji subject is 500 units but 250 characters to Rails).
+      for (const [field, value, max] of [
+        ["subject", subject, MAX_SUBJECT_LENGTH],
+        ["body", body, MAX_BODY_LENGTH],
+      ] as const) {
+        if (value === undefined) continue
+        const length = Array.from(value).length
+        if (length > max) {
+          const message = `\`${field}\` is ${length} characters; the limit is ${max}. Hunter accepts the write but Start-Sequence then rejects the sequence, so shorten it before saving.`
+          return {
+            content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+            structuredContent: { error: { code: "invalid_input" as const, retryable: false, field, message } },
+            isError: true,
+          }
+        }
+      }
+      // Only the sentinel form of the echo is catchable here. The RESOLVED form
+      // that List-Sequence-Follow-Ups emits is indistinguishable from a deliberate
+      // subject without the step's own subject_inherited? flag, so the description
+      // carries that half.
+      if (subject === SUBJECT_INHERITANCE_PLACEHOLDER) {
+        const message = `\`${SUBJECT_INHERITANCE_PLACEHOLDER}\` is Hunter's internal marker for "inherit the previous step's subject" and cannot be submitted. Omit \`subject\` to keep the step inheriting, or pass the concrete subject line you want.`
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "subject", message } },
+          isError: true,
+        }
+      }
+      const params: Record<string, string> = {}
+      if (subject !== undefined) params.subject = subject
+      if (body !== undefined) params.body = body
+      if (wait_days !== undefined) params.wait_days = String(wait_days)
+      if (message_format !== undefined) params.message_format = message_format
+      const result = await callHunterApi({
+        path: `/sequences/${sequence_id}/follow-ups/${follow_up_id}`,
+        apiKey,
+        baseUrl,
+        method: "PUT",
         params,
       })
       return withDeepLink(result, `/sequences/${sequence_id}`)

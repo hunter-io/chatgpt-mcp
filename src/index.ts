@@ -151,6 +151,10 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     // either way. A change that alters a constraint (a new required field, a
     // renamed property, a removed tool) needs a bump whatever the resubmission
     // schedule says.
+    //
+    // HUN-23065 rides the hold too. Adding a tool is additive — a cached client
+    // just doesn't see it — so no constraint changes meaning. remote-mcp DID bump
+    // for the same commit, because it has no resubmission to stay in step with.
     version: "3.0.0",
   })
 
