@@ -111,19 +111,23 @@ export function registerMessageTemplateTools(server: McpServer, apiKey: string, 
     TOOL_NAMES.createMessageTemplate,
     {
       description:
-        "Use this when the user wants to save a reusable message template — including when they ask to save a message draft written in chat (e.g. a sequence introduction or follow-up they liked) as a new template for later reuse. `name` and `body` are required; `subject` is optional and `message_format` defaults to html. The saved template can then pre-fill sequence steps via Create-Sequence-Follow-Up's `message_template_id`. Personalization placeholders like {{first_name}} are supported in the subject and body, but placeholders carrying the literal fallback markers FALLBACK or DEFAULT are rejected with a validation error. Free to call.",
+        'Use this when the user wants to save a reusable message template — including when they ask to save a message draft written in chat (e.g. a sequence introduction or follow-up they liked) as a new template for later reuse. `name` and `body` are required; `subject` is optional and `message_format` defaults to html. The saved template can then pre-fill sequence steps via Create-Sequence-Follow-Up\'s `message_template_id`. Personalization placeholders like {{first_name}} are supported in the subject and body, and a fallback goes after a colon: {{first_name:"there"}}. The colon is the only separator that works — everything before it is read as the attribute name, so a piped form like {{first_name|fallback:"there"}} silently renders as an empty string. Placeholders carrying the literal fallback markers FALLBACK or DEFAULT are rejected with a validation error. Free to call.',
       inputSchema: {
         name: z.string().min(1).max(255).describe("Name of the template, shown in the Hunter template picker"),
         subject: z
           .string()
           .max(250)
           .optional()
-          .describe("Email subject line (max 250 characters); may include personalization placeholders"),
+          .describe(
+            'Email subject line (max 250 characters). May include personalization placeholders; give each one a fallback after a colon, as in {{first_name:"there"}}',
+          ),
         body: z
           .string()
           .min(1)
           .max(50_000)
-          .describe("Message body (max 50,000 characters); HTML unless message_format is text"),
+          .describe(
+            'Message body (max 50,000 characters); HTML unless message_format is text. Personalization placeholders take a fallback after a colon, as in {{first_name:"there"}}',
+          ),
         message_format: z
           .enum(["html", "text"])
           .optional()
@@ -161,8 +165,21 @@ export function registerMessageTemplateTools(server: McpServer, apiKey: string, 
       inputSchema: {
         id: z.number().int().positive().describe("ID of the message template to update"),
         name: z.string().min(1).max(255).optional().describe("New name for the template"),
-        subject: z.string().max(250).optional().describe("New email subject line (max 250 characters)"),
-        body: z.string().min(1).max(50_000).optional().describe("New message body (max 50,000 characters)"),
+        subject: z
+          .string()
+          .max(250)
+          .optional()
+          .describe(
+            'New email subject line (max 250 characters). Personalization placeholders take a fallback after a colon, as in {{first_name:"there"}}',
+          ),
+        body: z
+          .string()
+          .min(1)
+          .max(50_000)
+          .optional()
+          .describe(
+            'New message body (max 50,000 characters). Personalization placeholders take a fallback after a colon, as in {{first_name:"there"}}',
+          ),
         message_format: z.enum(["html", "text"]).optional().describe("New message format of the body"),
       },
       outputSchema: singleMessageTemplateOutputSchema.shape,

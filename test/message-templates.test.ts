@@ -163,6 +163,45 @@ describe("message-template tool registration", () => {
     expect(description).toContain("message_template_id")
   })
 
+  // HUN-23066: the v2 templates page published `{{first_name|fallback:"there"}}`, a form
+  // OutgoingMessage.replace_attributes reads as the attribute name `first_name|fallback`. It
+  // matches nothing and renders empty, discarding the fallback, with nothing raised. Both the
+  // tool description and the field descriptions have to carry the supported form.
+  it("Create-Message-Template shows the supported fallback syntax", () => {
+    const registered = registeredTools.get("Create-Message-Template")!
+    const subject = (registered.inputSchema.subject as z.ZodTypeAny).description ?? ""
+    const body = (registered.inputSchema.body as z.ZodTypeAny).description ?? ""
+
+    expect(registered.description).toContain('{{first_name:"there"}}')
+    expect(subject).toContain('{{first_name:"there"}}')
+    expect(body).toContain('{{first_name:"there"}}')
+  })
+
+  it("Update-Message-Template shows the supported fallback syntax", () => {
+    const fields = registeredTools.get("Update-Message-Template")!.inputSchema
+    const subject = (fields.subject as z.ZodTypeAny).description ?? ""
+    const body = (fields.body as z.ZodTypeAny).description ?? ""
+
+    expect(subject).toContain('{{first_name:"there"}}')
+    expect(body).toContain('{{first_name:"there"}}')
+  })
+
+  it("never publishes the piped fallback form without the correction beside it", () => {
+    for (const [name, registered] of registeredTools) {
+      const surfaces = [
+        registered.description,
+        ...Object.values(registered.inputSchema).map((field) => (field as z.ZodTypeAny).description ?? ""),
+      ]
+      for (const surface of surfaces) {
+        if (surface.includes('{{first_name|fallback:')) {
+          expect(surface, `${name} mentions the piped form without the supported one`).toContain(
+            '{{first_name:"there"}}',
+          )
+        }
+      }
+    }
+  })
+
   it("Create-Message-Template supports saving a chat draft as a template", () => {
     const description = registeredTools.get("Create-Message-Template")!.description
     expect(description).toMatch(/save a message draft written in chat/i)

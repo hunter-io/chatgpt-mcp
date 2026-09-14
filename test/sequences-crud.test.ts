@@ -205,6 +205,38 @@ describe("sequence CRUD registration", () => {
     expect(description).toContain("wait_days")
   })
 
+  // HUN-23066: the v2 docs used to publish `{{first_name|fallback:"there"}}`, which
+  // OutgoingMessage.replace_attributes parses as the attribute name `first_name|fallback` — it
+  // matches nothing, renders as an empty string, and discards the fallback, all without raising.
+  // The field descriptions are what the model reads while filling `subject` and `body`, so they
+  // have to carry the supported form rather than only the requirement.
+  it("Create-Sequence-Follow-Up shows the supported fallback syntax on the fields the model fills", () => {
+    const fields = tool("Create-Sequence-Follow-Up").inputSchema
+    const subject = (fields.subject as z.ZodTypeAny).description ?? ""
+    const body = (fields.body as z.ZodTypeAny).description ?? ""
+
+    expect(subject).toContain('{{first_name:"there"}}')
+    expect(body).toContain('{{first_name:"there"}}')
+  })
+
+  it("no registered sequence tool publishes the piped fallback form as correct", () => {
+    for (const [name, registered] of registeredTools) {
+      const surfaces = [
+        registered.description,
+        ...Object.values(registered.inputSchema).map((field) => (field as z.ZodTypeAny).description ?? ""),
+      ]
+      for (const surface of surfaces) {
+        // The body description names the piped form to warn against it, so require that any
+        // mention is adjacent to the correction rather than banning the string outright.
+        if (surface.includes('{{first_name|fallback:')) {
+          expect(surface, `${name} mentions the piped form without the supported one`).toContain(
+            '{{first_name:"there"}}',
+          )
+        }
+      }
+    }
+  })
+
   // The description is the only defence against echoing back the RESOLVED subject
   // that List-Sequence-Follow-Ups emits — the sentinel form is guarded in code,
   // this one cannot be. Drop the wording and an agent editing a body silently

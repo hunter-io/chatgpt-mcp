@@ -936,13 +936,13 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
           .string()
           .optional()
           .describe(
-            "Email subject. When omitted, the step inherits the previous step's subject so replies thread together (or takes the template's subject when message_template_id is set)",
+            "Email subject. Personalization placeholders take a fallback after a colon, as in {{first_name:\"there\"}} — the colon is the only separator that works. When omitted, the step inherits the previous step's subject so replies thread together (or takes the template's subject when message_template_id is set)",
           ),
         body: z
           .string()
           .optional()
           .describe(
-            "Email body — plain text or HTML depending on message_format. Merge fields like {{first_name}} must carry fallback values. Required unless message_template_id supplies it",
+            'Email body — plain text or HTML depending on message_format. Personalization placeholders must carry a fallback, written after a colon: {{first_name:"there"}}. The colon is the only separator that works — a piped form like {{first_name|fallback:"there"}} silently renders as an empty string. Required unless message_template_id supplies it',
           ),
         wait_days: z
           .number()
