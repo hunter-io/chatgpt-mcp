@@ -17,6 +17,7 @@ import {
   embedNextAction,
   withDeepLink,
 } from "./helpers"
+import { withClientUserAgent } from "./client-context"
 import { buildResponseSchema, nullableString, paginationMetaSchema } from "./schemas/common"
 import { stripDialectOnSend } from "./schema-dialect"
 
@@ -560,19 +561,26 @@ const handler = {
           return new Response("Upstream validation unavailable", { status: 502, headers: corsHeadersFor(request) })
         }
       }
-      const server = createServer(apiKey || "", baseUrl)
-      const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
-      // The SDK publishes every tool schema with a draft-07 `$schema` that no
-      // Hunter code asks for — see schema-dialect.ts for why it is removed here
-      // rather than rewritten (HUN-22545). No `version` bump goes with this: the
-      // ChatGPT app version is tied to an OpenAI resubmission, not a dev PR.
-      stripDialectOnSend(transport, (error) => {
-        Sentry.captureException(error, {
-          tags: { worker: "chatgpt-mcp", route: "mcp", phase: "schema-dialect-strip" },
+      // Capture the caller's User-Agent once, here, and make it ambient for
+      // everything this request goes on to do — every `callHunterApi` inside the
+      // tool dispatch below reads it back and forwards it to Rails as
+      // `X-MCP-USER-AGENT`. The wrap has to enclose `handleRequest`, since that is
+      // what dispatches the tool call. See client-context.ts.
+      return await withClientUserAgent(request.headers.get("user-agent"), async () => {
+        const server = createServer(apiKey || "", baseUrl)
+        const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+        // The SDK publishes every tool schema with a draft-07 `$schema` that no
+        // Hunter code asks for — see schema-dialect.ts for why it is removed here
+        // rather than rewritten (HUN-22545). No `version` bump goes with this: the
+        // ChatGPT app version is tied to an OpenAI resubmission, not a dev PR.
+        stripDialectOnSend(transport, (error) => {
+          Sentry.captureException(error, {
+            tags: { worker: "chatgpt-mcp", route: "mcp", phase: "schema-dialect-strip" },
+          })
         })
+        await server.connect(transport)
+        return addCorsHeaders(await transport.handleRequest(request), request)
       })
-      await server.connect(transport)
-      return addCorsHeaders(await transport.handleRequest(request), request)
     }
 
     if (

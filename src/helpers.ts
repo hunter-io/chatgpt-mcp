@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { currentClientUserAgent } from "./client-context"
 import type { HunterError } from "./schemas/common"
 
 // Credential / Bearer scrub for upstream bodies. Three narrowly-scoped patterns
@@ -605,6 +606,13 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     "X-SOURCE": "hunter-chatgpt",
     Authorization: `Bearer ${options.apiKey}`,
   }
+  // The calling MCP host's User-Agent, verbatim. Rails turns it into a client
+  // slug (`Mcp::Client`) — see client-context.ts for why the mapping lives there
+  // and not here. Absent outside a request scope, and absent when the caller sent
+  // no User-Agent at all; Rails records that case as `unknown`, which is a
+  // different thing from a User-Agent it cannot name.
+  const clientUserAgent = currentClientUserAgent()
+  if (clientUserAgent) headers["X-MCP-USER-AGENT"] = clientUserAgent
   if (body !== undefined) {
     headers["Content-Type"] = isJsonBody ? "application/json" : "application/x-www-form-urlencoded"
   }
