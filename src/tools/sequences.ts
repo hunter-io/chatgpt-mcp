@@ -1010,9 +1010,8 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
   // reach step 0: unlike #destroy there is no step-0 guard, so the introduction
   // email Create-Sequence leaves blank is authorable through the API (HUN-18644).
   //
-  // The endpoint sits behind the `v2_api_extended_endpoints` flag and 404s when
-  // it is off. The flag's catch-all group is at 100%, so it is live for everyone
-  // — kept out of the description, where the model could not act on it anyway.
+  // The endpoint is generally available. The `v2_api_extended_endpoints` flag
+  // that used to gate it was removed in HUN-23140.
   server.registerTool(
     TOOL_NAMES.updateSequenceFollowUp,
     {
