@@ -10,7 +10,7 @@ import {
   PRIVATE_READ_ANNOTATIONS,
   sanitizeUpstreamMessage,
   TOOL_NAMES,
-  WRITE_ANNOTATIONS,
+  EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
   withDeepLink,
 } from "../helpers"
 import { buildResponseSchema, paginationMetaSchema } from "../schemas/common"
@@ -176,14 +176,19 @@ const pushLeadsToCrmMetaSchema = z
 const pushLeadsToCrmOutputSchema = buildResponseSchema(pushLeadsToCrmDataSchema, pushLeadsToCrmMetaSchema)
 
 export function registerIntegrationTools(server: McpServer, apiKey: string, baseUrl: string) {
-  // WRITE_ANNOTATIONS (openWorldHint: true) is deliberate: a push copies lead
-  // data OUT of Hunter into the user's external CRM (HubSpot, Pipedrive,
-  // Salesforce, Zapier, Zoho) where it becomes visible to other systems and
-  // people and cannot be recalled by Hunter — an externally-visible effect,
-  // not a private-workspace staging write. destructiveHint stays false (it
-  // creates/updates CRM records, it doesn't delete anything); the hard
-  // confirmation gate below covers the irreversibility of the data leaving
-  // Hunter. (HUN-20858)
+  // EXTERNAL_SIDE_EFFECT_ANNOTATIONS (openWorldHint: true) is deliberate: a
+  // push copies lead data OUT of Hunter into the user's external CRM (HubSpot,
+  // Pipedrive, Salesforce, Zapier, Zoho) where it becomes visible to other
+  // systems and people and cannot be recalled by Hunter — an externally-visible
+  // effect, not a private-workspace staging write. (HUN-20858)
+  //
+  // destructiveHint was false until HUN-21259, on the reasoning that a push
+  // creates/updates CRM records rather than deleting anything, with the gate
+  // below covering irreversibility. That under-rates it: `confirmed` is a
+  // model-suppliable boolean, so a prompt-injected agent simply sets it on the
+  // first call. The host's out-of-band prompt is the only control the model
+  // can't forge, and data leaving Hunter for a third party is exactly the kind
+  // of irreversible act it exists for. Both controls now apply.
   server.registerTool(
     TOOL_NAMES.pushLeadsToCrm,
     {
@@ -216,7 +221,7 @@ export function registerIntegrationTools(server: McpServer, apiKey: string, base
           ),
       },
       outputSchema: pushLeadsToCrmOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
     },
     async ({ connected_app_id, lead_ids, leads_list_id, confirmed }) => {
       // Rails would answer 400 wrong_params, but a selection-less call must

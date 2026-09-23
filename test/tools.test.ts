@@ -324,18 +324,22 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
   // HUN-20170-v3 Phase 1.2/1.3 promoted Update-Leads-List and
   // Update-Custom-Attribute to this group: a rename overwrites the prior
   // user-visible value and the previous value cannot be retrieved from the API.
+  // Update-Leads-List / Update-Custom-Attribute: a rename overwrites the prior
+  // value across everything using it and cannot be recovered from the API.
+  // HUN-20170-v3 Phase 1.2/1.3 promoted them in chatgpt-mcp; HUN-21259 ported
+  // the same call to remote-mcp so both workers now agree.
   const privateDestructiveTools = [
     "Update-Lead",
+    "Update-Leads-List",
+    "Update-Custom-Attribute",
     "Create-Or-Update-Lead",
     "Delete-Lead",
-    "Update-Leads-List",
     "Delete-Leads-List",
     "Merge-Leads-Lists",
     "Update-Company-List",
     "Delete-Company-List",
     "Update-Company-List-Folder",
     "Delete-Company-List-Folder",
-    "Update-Custom-Attribute",
     "Delete-Custom-Attribute",
   ]
 
@@ -360,11 +364,13 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: false })
   })
 
-  // Resume-Sequence: WRITE — can re-enable outbound delivery on a paused-with-pending sequence.
-  it("tool 'Resume-Sequence' has write annotations (openWorld=true: can send)", () => {
+  // Resume-Sequence: EXTERNAL_SIDE_EFFECT — clearing `paused` fires
+  // Campaign#schedule_messages_creation and resumes real outbound delivery, so
+  // destructiveHint=true makes the host confirm before email leaves. (HUN-21259)
+  it("tool 'Resume-Sequence' has external-side-effect annotations (openWorld=true: can send)", () => {
     const tool = registeredTools.get("Resume-Sequence")
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true })
   })
 
   // Archive-Sequence: PRIVATE_DESTRUCTIVE — irreversible via the API (no un-archive),
@@ -375,11 +381,13 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
   })
 
-  // Add-Sequence-Recipients: WRITE — on a started sequence, adding a recipient schedules real outbound email.
-  it("tool 'Add-Sequence-Recipients' has write annotations (openWorld=true: can send)", () => {
+  // Add-Sequence-Recipients: EXTERNAL_SIDE_EFFECT — on a started sequence, adding
+  // a recipient schedules real outbound email, so destructiveHint=true makes the
+  // host confirm. Paired with a started-only `confirmed` gate. (HUN-21259)
+  it("tool 'Add-Sequence-Recipients' has external-side-effect annotations (openWorld=true: can send)", () => {
     const tool = registeredTools.get("Add-Sequence-Recipients")
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true })
+    expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true })
   })
 
   // Remove-Sequence-Recipients: PRIVATE_DESTRUCTIVE — blocked on started sequences; cancels queued state, no send.
@@ -6384,5 +6392,181 @@ describe("HUN-20797: callHunterApi paths use kebab-case (snake_case 404s in prod
       }
     }
     expect(offenders).toEqual([])
+  })
+})
+
+// ─── HUN-21259: Add-Sequence-Recipients started-only confirmation gate ───────
+//
+// On an ALREADY-STARTED sequence the add IS the send (Rails
+// app/models/campaign/audience.rb enqueues CreateMessagesForRecipientJob per
+// recipient `if started`), so it must round-trip through the user. A draft only
+// stages, so gating it would tax the ordinary authoring path for nothing.
+describe("HUN-21259: Add-Sequence-Recipients started-only confirmation gate", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registeredResources.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const RECIPIENTS_URL = "https://api.hunter.io/v2/sequences/1/recipients"
+  const detail = (body: unknown) => ({ ok: true, text: () => Promise.resolve(JSON.stringify(body)) })
+
+  const callAdd = async (args: Record<string, unknown>, ...responses: unknown[]) => {
+    const mockFetch = vi.fn()
+    for (const r of responses) mockFetch.mockResolvedValueOnce(r)
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await registeredTools.get("Add-Sequence-Recipients")!.handler(args)
+    return { result, mockFetch }
+  }
+
+  const posted = (mockFetch: ReturnType<typeof vi.fn>) =>
+    mockFetch.mock.calls.some((c: unknown[]) => c[0] === RECIPIENTS_URL)
+
+  const askUser = async (result: any) => {
+    const { nextActionSchema } = await import("../src/schemas/common")
+    const nextAction = nextActionSchema.parse((result.structuredContent as any).nextAction)
+    if (nextAction.kind !== "ask_user") throw new Error("expected ask_user")
+    return nextAction
+  }
+
+  it("passes straight through on a DRAFT sequence — no prompt, one POST", async () => {
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"] },
+      detail({ data: { started: false } }),
+      detail({ data: {} }),
+    )
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch.mock.calls[1][0]).toBe(RECIPIENTS_URL)
+    expect(mockFetch.mock.calls[1][1].method).toBe("POST")
+    expect((result.structuredContent as any).data?.status).not.toBe("awaiting_confirmation")
+  })
+
+  it("gates a STARTED sequence: emits ask_user and never POSTs", async () => {
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com", "c@d.com"] },
+      detail({ data: { started: true } }),
+    )
+    // Only the status probe went out — no write.
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(posted(mockFetch)).toBe(false)
+    expect((result.structuredContent as any).data.status).toBe("awaiting_confirmation")
+
+    const nextAction = await askUser(result)
+    expect(nextAction.question).toContain("2 recipients")
+    expect(nextAction.question).toContain("already sending")
+    expect(nextAction.pendingToolCall).toEqual({
+      tool: "Add-Sequence-Recipients",
+      args: { sequence_id: 1, emails: ["a@b.com", "c@d.com"], confirmed: true },
+    })
+  })
+
+  it("executes on the re-issued confirmed call, raising no prompt", async () => {
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"], confirmed: true },
+      detail({ data: { started: true, archived: false } }),
+      detail({ data: {} }),
+    )
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch.mock.calls[1][0]).toBe(RECIPIENTS_URL)
+    expect(mockFetch.mock.calls[1][1].method).toBe("POST")
+    expect((result.structuredContent as any).data?.status).not.toBe("awaiting_confirmation")
+  })
+
+  it("blocks a CONFIRMED add to an archived sequence — Rails would answer 201 with zero added", async () => {
+    // Api::Campaigns::RecipientsController#create renders `created`
+    // unconditionally without checking campaign.errors, so an archived add is
+    // indistinguishable from success on the wire. The probe has to run on the
+    // confirmed path too. (Codex on #14128)
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"], confirmed: true },
+      detail({ data: { started: true, archived: true } }),
+    )
+    expect(posted(mockFetch)).toBe(false)
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as any).error.code).toBe("invalid_input")
+  })
+
+  it("fails CLOSED when the sequence status can't be read", async () => {
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"] },
+      { ok: false, status: 500, text: () => Promise.resolve("upstream boom") },
+    )
+    expect(posted(mockFetch)).toBe(false)
+    expect((result.structuredContent as any).data.status).toBe("awaiting_confirmation")
+    const nextAction = await askUser(result)
+    expect(nextAction.question).toContain("could not be verified")
+  })
+
+  it("rejects an empty selection before probing status or prompting", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await registeredTools.get("Add-Sequence-Recipients")!.handler({ sequence_id: 1 })
+    // No status probe, no POST, no confirmation round-trip for a call that
+    // cannot succeed. Mirrors Push-Leads-To-CRM's pre-flight.
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as any).error.code).toBe("invalid_input")
+    expect((result.structuredContent as any).nextAction).toBeUndefined()
+  })
+
+  it("treats explicitly empty arrays as an empty selection", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await registeredTools
+      .get("Add-Sequence-Recipients")!
+      .handler({ sequence_id: 1, emails: [], lead_ids: [] })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+  })
+
+  it("keeps pendingToolCall for a full 50-address batch (over the chained-args cap)", async () => {
+    // 50 x 35-char addresses serialize to ~2.2 KB, past SUGGESTED_ARGS_MAX_BYTES.
+    // Sharing that cap dropped the pendingToolCall and left an unactionable
+    // ask_user; confirmation payloads have their own ceiling. (Codex on #14128)
+    const emails = Array.from({ length: 50 }, (_, i) => `${String(i).padStart(3, "0")}${"x".repeat(20)}@example.com`)
+    const { result } = await callAdd({ sequence_id: 1, emails }, detail({ data: { started: true } }))
+    const nextAction = await askUser(result)
+    expect(nextAction.question).toContain("50 recipients")
+    expect(nextAction.pendingToolCall).toEqual({
+      tool: "Add-Sequence-Recipients",
+      args: { sequence_id: 1, emails, confirmed: true },
+    })
+  })
+
+  it("rejects an ARCHIVED sequence instead of warning about a send that cannot happen", async () => {
+    // Campaign::Status#archive leaves `started` true, but
+    // Campaign::Audience#add_recipients returns 0 for an archived campaign --
+    // so gating on `started` alone warned about irreversible email that could
+    // never be sent. (Codex on #14128)
+    const { result, mockFetch } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"] },
+      detail({ data: { started: true, archived: true } }),
+    )
+    expect(mockFetch).toHaveBeenCalledTimes(1) // probe only, no POST
+    expect(posted(mockFetch)).toBe(false)
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as any).error.code).toBe("invalid_input")
+    expect((result.structuredContent as any).nextAction).toBeUndefined()
+  })
+
+  it("still gates a started, PAUSED (not archived) sequence — messages are queued for resume", async () => {
+    const { result } = await callAdd(
+      { sequence_id: 1, emails: ["a@b.com"] },
+      detail({ data: { started: true, archived: false } }),
+    )
+    const nextAction = await askUser(result)
+    expect(nextAction.pendingToolCall).toBeDefined()
+  })
+
+  it("echoes lead_ids rather than emails when that is what was passed", async () => {
+    const { result } = await callAdd({ sequence_id: 1, lead_ids: [7] }, detail({ data: { started: true } }))
+    const { addSequenceRecipientsArgsSchema } = await import("../src/schemas/common")
+    const nextAction = await askUser(result)
+    expect(nextAction.pendingToolCall).toEqual({
+      tool: "Add-Sequence-Recipients",
+      args: { sequence_id: 1, lead_ids: [7], confirmed: true },
+    })
+    expect(addSequenceRecipientsArgsSchema.safeParse(nextAction.pendingToolCall!.args).success).toBe(true)
   })
 })

@@ -804,6 +804,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 export type ConfirmableToolName =
   | typeof TOOL_NAMES.startSequence
   | typeof TOOL_NAMES.deleteSequence
+  | typeof TOOL_NAMES.addSequenceRecipients
   | typeof TOOL_NAMES.bulkMoveLeads
   | typeof TOOL_NAMES.bulkDeleteLeads
   | typeof TOOL_NAMES.bulkMoveCompanies
@@ -851,6 +852,17 @@ const QUESTION_MAX_LENGTH = 300
 // bytes). 2KB leaves comfortable headroom for IDN-encoded domains while still
 // bounding token cost (≈500 tokens per call, amortised across the loop).
 const SUGGESTED_ARGS_MAX_BYTES = 2048
+// Confirmation payloads get a larger ceiling than chained `suggestedArgs`.
+// The 2048 cap bounds CHAINED data — `pending_companies` and friends, which
+// can carry upstream/scraped content into a model-visible block. A
+// `pendingToolCall` is a different animal: it echoes the CALLER'S OWN
+// arguments straight back, and every shape is strictly bounded by its per-tool
+// schema in `schemas/common.ts` (Add-Sequence-Recipients, the widest, tops out
+// at 50 x 254-char emails ~= 13 KB). Sharing the 2048 cap silently dropped the
+// `pendingToolCall` from a full 50-address batch — 50 x 35 chars already
+// serializes to ~2.2 KB — leaving an ask_user the agent could not act on.
+// (HUN-21555; Codex review on #14128)
+const PENDING_TOOL_CALL_MAX_BYTES = 16384
 
 /**
  * Truncates `reason`/`question` to keep chained-flow token cost bounded.
@@ -917,11 +929,13 @@ export function embedNextAction(
     ],
     structuredContent: { ...result.structuredContent, nextAction: action },
   })
+  const cap =
+    nextAction.kind === "ask_user" && nextAction.pendingToolCall !== undefined
+      ? PENDING_TOOL_CALL_MAX_BYTES
+      : SUGGESTED_ARGS_MAX_BYTES
   const byteSize = new TextEncoder().encode(JSON.stringify(nextAction)).byteLength
-  if (byteSize > SUGGESTED_ARGS_MAX_BYTES) {
-    console.warn(
-      `embedNextAction: payload ${byteSize} bytes exceeds ${SUGGESTED_ARGS_MAX_BYTES} cap — emitting fallback ask_user`,
-    )
+  if (byteSize > cap) {
+    console.warn(`embedNextAction: payload ${byteSize} bytes exceeds ${cap} cap — emitting fallback ask_user`)
     return append(buildOverCapFallback(nextAction))
   }
   return append(nextAction)

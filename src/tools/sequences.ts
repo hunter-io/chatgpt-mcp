@@ -7,7 +7,6 @@ import {
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   TOOL_NAMES,
-  WRITE_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
   buildNextAction,
   embedNextAction,
@@ -26,6 +25,13 @@ import {
 interface SequenceDetailCountResponse {
   data?: {
     recipients_count?: number | null
+  }
+}
+
+interface SequenceSendStateResponse {
+  data?: {
+    started?: boolean | null
+    archived?: boolean | null
   }
 }
 
@@ -173,6 +179,45 @@ async function fetchRecipientCount(sequence_id: number, apiKey: string, baseUrl:
     if (result.isError) return null
     const response = parseHunterApiResponse<SequenceDetailCountResponse>(result)
     return response?.data?.recipients_count ?? null
+  } catch {
+    return null
+  }
+}
+
+// Reads the `started` and `archived` flags from the sequence detail endpoint
+// (app/app/views/api/sequences/show.jbuilder coerces both with `!!`).
+// Add-Sequence-Recipients needs BOTH to tell three states apart:
+//
+//   draft     (started false)            staging only — nothing leaves Hunter
+//   sending   (started true, not archived) the add IS the send
+//   archived  (started true, archived)    the add is a no-op
+//
+// `started` alone is not enough: Campaign::Status#archive sets `archived` and
+// `paused` but LEAVES `started` true (app/app/models/campaign/status.rb — it
+// even requires started == true to archive), while
+// Campaign::Audience#add_recipients returns 0 outright for an archived
+// campaign. Gating on `started` alone therefore warned about an irreversible
+// send that could never happen. (Codex review on #14128)
+//
+// Returns null when the flags can't be determined (API error, timeout, legacy
+// row). Callers MUST treat null as "assume it can send" and gate — failing
+// closed costs one confirmation prompt, failing open sends real email.
+async function fetchSequenceSendState(
+  sequence_id: number,
+  apiKey: string,
+  baseUrl: string,
+): Promise<{ started: boolean; archived: boolean } | null> {
+  try {
+    const result = await callHunterApi({
+      path: `/sequences/${sequence_id}`,
+      apiKey,
+      baseUrl,
+      signal: AbortSignal.timeout(RECIPIENT_COUNT_TIMEOUT_MS),
+    })
+    if (result.isError) return null
+    const response = parseHunterApiResponse<SequenceSendStateResponse>(result)
+    if (typeof response?.data?.started !== "boolean") return null
+    return { started: response.data.started, archived: response.data.archived === true }
   } catch {
     return null
   }
@@ -618,6 +663,13 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
+  // Resume-Sequence uses EXTERNAL_SIDE_EFFECT_ANNOTATIONS (destructiveHint: true):
+  // clearing `paused` fires Campaign#schedule_messages_creation
+  // (app/app/models/campaign.rb — `saved_change_to_paused?(to: false)`), which
+  // enqueues Campaigns::CreateMessagesJob and resumes real outbound email. The
+  // host's confirmation prompt is the only control an injected prompt can't
+  // forge, so it must fire here. Note the asymmetry with Pause-Sequence, which
+  // stays PRIVATE_WRITE: pausing only ever STOPS email leaving. (HUN-21259)
   server.registerTool(
     TOOL_NAMES.resumeSequence,
     {
@@ -627,7 +679,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
         sequence_id: z.number().int().positive().describe("ID of the sequence to resume"),
       },
       outputSchema: resumeSequenceOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
     },
     async ({ sequence_id }) => {
       // On 422 (archived → sequence_not_active; disconnected email account or
@@ -1200,17 +1252,31 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     },
   )
 
-  // Add-Sequence-Recipients uses WRITE_ANNOTATIONS (openWorldHint: true): for an
-  // ALREADY-STARTED sequence, adding a recipient enqueues message creation
+  // Add-Sequence-Recipients uses EXTERNAL_SIDE_EFFECT_ANNOTATIONS
+  // (destructiveHint: true, openWorldHint: true): for an ALREADY-STARTED
+  // sequence, adding a recipient enqueues message creation
   // (Campaigns::CreateMessagesForRecipientJob — app/models/campaign/audience.rb)
   // so it can schedule real outbound email to external recipients WITHOUT a
   // separate Start-Sequence call. That externally-visible send is open-world, so
   // this is NOT a private-only staging write. (HUN-20797; Codex review on #13429)
+  //
+  // destructiveHint was false until HUN-21259: the add IS the send, but neither
+  // the host's out-of-band prompt nor an own gate fired, leaving the only
+  // email-triggering tool on the surface with no control an injected prompt
+  // couldn't forge. Both are now in place, matching Start-Sequence's posture.
+  //
+  // The `confirmed` gate is deliberately conditional — it only fires on a
+  // STARTED sequence, because that is exactly when the add sends. Draft
+  // staging (the common authoring path) passes straight through, so building a
+  // sequence doesn't cost a round-trip per batch of 50. Note that the
+  // annotation is static and cannot be conditional, so the HOST prompt still
+  // fires on every call; the gate adds the specific "this sends N emails now"
+  // question the annotation alone can't express.
   server.registerTool(
     TOOL_NAMES.addSequenceRecipients,
     {
       description:
-        "Use this when the user wants to add recipients to an existing sequence by email address or by lead ID. Up to 50 per call; batch larger sets across multiple calls. For a draft (not-yet-started) sequence this only stages recipients and does not send email — use Start-Sequence to begin sending. For an ALREADY-STARTED sequence, adding a recipient can immediately schedule a real outbound email to that recipient (no separate Start-Sequence call). Free to call.",
+        "Use this when the user wants to add recipients to an existing sequence by email address or by lead ID. Up to 50 per call; batch larger sets across multiple calls. For a draft (not-yet-started) sequence this only stages recipients, does not send email, and runs immediately — use Start-Sequence to begin sending. For an ALREADY-STARTED sequence, adding a recipient immediately schedules a real outbound email to that recipient (no separate Start-Sequence call) and therefore requires explicit user confirmation: the first call returns a confirmation prompt without adding anyone, and only re-issuing with `confirmed: true` performs the add. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence"),
         emails: z
@@ -1223,11 +1289,99 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
           .max(50)
           .optional()
           .describe("Lead IDs to add as recipients (max 50)"),
+        confirmed: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Set to true ONLY after the user has explicitly confirmed in chat that real emails may be sent to the new recipients. Ignored for draft sequences (nothing is sent, so no prompt is raised). On a started sequence the first invocation (without confirmed) returns an ask_user nextAction; the second invocation (with confirmed: true) actually adds them.",
+          ),
       },
       outputSchema: addRecipientsOutputSchema.shape,
-      annotations: WRITE_ANNOTATIONS,
+      annotations: EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
     },
-    async ({ sequence_id, emails, lead_ids }) => {
+    async ({ sequence_id, emails, lead_ids, confirmed }) => {
+      // Rails answers 400 wrong_params for a selection-less call, but it must
+      // not reach the confirmation gate either — asking the user to approve a
+      // send that cannot happen is worse than failing fast locally. Mirrors the
+      // same pre-flight in Push-Leads-To-CRM. buildResponseSchema declares
+      // `error`, so the published output schema admits this envelope.
+      if ((emails === undefined || emails.length === 0) && (lead_ids === undefined || lead_ids.length === 0)) {
+        const message = "Provide emails and/or lead_ids (a non-empty array) — there is nobody to add."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, message } },
+          isError: true,
+        }
+      }
+
+      // Probed on EVERY path, confirmed or not. `null` means the state could
+      // not be read — fail CLOSED, since guessing "draft" on an unknown row
+      // would send real email unprompted.
+      const state = await fetchSequenceSendState(sequence_id, apiKey, baseUrl)
+
+      // Archived is `started: true` but adds nobody
+      // (Campaign::Audience#add_recipients returns 0 for an archived campaign),
+      // so this must never reach the API — Api::Campaigns::RecipientsController
+      // #create sums the add counts and renders `api_render(status: :created)`
+      // UNCONDITIONALLY, without inspecting campaign.errors. An archived add
+      // therefore comes back as HTTP 201 with zero added, i.e. indistinguishable
+      // from success. Checking only the unconfirmed path left the re-issued
+      // `confirmed: true` call (and any direct confirmed call) reporting a
+      // phantom success. (Codex review on #14128)
+      //
+      // This narrows but cannot close the window — a sequence archived between
+      // this probe and the POST still yields a silent zero-add. The complete
+      // fix is server-side: have the controller surface the model error.
+      if (state?.archived === true) {
+        const message = "This sequence is archived — recipients cannot be added to it."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, message } },
+          isError: true,
+        }
+      }
+
+      if (!confirmed) {
+        if (state?.started !== false) {
+          // The empty-selection pre-flight above guarantees addCount >= 1.
+          const addCount = (emails?.length ?? 0) + (lead_ids?.length ?? 0)
+          const addPhrase = `${addCount} recipient${addCount === 1 ? "" : "s"}`
+          const reason =
+            state?.started === true
+              ? "The sequence is already sending, so each new recipient is scheduled a real email immediately."
+              : "The sequence's status could not be verified, so this may schedule real email immediately."
+          const stub: McpTextResult = {
+            content: [
+              {
+                type: "text" as const,
+                text: `Awaiting user confirmation to add recipients to sequence ${sequence_id}.`,
+                annotations: { audience: ["user"] },
+              },
+            ],
+            structuredContent: {
+              data: { id: sequence_id, status: "awaiting_confirmation" },
+            },
+          }
+          return embedNextAction(
+            stub,
+            buildNextAction({
+              kind: "ask_user",
+              question: `Confirm: add ${addPhrase} to sequence ${sequence_id}? ${reason} Sent email cannot be recalled.`,
+              pendingToolCall: {
+                tool: TOOL_NAMES.addSequenceRecipients,
+                // Echo only the fields that were actually provided.
+                args: {
+                  sequence_id,
+                  ...(emails !== undefined && { emails }),
+                  ...(lead_ids !== undefined && { lead_ids }),
+                  confirmed: true,
+                },
+              },
+            }),
+          )
+        }
+      }
+
       const params: Record<string, string | string[]> = {}
       if (emails) params.emails = emails
       if (lead_ids) params.lead_ids = lead_ids.map(String)

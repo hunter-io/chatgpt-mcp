@@ -68,6 +68,18 @@ export const deleteSequenceArgsSchema = z
   })
   .strict()
 
+// Add-Sequence-Recipients gates only on a STARTED sequence, so the re-issued
+// call echoes whichever selection field the original carried (both optional,
+// mirroring the tool's own inputSchema).
+export const addSequenceRecipientsArgsSchema = z
+  .object({
+    sequence_id: z.number().int().positive(),
+    emails: z.array(z.string().max(254)).max(50).optional(),
+    lead_ids: z.array(z.number().int().positive()).max(50).optional(),
+    confirmed: z.literal(true),
+  })
+  .strict()
+
 export const bulkMoveLeadsArgsSchema = z
   .object({
     leads_list_id: z.number().int().positive(),
@@ -140,6 +152,7 @@ export const deleteApiKeyArgsSchema = z
 export const pendingToolCallSchema = z.union([
   z.object({ tool: z.literal(TOOL_NAMES.startSequence), args: startSequenceArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.deleteSequence), args: deleteSequenceArgsSchema }),
+  z.object({ tool: z.literal(TOOL_NAMES.addSequenceRecipients), args: addSequenceRecipientsArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.bulkMoveLeads), args: bulkMoveLeadsArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.bulkDeleteLeads), args: bulkDeleteLeadsArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.bulkMoveCompanies), args: bulkMoveCompaniesArgsSchema }),

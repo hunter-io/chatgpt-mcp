@@ -148,10 +148,13 @@ describe("integrations tool registration", () => {
     expect(tool.description).toMatch(/Free to call\.$/)
   })
 
-  it("Push-Leads-To-CRM uses WRITE_ANNOTATIONS (open-world: lead data leaves Hunter)", () => {
+  // destructiveHint: true since HUN-21259 — `confirmed` is model-suppliable, so
+  // the host prompt is the only control an injected agent can't forge, and lead
+  // data reaching a third-party CRM can't be recalled.
+  it("Push-Leads-To-CRM uses EXTERNAL_SIDE_EFFECT_ANNOTATIONS (open-world: lead data leaves Hunter)", () => {
     expect(getTool("Push-Leads-To-CRM").annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       openWorldHint: true,
     })
   })

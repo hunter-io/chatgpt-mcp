@@ -7,7 +7,6 @@ import {
   type McpTextResult,
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
-  PRIVATE_WRITE_ANNOTATIONS,
   TOOL_NAMES,
   withDeepLink,
 } from "../helpers"
@@ -207,7 +206,13 @@ export function registerAccountManagementTools(server: McpServer, apiKey: string
           ),
       },
       outputSchema: createApiKeyOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      // destructiveHint: true to match Delete-API-Key. Minting a credential
+      // that outlives the session is at least as consequential as removing one,
+      // so the pairing should not be asymmetric. Not a reachable attack path —
+      // Api::ApiKeysController's `reject_oauth_token` refuses OAuth-authorized
+      // connections, which is both the ChatGPT App and the Claude connector —
+      // this is consistency, not a fix. (HUN-21259)
+      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ name, confirmed }) => {
       if (!confirmed) {

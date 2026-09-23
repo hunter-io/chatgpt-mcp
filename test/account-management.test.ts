@@ -152,13 +152,16 @@ describe("account-management registration", () => {
     expect(description).toContain("confirmed: true")
   })
 
-  it("marks reads, the create write, and the delete with exact annotation values", () => {
+  // Create-API-Key is private-DESTRUCTIVE to match Delete-API-Key: minting a
+  // credential that outlives the session is at least as consequential as
+  // removing one. (HUN-21259)
+  it("marks reads and both key-management writes with exact annotation values", () => {
     const privateRead = { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
     expect(tool("Get-Usage").annotations).toEqual(privateRead)
     expect(tool("List-API-Keys").annotations).toEqual(privateRead)
     expect(tool("Create-API-Key").annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       openWorldHint: false,
     })
     expect(tool("Delete-API-Key").annotations).toEqual({
@@ -383,7 +386,12 @@ describe("Create-API-Key", () => {
       jsonOk(
         {
           status: "success",
-          data: { id: 8, name: null, token: "0000111122223333aaaabbbbccccddddeeeeffff", created_at: "2026-07-02T10:00:00Z" },
+          data: {
+            id: 8,
+            name: null,
+            token: "0000111122223333aaaabbbbccccddddeeeeffff",
+            created_at: "2026-07-02T10:00:00Z",
+          },
         },
         201,
       ),
