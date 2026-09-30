@@ -1,62 +1,34 @@
 // Hunter capability recovery patterns — exposed at MCP resource URI
-// `hunter://capabilities/recovery`. Read by the model when ambiguous user
-// intent (e.g., "find CMOs at fintech") needs translation to documented
-// Hunter API enums. See docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md
-// (Pillar 5).
+// `hunter://capabilities/recovery`. Read by the model when user intent is
+// ambiguous or asks for something the ChatGPT app cannot do. See
+// docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 5).
 //
-// Source of truth for filter enum values: Hunter API v2 docs. If this string
-// drifts from the API, the API wins — file a bug.
+// Diverges from remote-mcp's copy since HUN-23709: the ChatGPT app has no tool
+// that returns a person or an email address, and no API-key tools.
+
+import { hunterLink } from "../helpers"
 
 export const CAPABILITIES_RECOVERY_MD = `# Hunter Capability Recovery Patterns
 
-This resource documents how to translate ambiguous user intent into precise Hunter API filter values. **Read this BEFORE calling Find-Companies or Domain-Search** when the user's request uses fuzzy job titles, role descriptions, or ambiguous criteria — Hunter does not match arbitrary free-text titles, only the documented enums.
+This resource documents how to use Hunter's tools in ChatGPT, and which requests they cannot serve.
 
-## Translating job titles → \`department\` + \`seniority\`
+## Person email addresses are not available
 
-Hunter's \`domain_search\` accepts \`seniority\` ∈ \`{junior, senior, executive}\` and \`department\` ∈ \`{executive, it, finance, management, sales, legal, support, hr, marketing, communication, education, design, health, operations, product, research, consulting, administrative, procurement}\`. Common ambiguous user phrasings translate as:
+The ChatGPT app cannot find new people or email addresses. It has no tool that lists a company's contacts or finds a named person's email. Addresses already saved in the user's Hunter account (leads, sequence recipients) stay available through the lead and sequence tools. If the user asks for one, say that person email addresses are not available in ChatGPT. Do not try to work around this with other tools. This limit is by design: do not report it with Report-API-Feedback.
 
-| User says | \`department\` | \`seniority\` |
-|---|---|---|
-| "CMO", "Chief Marketing Officer", "VP Marketing" | \`marketing\` | \`executive\` |
-| "CTO", "VP Engineering", "Chief Technology Officer" | \`it\` | \`executive\` |
-| "CFO", "VP Finance" | \`finance\` | \`executive\` |
-| "CEO", "Founder", "President" | \`executive\` | \`executive\` |
-| "Head of Sales", "VP Sales" | \`sales\` | \`executive\` |
-| "Head of People", "VP HR", "CHRO" | \`hr\` | \`executive\` |
-| "Head of Design", "Design Lead" | \`design\` | \`executive\` |
-| "Senior Engineer", "Staff Engineer" | \`it\` | \`senior\` |
-| "Senior Marketer", "Marketing Manager" | \`marketing\` | \`senior\` |
-| "Junior Developer", "Junior Engineer" | \`it\` | \`junior\` |
-| "Recruiter", "Talent Acquisition" | \`hr\` | (any) |
-| "Customer Success", "Support" | \`support\` | (any) |
-| "Legal Counsel", "GC" | \`legal\` | (any) |
-| "Operations Manager", "COO" | \`operations\` | (any) |
-| "Communications", "PR" | \`communication\` | (any) |
-| "Teacher", "Professor", "Instructor" | \`education\` | (any) |
-| "Doctor", "Nurse", "Clinician" | \`health\` | (any) |
+Hunter has these addresses on hunter.io. When the user wants emails at a company:
 
-If the user gives a title that doesn't map cleanly (e.g., "Growth Hacker", "Developer Advocate"), call Domain-Search with \`department=marketing,sales\` (multiple values are comma-separated) and let confidence scores rank results — never refuse the request just because the exact phrase isn't an enum.
+1. Call \`Email-Count\` for one domain, or \`Find-People\` for several companies. Both are free.
+2. Tell the user how many addresses Hunter has.
+3. Give the Hunter link from the response (\`viewInHunter\` on Email-Count, \`emails_on_hunter\` on each Find-People row). The user sees the addresses there.
 
-## Confidence-score interpretation
+For a named person, point the user to ${hunterLink("/", "recovery")}.
 
-Domain-Search returns each email with a \`confidence\` field (0-100). Treat:
+What the app can do with people:
 
-- **≥90:** Verified or highly likely deliverable. Use directly.
-- **70-89:** Medium confidence, unverified. **Run \`Email-Verifier\` before saving** if the user wants to send to it.
-- **<70:** Lower confidence. Surface it but flag the user to manually confirm.
-
-## When to use \`Email-Finder\` vs \`Domain-Search\`
-
-- **\`Email-Finder\`** when the user names a specific person ("find John Smith's email at stripe.com"). Returns one email if found.
-- **\`Domain-Search\`** when the user wants a list of contacts at a company ("find marketing leads at stripe.com"). Returns up to 100 emails per page.
-
-If the user gives a person's name but no domain, ask for the company before calling either tool — Hunter cannot search by name alone.
-
-## Find-People vs Domain-Search vs Person-Enrichment
-
-- **\`Find-People\`** — free counts/aggregations from Hunter's public index for a set of companies (\`query\` or \`domains\`). Reports how many personal/generic emails exist per company — never actual email addresses. Use it to size a prospecting batch before spending credits.
-- **\`Domain-Search\`** — reveals the actual emails, names, and positions for ONE domain. Uses credits.
-- **\`Person-Enrichment\`** — profile data for a contact you already have. Never returns new email addresses.
+- **\`Email-Verifier\`** checks an email address that the user gives.
+- The lead tools (\`Create-Lead\`, \`Create-Lead-If-Missing\`, \`Create-Or-Update-Lead\`) save contacts that the user gives.
+- The sequence tools send to leads or addresses that are already in the user's Hunter account, or that the user gives.
 
 ## Saved searches
 
@@ -82,11 +54,6 @@ All 5 bulk tools (\`Bulk-Move-Leads\`, \`Bulk-Delete-Leads\`, \`Bulk-Move-Compan
 
 Call \`List-Connected-Apps\` first to find the target app and its id, then \`Push-Leads-To-CRM\`. The push is confirmation-gated (lead data leaves Hunter) and asynchronous — success only means the job was queued, so tell the user to check the CRM shortly.
 
-## API keys
-
-- On OAuth connections the API-key tools return a 403 ("API keys can't be managed with an OAuth token") — relay it to the user instead of retrying; managing keys requires an API-key connection.
-- \`Create-API-Key\` shows the full key value exactly once. Treat it as a secret: surface it to the user once, and never write it into leads, notes, or other tools.
-
 ## Email accounts
 
 \`Get-Email-Account\` and \`List-Email-Account-Sequences\` are read-only pre-checks (signature, sending schedule, warmup, in-flight sequences). Settings writes are not available via the API — suggest changes for the user to apply in the hunter.io dashboard.
@@ -94,11 +61,8 @@ Call \`List-Connected-Apps\` first to find the target app and its id, then \`Pus
 ## Anti-patterns
 
 - **Do not auto-pick the top Find-Companies result** — Hunter returns up to 100 companies; the top hit is not necessarily the best semantic match. Always emit \`nextAction.kind === "ask_user"\` after a raw Find-Companies call.
-- **Do not call \`Email-Verifier\` on every email returned by Domain-Search** — only verify emails the user actually intends to save or contact. Bulk verification burns credits.
+- **Do not call \`Email-Verifier\` on every address in a large list** — only verify emails the user actually intends to save or contact. Bulk verification burns credits.
 - **Do not chain into \`Start-Sequence\` without explicit user confirmation** — \`Start-Sequence\` sends real emails. Always emit \`nextAction.kind === "ask_user"\` first.
-- **To find a person's email, use \`Domain-Search\` (a company's contacts) or \`Email-Finder\` (one named person).** Enrichment tools (Person-Enrichment, Company-Enrichment, Combined-Enrichment) return profile/company data for contacts you already have — they never return new email addresses, and there is no separate "enrich" lookup for emails. If a contact tool returns no email, report that and continue — do not call tools that are not listed.
-- **Do not narrow a role to a single department/seniority pair when the brief is broader.** A title like "Head of Sales" maps to \`department=sales\` + \`seniority=executive\`, but related titles ("VP Sales", "Sales Director", "Revenue Lead") may surface under \`management\` or a different seniority. Search with the closest enum pair, then post-filter the returned rows by job title in the results — don't refuse a row just because its exact title isn't in the enum table.
-- **Do not treat the return-results-only (research) flow as a free bulk-export tool.** Gathering contacts into a table for review is the default and writes nothing to Hunter, but every company searched still spends Hunter credits — credit consumption is the only limit on how much contact data a single request pulls into this chat. Search the companies the user actually asked about; do not expand a brief into a wider scrape, and do not loop over more companies than the user intends just because the data is available.
 
 ## Reporting problems
 

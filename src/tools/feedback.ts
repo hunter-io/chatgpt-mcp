@@ -57,7 +57,7 @@ export function registerFeedbackTools(server: McpServer, apiKey: string, baseUrl
           .string()
           .max(500)
           .optional()
-          .describe("The API path or tool involved, e.g. '/v2/domain-search' or 'Domain-Search'."),
+          .describe("The API path or tool involved, e.g. '/v2/email-verifier' or 'Email-Verifier'."),
         expected: z.string().max(5000).optional().describe("What you expected to happen."),
         actual: z.string().max(5000).optional().describe("What actually happened (error text, wrong field, etc.)."),
         request_example: z

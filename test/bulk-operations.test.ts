@@ -252,7 +252,7 @@ describe("Bulk-Move-Leads", () => {
     expect(result.isError).toBeUndefined()
     const sc = result.structuredContent as any
     expect(sc.data.status).toBe("queued")
-    expect(sc.viewInHunter).toBe("https://hunter.io/leads?leads_list_id=9")
+    expect(sc.viewInHunter).toBe("https://hunter.io/leads?leads_list_id=9&utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
     const schema = publishedOutputSchema(tool("Bulk-Move-Leads").outputSchema!)
     expect(() => schema.parse(sc)).not.toThrow()
   })
@@ -477,7 +477,7 @@ describe("Bulk-Move-Companies", () => {
     expect(body.get("target_company_list_id")).toBe("9")
     const sc = result.structuredContent as any
     expect(sc.data.status).toBe("queued")
-    expect(sc.viewInHunter).toBe("https://hunter.io/lead/companies?company_list_id=9")
+    expect(sc.viewInHunter).toBe("https://hunter.io/lead/companies?company_list_id=9&utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
     const schema = publishedOutputSchema(tool("Bulk-Move-Companies").outputSchema!)
     expect(() => schema.parse(sc)).not.toThrow()
   })

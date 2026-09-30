@@ -1,77 +1,77 @@
 # OpenAI Apps SDK Dashboard — Hunter ChatGPT MCP
 
-This file is a **pointer**, not the dashboard source-of-truth. The **current**
-annotation posture is the **V3** pass (HUN-20838…HUN-20869 plus HUN-23065: 101 tools, the
-campaigns→sequences terminology migration, and the new sequence-authoring /
-lead-organization / bulk / discover-people / integrations / account-management
-tool families). It carries forward, unchanged:
+This file is a **pointer**, not the dashboard source-of-truth. The current
+surface is **version 4.0.0 with 93 tools** (HUN-23709). OpenAI rejected 2.0.0
+because of the person-email features, so 4.0.0 removes 8 tools:
 
-- the HUN-20170-v3 billable-lookup defense (position D: paid lookups stay
-  `readOnly=false / destructive=false / openWorld=true`, with bulk credit
-  consent enforced by a server-side `confirmed_credit_use` guard on
-  `Domain-Search`), and
-- the HUN-20797 sequence-tool posture (Pause/Archive = closed-world,
-  Resume/Add-recipients = open-world because they can schedule a real send),
-  with the tools now carrying their sequence names after the rename.
+- Person email: `Domain-Search`, `Email-Finder`, `Person-Enrichment`,
+  `Combined-Enrichment`, `Plan-Prospecting-Flow`.
+- API keys: `List-API-Keys`, `Create-API-Key`, `Delete-API-Key`. These tools
+  refuse OAuth tokens, and the ChatGPT app connects with OAuth.
 
-The authoritative justifications to paste into the OpenAI Developer
-dashboard live at:
+`Email-Verifier` stays. It only checks an address that the user gives.
+`Email-Count` and `Find-People` stay. They return counts only, with a link to
+hunter.io where the user sees the addresses. The server instructions tell the
+model that person email addresses are not available in ChatGPT, and point the
+user to hunter.io.
+
+The HUN-20797 sequence-tool posture stays: Pause and Archive are closed-world.
+Resume and Add-Sequence-Recipients are open-world, because they can schedule a
+real send.
+
+The justifications to paste into the OpenAI Developer dashboard live at:
 
 ```
-chatgpt-mcp/.context/v3-resubmission/tool-justifications.md
-chatgpt-mcp/.context/v3-resubmission/justifications-autofill.console.js
+chatgpt-mcp/.context/v4-resubmission/tool-justifications.md
+chatgpt-mcp/.context/v4-resubmission/justifications-autofill.console.js
 ```
 
-`.context/` is gitignored (local-only working artifact). Regenerate both files
-from the deployed `tools/list` + the annotation constants whenever the
-annotation posture or tool descriptions change (the `.js` is generated from
-the `.md`; they must never drift apart). Do not paste justifications from this
-file.
+`.context/` is gitignored (local-only working artifact). Generate both files
+from the deployed `tools/list` and the annotation constants. Generate them
+again when the annotation posture or a tool description changes. The `.js` file
+comes from the `.md` file, so the two must stay the same. Do not paste
+justifications from this file.
 
 ## Pre-submission checklist (run before every resubmission)
 
-> **V3 / v3.0.0 — posture summary.** A tool is `openWorldHint: true` **iff**
-> it reads Hunter's open-internet data index (`Find-Companies`, `Find-People`,
-> `Email-Count`, the 6 billable lookups) OR can produce an externally-visible
-> effect: `Start-Sequence` (sends), `Resume-Sequence` and
-> `Add-Sequence-Recipients` (both can schedule real outbound email on a
-> started / paused-with-pending sequence without a separate start call), and
-> `Push-Leads-To-CRM` (lead data leaves Hunter into the user's external CRM).
-> Everything else — including all creates, updates, deletes, bulk operations,
-> tags, folders, templates, saved searches, webhooks, API keys, usage, and
-> email-account reads — is `openWorldHint: false`. Ten tools are additionally
-> confirmation-gated in-app (`confirmed: true` re-issue pattern):
-> Start-Sequence, Delete-Sequence, the 5 bulk tools, Push-Leads-To-CRM,
-> Create-API-Key, Delete-API-Key. Matches OpenAI's rule (open-world = effects
-> visible beyond the current user). Re-add the connector after deploy to
-> refresh cached dashboard cards.
+> **4.0.0 — posture summary.** A tool is `openWorldHint: true` only if it reads
+> the Hunter index of open-internet data (`Find-Companies`, `Email-Count`,
+> `Find-People`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
+> effect outside the account of the user. These tools have that effect: `Start-Sequence` (sends),
+> `Resume-Sequence` and `Add-Sequence-Recipients` (can schedule real email),
+> and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). All
+> other tools are `openWorldHint: false`. Nine tools also ask for confirmation
+> in the app (the `confirmed: true` re-issue pattern): Start-Sequence,
+> Delete-Sequence, Add-Sequence-Recipients (started sequences only), the 5 bulk
+> tools, and Push-Leads-To-CRM.
 
-- [ ] Bump `McpServer.version` in `chatgpt-mcp/src/index.ts` so ChatGPT's `tools/list` cache invalidates (V3 shipped as `3.0.0`).
+- [ ] Make sure that `McpServer.version` in `chatgpt-mcp/src/index.ts` is `4.0.0`.
 - [ ] Deploy: `pnpm --filter chatgpt-mcp run deploy`.
-- [ ] In the OpenAI Developer dashboard, **create a new app version** (do NOT edit the existing one; in-place edits do not refresh `tools/list`). Then click **Scan Tools** explicitly.
-- [ ] Confirm the dashboard shows **101 tools** and the `Read Only` / `Open World` / `Destructive` flags match the posture note above. Any mismatch → fix code & redeploy before pasting justifications.
-- [ ] Verify each renamed-via-title tool surfaces the verb-form label on its card (`Find Emails By Domain`, `Find Person Email`, `Verify Email`, `Enrich Person`, `Enrich Company`, `Enrich Person And Company`). If the dashboard shows only the canonical `name`, execute the canonical-rename contingency described in the 2026-05-28 v3 plan's Phase 5.3.
-- [ ] For **every** tool, paste the Description (no edits) and the three justification lines from `chatgpt-mcp/.context/v3-resubmission/tool-justifications.md` verbatim (or run `chatgpt-mcp/.context/v3-resubmission/justifications-autofill.console.js` in the dashboard console to fill all 101×3 fields). Each justification stays ≤200 chars.
-- [ ] Verify zero "Recommended: Add an `outputSchema`" warnings remain.
-- [ ] Wire-format annotation completeness: confirm the deployed `tools/list` response includes `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null`/omitted) on every tool. See the `curl + jq` check in the 2026-05-28 v3 plan's Phase 5.2.
-- [ ] CSP / widget verification: `_meta.ui.csp.connectDomains` includes `https://api.hunter.io`, `frameDomains` is `[]` (explicit empty), and both widgets render without CSP errors after Scan Tools completes.
-- [ ] Demo account: real API key, ≥200 search + ≥50 verification credits, no MFA, no sign-up gate. Pre-warm state: a real **started** sequence (so Pause/Resume/Archive return real success), a draft sequence with a free recipient slot, at least one saved message template, a couple of lead tags, and — if available — a connected CRM app.
-- [ ] Capture a full-screen screenshot of the dashboard tool list showing no warnings; attach to the PR.
-- [ ] Run the [`../TESTING_PLAYBOOK.md`](../TESTING_PLAYBOOK.md) V3 pass: every Section 1 prompt on ChatGPT web AND ChatGPT mobile (iOS + Android; capture screen recordings), plus the Section 2 rows for the new tool families and the Section 3 edge cases 3.12–3.21.
-- [ ] Paste the resubmission note from `TESTING_PLAYBOOK.md` **Section 5** (notes A–E; note E covers the V3 terminology migration, the new tool families, and the Idempotency-Key behavior) into OpenAI's resubmission notes field.
+- [ ] Send `initialize` to `https://chatgpt.hunter.io/mcp`. Make sure that `serverInfo.version` is `4.0.0`.
+- [ ] Send `tools/list`. Make sure that it returns 93 tools and none of the 8 removed tools.
+- [ ] In the OpenAI Developer dashboard, withdraw version 2.0.0 from review.
+- [ ] **Create a new app version.** Do not edit an existing version, because an edit does not refresh `tools/list`. Then click **Scan Tools**.
+- [ ] Make sure that the dashboard shows **93 tools**. Make sure that the `Read Only`, `Open World`, and `Destructive` flags agree with the posture summary. If a flag is different, correct the code and deploy again before you paste justifications.
+- [ ] Make sure that the two billable lookups show their verb-form title: `Verify Email` and `Enrich Company`.
+- [ ] For **each** tool, paste the description (no edits) and the three justification lines from `tool-justifications.md`. Or run `justifications-autofill.console.js` in the dashboard console to fill all 93×3 fields. Each justification is 200 characters or fewer.
+- [ ] Make sure that no "Recommended: Add an `outputSchema`" warning shows.
+- [ ] Make sure that each tool in the deployed `tools/list` has `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null` or missing). See the `curl + jq` check in the 2026-05-28 v3 plan, Phase 5.2.
+- [ ] CSP and widgets: make sure that `_meta.ui.csp.connectDomains` includes `https://api.hunter.io` and `frameDomains` is `[]`. Make sure that both widgets show without CSP errors after Scan Tools.
+- [ ] Demo account: a real API key, 50 or more verification credits, no MFA, and no sign-up gate. Prepare a **started** sequence (so Pause, Resume, and Archive return real success), a draft sequence with a free recipient slot, a saved message template, some lead tags, and a connected CRM app if available.
+- [ ] Take a full-screen screenshot of the dashboard tool list with no warnings. Attach it to the PR.
+- [ ] Do the [`../TESTING_PLAYBOOK.md`](../TESTING_PLAYBOOK.md) pass on ChatGPT web and ChatGPT mobile (iOS and Android). Record the mobile screens.
+- [ ] Paste the resubmission notes from `TESTING_PLAYBOOK.md` **Section 5** into the resubmission notes field.
 - [ ] Click Submit.
 
 ## Why this file is a pointer
 
-Keeping the justification copy in a gitignored `.context/v3-resubmission/`
-file means:
+The dashboard copy stays in a gitignored `.context/v4-resubmission/` folder
+for three reasons:
 
-1. The dashboard text is **regenerated from the current code** (the live
-   `tools/list` + annotation constants) every resubmission cycle. Stale
-   tables can't drift into the dashboard.
-2. The playbook (`../TESTING_PLAYBOOK.md`), the implementation plan
-   (`docs/plans/2026-07-02-001-feat-mcp-chatgpt-api-parity-plan.md`), and the
-   code constants are the single source of truth. `dashboard.md` is just the
-   human-runnable checklist that points at them.
-3. Local-only artifacts (per the `feedback_no_committing_todos` rule) stay
-   out of git; the PR carries the plan + code + tests, not the paste-source.
+1. Each resubmission generates the dashboard text from the current code (the
+   live `tools/list` and the annotation constants). Old tables cannot get into
+   the dashboard.
+2. The playbook (`../TESTING_PLAYBOOK.md`) and the code constants are the
+   source of truth. `dashboard.md` is only the checklist that points to them.
+3. Local-only artifacts (the `feedback_no_committing_todos` rule) stay out of
+   git. The PR carries the code and the tests, not the paste source.

@@ -1,8 +1,12 @@
 # ChatGPT App — Testing Playbook
 
-> Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app)
+> Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app), [HUN-23709](https://linear.app/hunter-io/issue/HUN-23709)
 
-Manual test playbook for the Hunter ChatGPT app — **V3 resubmission**. Run before every app review submission to confirm the demo video flow, the marketplace test cases, and to surface hidden bugs across all 101 tools. V3 grows the surface from 56 to 101 tools (HUN-20838…HUN-20866, plus Update-Sequence-Follow-Up in HUN-23065): sequence CRUD + follow-up authoring, message templates, lead tags, leads-list folders/favorites, bulk operations, Discover people extraction, saved searches, CRM push, webhooks, and usage/API-key management — plus the terminology migration that renamed five outreach tools and the `sequence-prep` prompt to the canonical "sequences" naming.
+Manual test playbook for the Hunter ChatGPT app — **version 4.0.0 resubmission, 93 tools**. Run it before every app review submission. It checks the demo video flow, the marketplace test cases, and all 93 tools.
+
+**Why 4.0.0 has 93 tools, not 101 (HUN-23709).** OpenAI rejected version 2.0.0 because of person-email features. Version 4.0.0 removes 8 tools. Five return people or person emails: `Domain-Search`, `Email-Finder`, `Person-Enrichment`, `Combined-Enrichment`, and `Plan-Prospecting-Flow`. Three manage API keys and refuse OAuth tokens: `List-API-Keys`, `Create-API-Key`, and `Delete-API-Key`. The `prospect` prompt is removed too. The app cannot show people or email addresses. `Email-Verifier` stays, because it only checks an address that the user gives. `Email-Count` and `Find-People` stay, because they return counts only. Each gives a hunter.io link where the user sees the addresses.
+
+Rows marked "(V3)" cover tools added in the 3.0.0 submission (HUN-20838…HUN-20866, HUN-23065).
 
 **How to use this doc:**
 - Run every prompt in **chatgpt.com** with the deployed Hunter app installed.
@@ -38,13 +42,13 @@ Set this up once before you start.
 - [ ] Browser console / DevTools open to capture network errors and widget rendering issues
 - [ ] Fresh ChatGPT conversation per prompt unless explicitly chained — avoids context bleed between tests
 
-> **Cost estimate for one full run:** ~25 credits total across Sections 1, 2, and 3 — unchanged from the previous revision: all 44 tools added in V3 are free, and none of the prompts added for V3 spends credits. (Hunter has a single unified credit pool — every paid call deducts from the same balance.)
+> **Cost estimate for one full run:** about 5 credits across Sections 1, 2, and 3. Only `Company-Enrichment` and `Email-Verifier` use credits. All other tools are free. (Hunter has a single unified credit pool — every paid call deducts from the same balance.)
 
 ---
 
 ## Section 1 — Marketplace + demo prompts
 
-These five prompts are the official set submitted to OpenAI's marketplace and should map 1:1 to the demo video shots. They cover both widgets, the prospecting coordinator, and the destructive-action confirmation gate.
+These five prompts are the official set submitted to OpenAI's marketplace and should map 1:1 to the demo video shots. They cover both widgets, a company-list build, sequence recipients, and the destructive-action confirmation gate.
 
 ---
 
@@ -69,7 +73,8 @@ Find software companies in San Francisco with more than 50 employees
 - [ ] Filters inferred from the query are visible (industry: software, location: San Francisco, size: 50+)
 
 **Pass criteria:**
-- [ ] Model does **not** auto-pick the top result for follow-up — it asks the user which company to investigate (`ask_user` next-action)
+- [ ] Model does **not** auto-pick the top result for follow-up — it asks whether to save a company, look one up in detail, or refine the search (`ask_user` next-action)
+- [ ] Model does **not** offer to find contacts or email addresses at these companies
 - [ ] No narrative/summary of the results outside the widget (per widget description, the UI is the source of truth)
 - [ ] Permalink opens hunter.io/discover with the same query applied
 
@@ -83,7 +88,7 @@ Find software companies in San Francisco with more than 50 employees
 
 ### 2. Company overview (widget)
 
-**Goal:** Showcase the Company-Enrichment widget. Confirms the widget renders all enrichment fields and the model offers next steps (find contacts / save as lead) without spamming narrative on top of the widget.
+**Goal:** Showcase the Company-Enrichment widget. Confirms the widget renders all enrichment fields and the model offers next steps (save as lead / add to a company list) without spamming narrative on top of the widget.
 
 **Prompt:**
 
@@ -97,12 +102,12 @@ Give me an overview of stripe.com
 **Expected UI:**
 - [ ] Company widget renders inline with: logo, industry, size, location, technologies, social profiles
 - [ ] Funding info visible if present
-- [ ] Generic email addresses listed (small set, e.g., support@, info@)
 - [ ] Link to the company profile on hunter.io is shown
 
 **Pass criteria:**
 - [ ] No descriptive paragraph repeating widget content
-- [ ] Model offers next steps (find contacts / save as lead / both) and lets the user choose
+- [ ] Model asks to save the company as a lead, and offers to add it to a company list only after the save (`Add-Company-To-List` needs the id that `Save-Company` returns)
+- [ ] Model does **not** offer to find contacts at this company
 - [ ] Exactly 1 credit deducted (verify in Hunter dashboard after)
 
 **Screenshot:** `<!-- paste screenshot here -->`
@@ -113,37 +118,32 @@ Give me an overview of stripe.com
 
 ---
 
-### 3. End-to-end prospecting
+### 3. Build a company list from Discover
 
-**Goal:** Exercise the full prospecting chain. This is the highest-value demo prompt — it shows Hunter's breadth in one flow.
+**Goal:** Exercise a multi-step flow with the 93 tools. It shows discovery, saving, and list organization in one conversation.
 
 **Prompt:**
 
 ```
-Find 10 marketing leads at SaaS companies in Berlin and save them to a new list called "Berlin SaaS Marketing"
+Find fintech companies in Berlin with 50 to 200 employees, then add the ones I pick to a new company list called "Berlin Fintech"
 ```
 
 **Expected tools fired (in order):**
-- [ ] `Plan-Prospecting-Flow` (coordinator — emits plan + first nextAction)
-- [ ] `Find-Companies` (then user picks companies)
-- [ ] `Domain-Search` (looped — once per chosen company, with `seniority` or `department` filters inferred from "marketing")
-- [ ] `Email-Verifier` (per email kept)
-- [ ] `Create-Leads-List` (one call, with name "Berlin SaaS Marketing")
-- [ ] `Create-Or-Update-Lead` (one call per saved contact, with `leads_list_id` set to the new list)
+- [ ] `Find-Companies` (then the user picks companies)
+- [ ] `Create-Company-List` (one call, with name "Berlin Fintech")
+- [ ] `Save-Company` (once per picked company — it returns the company `id`; it returns the existing record if the company is already saved)
+- [ ] `Add-Company-To-List` (once per picked company, with `company_list_id` set to the new list and `company_id` from Save-Company)
 
 **Pass criteria:**
-- [ ] Discover returns relevant SaaS companies in Berlin
-- [ ] Model presents companies and asks user to pick (does NOT auto-pick)
-- [ ] After user picks, Domain-Search loops across **every** chosen company without re-asking "should I do all of them?"
-- [ ] `seniority`/`department` filters are passed to Domain-Search (e.g., `department=marketing`) — verify in network panel
-- [ ] Email-Verifier called only on emails the user wants to save
-- [ ] Only emails returning `status: "valid"` are saved via Create-Or-Update-Lead
-- [ ] New list "Berlin SaaS Marketing" appears in hunter.io/leads with the correct count
-- [ ] Final assistant message includes a deep link to `https://hunter.io/leads?leads_list_id=<id>`
-- [ ] No fallback to web search / LinkedIn / pattern guessing — Hunter is the only source
-- [ ] Credits debited match expectation (≈20 credits for this flow: ~10 from `Domain-Search` + ~10 from `Email-Verifier`; `Find-Companies`, `Create-Leads-List`, and `Create-Or-Update-Lead` are free)
+- [ ] Discover returns relevant fintech companies in Berlin
+- [ ] Model presents companies and asks the user to pick (does NOT auto-pick)
+- [ ] After the user picks, the model adds **every** picked company without re-asking "should I do all of them?"
+- [ ] New company list "Berlin Fintech" appears in hunter.io (Leads → Companies) with the correct count
+- [ ] Model does **not** offer to find contacts or email addresses at these companies
+- [ ] No fallback to web search / LinkedIn — Hunter is the only source
+- [ ] Zero credits debited — all four tools are free
 
-**Screenshot(s):** `<!-- paste 2-3 screenshots: Discover widget, mid-loop status, final summary with deep link -->`
+**Screenshot(s):** `<!-- paste 2-3 screenshots: Discover widget, pick step, final summary -->`
 
 **Result/notes:** `<!-- fill in -->`
 
@@ -220,24 +220,15 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 |---|------|--------|----------|------|-------|
 | A1 | `Get-Account-Details` | `How many Hunter credits do I have left?` | Returns plan name + remaining credits | ☐ | |
 
-### Search
+### Email verification & counts
+
+`Email-Verifier` only checks an address that the user gives. Its inputs are `email`, `save_leads`, and `leads_list_id`.
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| S1 | `Email-Finder` | `What is Patrick Collison's email at stripe.com?` | Returns one email + confidence score | ☐ | |
-| S2 | `Email-Verifier` | `Is patrick@stripe.com a valid email?` | Returns status (valid / invalid / accept_all / etc.) | ☐ | |
-| S3 | `Email-Count` | `How many email addresses does Hunter have for stripe.com?` | Returns total + personal/generic split. Free, no credits | ☐ | |
-| S4 | `Domain-Search` (filtered) | `List the engineering leads at stripe.com — only senior or executive` | Calls `Domain-Search` with `domain=stripe.com`, `department=it`, `seniority=senior,executive` | ☐ | |
-
-> **Found-only (HUN-21313):** on the ChatGPT app, `Domain-Search` hits the found-only endpoint (`/v2/domain-search/found`) — it returns only published (found) addresses and never pattern-generated/inferred ones. There is intentionally **no** separate `Domain-Search-Found` tool to test here; that tool exists only on the Claude connector (`remote-mcp`), where the full-fidelity `Domain-Search` is kept and the found-only variant is added alongside it. Nothing to verify in the ChatGPT app beyond S4 returning found data.
-
-### Enrichment
-
-| # | Tool | Prompt | Expected | Pass | Notes |
-|---|------|--------|----------|------|-------|
-| E1 | `Person-Enrichment` | `Tell me everything you know about patrick@stripe.com` | Returns name/title/company/socials. 1 credit | ☐ | |
-| E2 | `Combined-Enrichment` | `Enrich patrick@stripe.com — give me both the person and the company` | One call to `Combined-Enrichment` (not separate Person + Company calls) | ☐ | |
-| E3 | `Combined-Enrichment` (LinkedIn handle) | `Enrich the LinkedIn profile patrickcollison` | Call uses `linkedin_handle`, not `email` | ☐ | |
+| S1 | `Email-Verifier` | `Is patrick@stripe.com a valid email?` | Returns status (valid / invalid / accept_all / etc.) + score. `save_leads` stays unset, and no lead-write tool follows | ☐ | |
+| S2 | `Email-Verifier` → `Create-Lead-If-Missing` | `Verify patrick@stripe.com and save it to leads list <LEADS_LIST_ID> only if it is valid` | Email-Verifier is called with `save_leads: true` and `leads_list_id`. A `valid` result chains to `Create-Lead-If-Missing` with the same email and list. Any other status → "not saving", no lead write. An existing lead → "already exists; no changes made" | ☐ | |
+| S3 | `Email-Count` | `How many email addresses does Hunter have at stripe.com?` | Counts only (total, personal, generic). The reply links to `https://hunter.io/search/stripe.com` with `utm_source=hunter-chatgpt` and `utm_content=email-count`. No name or address is shown | ☐ | |
 
 ### Leads
 
@@ -260,8 +251,9 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | LL3 | `Update-Leads-List` | `Rename leads list <LEADS_LIST_ID> to "Playbook Renamed"` | List renamed, deep link returned | ☐ | |
 | LL4 | `Merge-Leads-Lists` (destructive) | `Merge leads list <SRC_ID> into <DEST_ID>` | Confirmation prompt; on accept, source deleted and leads moved to dest | ☐ | |
 | LL5 | `Delete-Leads-List` (destructive) | `Delete leads list <DISPOSABLE_LEADS_LIST_ID>` | Confirmation prompt; on accept, list removed | ☐ | |
+| LL6 | `Create-Leads-List` (write) | `Create a leads list called "Playbook Throwaway"` | List created, deep link to `/leads?leads_list_id=<id>` returned | ☐ | |
 
-> Tip: create a throwaway list before running LL4/LL5 so you don't lose real data. `Create-Leads-List` is exercised by Section 1 prompt 3, so no row needed.
+> Tip: run LL6 first and use its list for LL4/LL5, so you don't lose real data.
 
 ### Custom attributes
 
@@ -396,15 +388,15 @@ All five bulk tools are confirmation-gated: the confirmation must state the affe
 
 > Use throwaway lists for BK2/BK5 — bulk deletes are irreversible.
 
-### Discover people & saved searches (V3)
+### Discover people counts & saved searches (V3)
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| DP1 | `Find-People` | `Which of these companies have marketing contacts?` (after a `Find-Companies` run in the same conversation) | People extraction across the picked companies: email counts + department aggregations. Free, no credits | ☐ | |
-| DP2 | `List-Saved-Searches` | `Show my saved Discover searches` | Saved searches with id + name | ☐ | |
-| DP3 | `Get-Saved-Search` | `Show saved search <SEARCH_ID>` | One saved search + its stored filters | ☐ | |
-| DP4 | `Create-Saved-Search` (write) | `Save this Discover search as "UK Fintech"` | Search saved with the current filters, id returned | ☐ | |
-| DP5 | `Delete-Saved-Search` (destructive) | `Delete saved search <SEARCH_ID>` | Confirmation; on accept removed. No update endpoint exists — to change a search, delete and recreate | ☐ | |
+| FP1 | `Find-People` | `How many email addresses does Hunter have at stripe.com, adyen.com, and mollie.com?` | Per-company counts (personal / generic / total). Each row has an `emails_on_hunter` link to `https://hunter.io/search/<domain>` with `utm_source=hunter-chatgpt` and `utm_content=find-people`. No name or address is shown | ☐ | |
+| SS1 | `List-Saved-Searches` | `Show my saved Discover searches` | Saved searches with id + name | ☐ | |
+| SS2 | `Get-Saved-Search` | `Show saved search <SEARCH_ID>` | One saved search + its stored filters | ☐ | |
+| SS3 | `Create-Saved-Search` (write) | `Save this Discover search as "UK Fintech"` | Search saved with the current filters, id returned | ☐ | |
+| SS4 | `Delete-Saved-Search` (destructive) | `Delete saved search <SEARCH_ID>` | Confirmation; on accept removed. No update endpoint exists — to change a search, delete and recreate | ☐ | |
 
 ### Integrations (V3)
 
@@ -414,16 +406,17 @@ All five bulk tools are confirmation-gated: the confirmation must state the affe
 | IN2 | `List-Webhooks` | `Show my Hunter webhooks` | Webhooks with id, URL, events, status | ☐ | |
 | IN3 | `Update-Webhook` (destructive) | `Disable webhook <WEBHOOK_ID>` | Webhook updated (reversible) | ☐ | |
 
-### Usage & API keys (V3)
+### Usage (V3)
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| UK1 | `Get-Usage` | `How many credits have I used this month?` | Usage summary: searches/verifications/credits used vs plan quota. Free, no credits deducted | ☐ | |
-| UK2 | `List-API-Keys` | `List my Hunter API keys` | Masked key values only. Over OAuth → expect the 403 (see caveat below), relayed clearly | ☐ | |
-| UK3 | `Create-API-Key` (destructive) | `Create a new Hunter API key` | Confirmation gate first (security-sensitive); over OAuth → expect the 403, relayed gracefully | ☐ | |
-| UK4 | `Delete-API-Key` (destructive) | `Delete API key <KEY_ID>` | Confirmation gate first; over OAuth → expect the 403, relayed gracefully | ☐ | |
+| U1 | `Get-Usage` | `How many credits have I used this month?` | Usage summary: searches/verifications/credits used vs plan quota. Free, no credits deducted | ☐ | |
 
-> **OAuth caveat (UK2–UK4):** the ChatGPT app connects via OAuth, and the Hunter API refuses API-key management with an OAuth token — it returns **403 "API keys can't be managed with an OAuth token"**. These rows PASS when the model relays that error cleanly and points the user to the Hunter dashboard — NOT when a key is actually listed/created/deleted. See edge case 3.18.
+### Feedback
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| FB1 | `Report-API-Feedback` | `Report to Hunter that the company list results were missing a field I needed` | Feedback sent with `feedback_type`, `summary`, and `details`. Free, no credits | ☐ | |
 
 ---
 
@@ -431,19 +424,26 @@ All five bulk tools are confirmation-gated: the confirmation must state the affe
 
 These aren't tied to a single tool — they verify cross-cutting behavior. Run after Sections 1 and 2.
 
-### 3.1 Capability recovery (ambiguous role translation)
+### 3.1 Person email request is declined (4.0.0)
 
-**Goal:** The MCP exposes a capabilities-recovery resource that maps fuzzy job titles to the documented `seniority`/`department` enums. Verify the model reads it before running Domain-Search.
+**Goal:** The app cannot find new people or email addresses. The server `instructions` and the capabilities-recovery resource tell the model to decline. For a company, the model gives the count from `Email-Count` and its hunter.io link. Verify that it does.
 
-**Prompt:**
+**Prompts (fresh conversation each):**
 
 ```
-Find me CMOs at fintech startups in France
+Find the email of the CEO of stripe.com
 ```
 
-- [ ] Domain-Search calls use `seniority=executive` AND `department=marketing` (not literal `position=CMO`)
-- [ ] Same test with "Head of Sales" → `seniority=executive`, `department=sales`
-- [ ] Same test with "VP Engineering" → `seniority=executive`, `department=it`
+```
+Who are the marketing contacts at hubspot.com?
+```
+
+- [ ] No tool call tries to find the person or list the contacts
+- [ ] No web search, browse, or fetch is used as a workaround, and no address is guessed from a pattern
+- [ ] The reply says person email addresses are not available in ChatGPT
+- [ ] The reply points to https://hunter.io
+- [ ] For hubspot.com: `Email-Count` is called, the reply gives the count, and it links to `https://hunter.io/search/hubspot.com`
+- [ ] No `Report-API-Feedback` call is made for it (the limit is by design)
 
 **Result/notes:** `<!-- fill in -->`
 
@@ -452,12 +452,12 @@ Find me CMOs at fintech startups in France
 **Prompt:**
 
 ```
-Find contacts at thisdoesnotexistasdf12345.com
+Give me an overview of thisdoesnotexistasdf12345.com
 ```
 
-- [ ] Domain-Search returns 0 results
-- [ ] Model emits a `complete` next-action with "no contacts found" — not an error
-- [ ] No verification or upsert calls follow
+- [ ] `Company-Enrichment` returns no company — the model says so clearly, not as a crash
+- [ ] No credit is deducted (Company-Enrichment is charged only when data is found)
+- [ ] No save or list calls follow
 
 **Result/notes:** `<!-- fill in -->`
 
@@ -466,13 +466,13 @@ Find contacts at thisdoesnotexistasdf12345.com
 **Prompt:**
 
 ```
-Show me the next page of contacts at stripe.com
+Show me the next page of results
 ```
 
-(after a previous Domain-Search at stripe.com in the same conversation)
+(after a previous `Find-Companies` run in the same conversation)
 
-- [ ] Model passes `offset=10` (or appropriate page-2 offset) to `Domain-Search`
-- [ ] Returns different emails than the first page
+- [ ] Model passes an `offset` for page 2 to `Find-Companies`
+- [ ] Returns different companies than the first page
 
 **Result/notes:** `<!-- fill in -->`
 
@@ -548,18 +548,16 @@ For each tool that returns a deep link (Save-Company, Create/Update/Create-Or-Up
 
 If the ChatGPT host surfaces the registered MCP prompts as slash commands or quick actions:
 
-- [ ] `prospect` is selectable
-- [ ] `build-list` is selectable
+- [ ] Only `build-list` and `sequence-prep` are listed
+- [ ] `build-list` is selectable. Given email addresses, it creates a leads list and saves them. Given none, it asks for addresses and points to https://hunter.io
 - [ ] `sequence-prep` is selectable (title "Sequence Prep" — renamed in V3; no legacy-named prompt remains)
 - [ ] Each one prefills the expected guidance text and runs end-to-end
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.10 Direct Discover → multi-company investigate (no Prospecting coordinator)
+### 3.10 Direct Discover → multi-company save (no slash command)
 
-**Goal:** Verify the model loops `Domain-Search` across every picked company and stays on Hunter tools when the user enters via direct `Find-Companies` (bypassing the `Plan-Prospecting-Flow` coordinator). This is the most reviewer-realistic entry path: a natural prompt, no slash-command, no coordinator.
-
-**Background:** A real review-prep session (2026-05-05) reproduced this failure: `Domain-Search` ran for company 1 only, the model fell back to a non-Hunter browse/fetch tool for company 2, and supplemented with ungrounded "public-looking" commentary. This test guards against regression after the Section 1 hardening lands.
+**Goal:** Verify the model saves every picked company and stays on Hunter tools when the user enters through a natural `Find-Companies` prompt. This is the most reviewer-realistic entry path.
 
 **Prompts (run both in the same fresh conversation):**
 
@@ -568,21 +566,20 @@ Find e-commerce companies in London with more than 200 employees
 ```
 
 ```
-Investigate the top two
+Save the top two to my company list <LIST_ID>
 ```
 
 **Expected tools fired:**
 - [ ] `Find-Companies` (after prompt 1)
-- [ ] `Domain-Search` for picked company 1 (after prompt 2)
-- [ ] `Domain-Search` for picked company 2 (after prompt 2)
-- [ ] `Email-Verifier` whenever a Domain-Search response includes `nextAction.kind === "call_tool"` pointing to it
+- [ ] `Save-Company` for picked company 1 and picked company 2 (after prompt 2)
+- [ ] `Add-Company-To-List` for both companies, with `company_list_id=<LIST_ID>`
 
-**Pass criteria — three diagnostic checks, all must hold per run:**
-- [ ] `Domain-Search` is called for **both** picked companies (not just the first)
-- [ ] No tool outside the Hunter MCP is invoked for company/contact lookup (no web search, no browse, no fetch). Adjacent tools the user explicitly asks for are fine
-- [ ] `Email-Verifier` is called whenever `nextAction` suggests it
+**Pass criteria:**
+- [ ] Both picked companies are saved and added to the list (not just the first)
+- [ ] No tool outside the Hunter MCP is used for company lookup (no web search, browse, or fetch)
+- [ ] The model does **not** offer to find contacts at these companies
 
-**Run protocol:** Repeat in 3 fresh conversations. Behaviour is non-deterministic; **pass = ≥ 2 of 3 runs meet all criteria**. Falling short of 2/3 triggers the structural fast-follow (server-side `pending_companies` next-action) — see `docs/plans/2026-05-05-feat-chatgpt-mcp-direct-discover-hardening-plan.md` → "Fast-follow."
+**Run protocol:** Behaviour is non-deterministic. Repeat in 3 fresh conversations; **pass = ≥ 2 of 3 runs meet all criteria**.
 
 | Run | Result | Tools fired (paste from network panel) | Notes |
 |-----|--------|----------------------------------------|-------|
@@ -590,42 +587,28 @@ Investigate the top two
 | 2   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
 | 3   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
 
-**Screenshots (one per run, showing the conversation through final summary):** `<!-- paste 3 screenshots -->`
-
-**Overall:** ☐ Pass (≥ 2/3) ☐ Fail (< 2/3 → trigger fast-follow)
+**Overall:** ☐ Pass (≥ 2/3) ☐ Fail (< 2/3)
 
 ---
 
-### 3.11 Research-mode table: the reporter's brief (HUN-20651)
+### 3.11 Mixed brief: companies yes, contacts no (4.0.0)
 
-**Goal:** Verify the research/return-a-table path end to end. This is the exact brief that surfaced HUN-20651: the model fell out of the bulk loop into per-company confirmations, re-verified already-valid emails, called a non-existent `enrich` endpoint, and never returned after 20+ minutes. The fix (research as the default mode + conditional verify + enrichment guardrail) makes this a fast, gate-light table — no save chain, no re-verification of already-valid rows, no invented endpoints.
+**Goal:** A brief can mix a request the app serves (companies) with one it declines (person emails). The model must do the first part and decline the second. The brief is the one that surfaced HUN-20651.
 
-**Prompt (one fresh conversation, no slash-command):**
+**Prompt (one fresh conversation, no slash command):**
 
 ```
 Use Hunter to find 20 SaaS companies in France with 50-200 employees. For each company, find verified email addresses for people in Head of Sales or VP Sales roles. Return the results in a table.
 ```
 
-**Expected behaviour:** `Find-Companies` discovers the SaaS companies, the model relays ONE bulk credit-consent prompt, then `Domain-Search` loops company-to-company (carrying `seniority=executive`, `department=sales`) and the run ends with a rendered table. Because the brief says "verified", `Email-Verifier` may run for rows whose Domain-Search verification was NOT already `valid` — but never for rows that were. No `Create-Lead-If-Missing` (the user asked for a table, not a save).
+**Pass criteria:**
+- [ ] `Find-Companies` runs, and the run ends with the companies shown to the user (it does not stall)
+- [ ] The reply says person email addresses are not available in ChatGPT and points to https://hunter.io
+- [ ] No tool call tries to find contacts, and no web search, browse, or fetch is used as a workaround
+- [ ] No address is invented or guessed from a pattern, and no `Email-Verifier` call is made on a guessed address
+- [ ] No `Report-API-Feedback` call is made for the missing contacts
 
-**Pass criteria — five BINARY network-panel checks, all must hold per run:**
-- [ ] The run ends with a **table** rendered to the user (does not stall or trail off).
-- [ ] After the **one** batch-approval prompt, **zero** further confirmation prompts appear before the table is returned.
-- [ ] **No `Email-Verifier` call** for any email whose `Domain-Search` row was already `valid` (cross-check the Domain-Search response `verification.status` / `verification_source: "domain_search"` against the verifier calls in the panel).
-- [ ] **Zero calls to any non-existent endpoint** — nothing named `enrich`, no `/enrich`, no web browse/fetch substituted for a Hunter lookup.
-- [ ] **No `Create-Lead-If-Missing`** (or any other lead-write tool) is called — research mode writes nothing.
-
-**Run protocol:** Repeat in 3 fresh conversations. Behaviour is non-deterministic; **pass = ≥ 2 of 3 runs meet all five criteria**. A `< 2/3` result means the research loop is not holding the default — re-check that `save_leads` stayed unset and that the consent gate carried `confirmed_credit_use` forward.
-
-| Run | Result | Tools fired (paste from network panel) | Notes |
-|-----|--------|----------------------------------------|-------|
-| 1   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
-| 2   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
-| 3   | ☐ Pass ☐ Fail | `<!-- fill in -->` | `<!-- fill in -->` |
-
-**Screenshots (one per run, showing the conversation through the final table):** `<!-- paste 3 screenshots -->`
-
-**Overall:** ☐ Pass (≥ 2/3) ☐ Fail (< 2/3)
+**Result/notes:** `<!-- fill in -->`
 
 ---
 
@@ -684,22 +667,22 @@ Delete all the leads in list <DISPOSABLE_LEADS_LIST_ID>
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.15 Find-Companies → Find-People extraction (V3)
+### 3.15 Company-Enrichment follow-up: save and add to a company list (4.0.0)
 
 **Prompts (same conversation):**
 
 ```
-Find fintech companies in Amsterdam with 50+ employees
+Give me an overview of datadoghq.com
 ```
 
 ```
-Which of these have marketing contacts, and how many?
+Both — add it to company list <LIST_ID> too
 ```
 
-- [ ] `Find-People` is called with the picked companies (no per-company `Domain-Search` loop for this aggregate question)
-- [ ] Response shows per-company email counts and department aggregations
-- [ ] Zero credits deducted — `Find-People` is free (verify balance after)
-- [ ] Model offers `Domain-Search` as the paid next step to reveal actual addresses
+- [ ] After prompt 1, the model asks to save the company as a lead, and offers the company list only after the save — it does not offer to find contacts
+- [ ] After prompt 2, `Save-Company` runs and returns the company `id`
+- [ ] `Add-Company-To-List` runs with `company_list_id=<LIST_ID>` and that `company_id`
+- [ ] Exactly 1 credit deducted (for Company-Enrichment); the save and list calls are free
 
 **Result/notes:** `<!-- fill in -->`
 
@@ -741,21 +724,7 @@ Push the leads in list <LEADS_LIST_ID> to my CRM
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.18 API-key management over OAuth: expect the 403, relayed gracefully (V3)
-
-**Prompt:**
-
-```
-List my Hunter API keys, then create a new one called "playbook"
-```
-
-- [ ] `List-API-Keys` (and, past its gate, `Create-API-Key`) return **403** — the ChatGPT app connects via OAuth, and the Hunter API refuses key management with an OAuth token
-- [ ] The model relays the actual reason (*"API keys can't be managed with an OAuth token"*) and suggests managing keys in the Hunter dashboard — it does NOT loop, retry, or hallucinate a key
-- [ ] `Create-API-Key` still shows its confirmation gate BEFORE the call (security-sensitive), even though the call will 403
-
-**Result/notes:** `<!-- fill in -->`
-
-### 3.19 Email-account inspection (V3)
+### 3.18 Email-account inspection (V3)
 
 **Prompts (same conversation):**
 
@@ -773,7 +742,7 @@ What's using that account?
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.20 Terminology regression: no legacy outreach wording (V3)
+### 3.19 Terminology regression: no legacy outreach wording (V3)
 
 **Goal:** The V3 terminology migration renamed five outreach tools and the `sequence-prep` prompt. Verify no legacy wording survives anywhere user-visible.
 
@@ -784,7 +753,7 @@ What's using that account?
 
 **Result/notes:** `<!-- fill in -->`
 
-### 3.21 Idempotency spot-check (best-effort, manual) (V3)
+### 3.20 Idempotency spot-check (best-effort, manual) (V3)
 
 **Goal:** Every resource-creating POST sends an `Idempotency-Key` header automatically (HUN-18680), and `POST /sequences` retries once on network failure reusing the same key — so a blip never creates duplicate sequences.
 
@@ -803,9 +772,9 @@ After completing all sections, fill this in.
 | Section | Total | Pass | Fail | Blocked |
 |---------|-------|------|------|---------|
 | 1 — Marketplace prompts | 5 | | | |
-| 2 — Tool coverage matrix | 92 | | | |
-| 3 — Edge cases | 21 | | | |
-| **Total** | **118** | | | |
+| 2 — Tool coverage matrix | 88 | | | |
+| 3 — Edge cases | 20 | | | |
+| **Total** | **113** | | | |
 
 **Overall verdict:** ☐ Ready for app review submission ☐ Needs fixes before submission
 
@@ -821,106 +790,88 @@ After completing all sections, fill this in.
 
 ## Section 5 — Resubmission notes (paste verbatim into OpenAI submission form)
 
-Use this block when filling out the "Notes for the reviewer" field on the
-OpenAI Apps SDK submission form. Pre-empts the reviewer-edge-cases the V3
-implementation knowingly accepts as trade-offs, and summarizes what changed
-in this resubmission (note E); surfacing them proactively beats letting a
-reviewer discover them on a test run.
+Use this block for the "Notes for the reviewer" field on the OpenAI Apps
+SDK submission form. Note A explains what changed in 4.0.0. The other notes
+describe known limits, so a reviewer does not find them on a test run.
 
-### A. Bulk credit consent is enforced server-side
+### A. 4.0.0 scope: no people or email addresses
 
-Bulk prospecting flows on paid Hunter lookups (Domain-Search,
-Email-Verifier, Person/Company/Combined-Enrichment) require **one upfront
-credit-cost approval per batch**, enforced by a server-side
-`confirmed_credit_use` guard on `Domain-Search`. The first call in a
-multi-company batch returns an `ask_user` `nextAction` carrying the credit
-estimate; after the user approves, subsequent chained calls in the same
-batch proceed without re-prompting because the flag propagates through
-the `nextAction.suggestedArgs` carry. Single-call paid lookups surface the
-per-call credit cost in the assistant's user-facing narration before
-invoking. This is intentional under our v3 annotation posture — the host's
-destructive-confirmation prompt would otherwise fire on every chained call
-and the 50-company prospecting loop becomes user-hostile.
+Version 2.0.0 was rejected because of person-email features. Version 4.0.0
+removes every tool that returns a person or an email address. The app has 93
+tools, down from 101.
+
+- No tool lists a company's contacts or finds a named person's email
+  address. When a user asks for one, the app says that person email
+  addresses are not available in ChatGPT and points to https://hunter.io.
+- `Email-Count` and `Find-People` return counts only, never a name or an
+  address. Each gives a link to hunter.io, where the user can see the
+  addresses.
+- `Email-Verifier` stays. It only checks an email address that the user
+  gives. It does not find or suggest addresses.
+- The three API-key tools are removed. The Hunter API refuses API-key
+  management with an OAuth token, and the app connects through OAuth.
 
 ### B. Hunter MCP scope vs. dashboard parity
 
-Hunter MCP V3 covers email discovery, verification, enrichment,
-lead/sequence read-write, and — new in this submission — full sequence
-authoring, message templates, lead organization (tags, folders,
-favorites), bulk lead/company operations, Discover people extraction,
-saved searches, CRM push, webhooks, and usage/email-account/API-key
-surfaces. Async **bulk verification** and a few smaller parity items
-(Author-Finder, the full Discover filter set) remain on the roadmap.
-Reviewers who ask the agent to queue a bulk verification job will see a
-clean "I can't do that yet" response from the tool surface — that is the
-surface telling the truth, not a bug. The web app exposes these; the MCP
-will follow in a future cycle.
+The app covers company discovery and enrichment, verification of an email
+address that the user gives, and read-write access to leads, lists,
+companies, sequences, message templates, saved searches, CRM push, and
+webhooks. The Hunter web app has more features. Async bulk verification
+and the full Discover filter set are not in the app. A request for them
+gets a clear "not available" answer. That is expected, not a bug.
 
-### C. Title-vs-canonical-name dashboard surface
+### C. Tool titles
 
-The six weakest-named billable tools carry an `annotations.title` field
-with a verb-form human-readable label (`Find Emails By Domain`, `Find
-Person Email`, `Verify Email`, `Enrich Person`, `Enrich Company`, `Enrich
-Person And Company`). Canonical `name` values are unchanged
-(`Domain-Search`, `Email-Finder`, etc.) to keep blast radius small for
-this resubmission. If the dashboard card surfaces only the canonical name
-and not the title, we will upgrade to canonical kebab-case renames on the
-same PR before merging — the contingency commit is a six-line `TOOL_NAMES`
-edit plus the mirrored byte-aligned edit in remote-mcp.
+The two billable tools carry an `annotations.title` with a verb-form
+label: `Verify Email` for `Email-Verifier` and `Enrich Company` for
+`Company-Enrichment`. The canonical `name` values do not change.
 
 ### D. Privacy posture summary
 
 - `Get-Account-Details` returns plan name and per-product credit balances
   only. Name, email, and team ID are stripped server-side before reaching
   the model.
-- Person- and Combined-Enrichment use `.strict()` schemas with audited
-  field allowlists. Future Hunter API additions are silently dropped
-  unless a coordinated schema bump + privacy-policy disclosure update
-  ships first.
+- `Company-Enrichment` returns company data only. It does not return
+  personal data, and it removes the company's email addresses from the
+  response. It keeps only their count.
 - Tool responses contain no API keys, OAuth tokens, JWTs, session IDs,
   trace IDs, request IDs, or correlation IDs — these are scrubbed
   server-side via the credential-shape regex set and the
   `INJECTED_FIELD_NAMES` strip pass.
 
-### E. V3 scope: sequences terminology migration + 44 new free tools
+### E. Annotations and idempotency
 
-**Terminology migration.** Five outreach tools were renamed to the
-canonical product term — these tools hit `/v2/sequences/*` and the product
-calls the objects "sequences": `List-Sequences`,
-`List-Sequence-Recipients`, `Add-Sequence-Recipients`,
-`Remove-Sequence-Recipients`, and `Start-Sequence` replace their
-legacy-named predecessors from the previous submission. The matching named
-prompt is now `sequence-prep` (title "Sequence Prep"). Behavior is
-unchanged; only the names moved.
-
-**New tool families and annotation rationale.** 44 tools were added
-(HUN-20838…HUN-20866): sequence CRUD + follow-up authoring, message
-templates, lead tags, leads-list folders/favorites, bulk lead/company
-operations, Discover people extraction (`Find-People`) + saved searches,
-CRM push + webhooks, and usage/email-account/API-key surfaces. Annotations
-follow the established posture:
+Annotations follow one posture:
 
 - **Reads** are `readOnlyHint: true` + `openWorldHint: false` — private
   reads of the user's own Hunter data.
+- **Public-index reads** (`Find-Companies`, `Email-Count`, `Find-People`)
+  are `readOnlyHint: true` + `openWorldHint: true`. They read the Hunter
+  index of public web data.
 - **Creates** are private, non-destructive writes (`destructiveHint:
   false`, `openWorldHint: false`).
 - **Updates, deletes, and bulk destructive operations** carry
   `destructiveHint: true` so the host confirms. Bulk confirmations state
   the affected record count; bulk deletes require a second explicit
   confirmation.
-- **`Push-Leads-To-CRM`** is the one `openWorldHint: true` write, because
-  lead data leaves Hunter for the user's external CRM. It is
-  confirmation-gated and returns an async job acknowledgement.
-- **`Create-API-Key` / `Delete-API-Key`** are confirmation-gated as
-  security-sensitive. Over the app's OAuth connection the Hunter API
-  refuses key management with a 403 ("API keys can't be managed with an
-  OAuth token"), which the model relays to the user.
-- **Billable lookups are unchanged** — every tool added in V3 is free.
+- **Four writes are `openWorldHint: true`**, because their effect leaves
+  Hunter. `Start-Sequence` sends email. `Resume-Sequence` and
+  `Add-Sequence-Recipients` can schedule email on a started sequence.
+  `Push-Leads-To-CRM` sends lead data to the user's external CRM. The user
+  confirms each one before email or data leaves Hunter. `Resume-Sequence`
+  uses the host prompt. `Add-Sequence-Recipients` asks only on a started
+  sequence, because a draft sends nothing.
+- **Billable tools:** only `Email-Verifier` and `Company-Enrichment` use
+  credits. All other tools are free.
 
-**Idempotency.** Every resource-creating POST now sends an
-`Idempotency-Key` header automatically (HUN-18680), and `POST /sequences`
-retries once on network failure reusing the same key — a retried create
-can never produce a duplicate sequence.
+The outreach tools use the product term "sequences" (`List-Sequences`,
+`Start-Sequence`, and others), and the matching named prompt is
+`sequence-prep`.
+
+**Idempotency.** Every resource-creating POST sends an `Idempotency-Key`
+header automatically (HUN-18680), and `POST /sequences` retries once on
+network failure reusing the same key — a retried create can never produce
+a duplicate sequence.
 
 ---
 
@@ -928,7 +879,7 @@ can never produce a duplicate sequence.
 
 The OpenAI Apps SDK submission form has a **Test cases** section (positive `version.test_cases.*` + `version.negative_test_cases.*` fields). Paste the snippet below into the browser DevTools console **on the submission-form page** to fill every row at once and length-check it. It mirrors the form's field-name scheme and sets values React-safely via `setNativeValue`.
 
-**Before running:** in the form, add **16 positive** test-case rows and **3 negative** rows (the script fills existing inputs — it does not create rows). Substitute `<ANGLE_BRACKET>` placeholders with real test-account values first. Field limits enforced by the script: `description ≤200`, `user_prompt ≤500`, `tools_triggered ≤200`, `expected_output ≤300`. Cases 1–5 cover the original surface; 6–12 cover the HUN-20196 additions (email accounts, sequences, company lists/folders, membership/favorites, connected apps); 13–16 cover the V3 additions (sequence authoring, bulk operations, Find-People extraction, usage).
+**Before running:** in the form, add **16 positive** test-case rows and **4 negative** rows (the script fills existing inputs — it does not create rows). Substitute `<ANGLE_BRACKET>` placeholders with real test-account values first. Field limits enforced by the script: `description ≤200`, `user_prompt ≤500`, `tools_triggered ≤200`, `expected_output ≤300`. Positive cases 1–5 cover the core surface (company discovery and enrichment, verify-and-save of a given address, company-list build, account and sequences); 6–12 cover the HUN-20196 additions (email accounts, sequences, company lists/folders, membership/favorites, connected apps); 13–16 cover the V3 additions (sequence authoring, bulk operations, saved searches, usage). Negative cases 1–3 are off-topic requests; negative case 4 is a person-email request that the app must decline.
 
 ```js
 (() => {
@@ -949,21 +900,20 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
           "A company profile card for gsk.com with enrichment details, followed by a successful Save-Company result or an already-saved message with a Hunter Leads link."
       },
       {
-        description: "Find contacts for a domain, verify, and save",
+        description: "Verify an email address the user gives and save it only if valid",
         user_prompt:
-          "Using Hunter, find one marketing contact at hubspot.com, verify the email, and save it as a lead only if the email is valid.",
-        tools_triggered: "Domain-Search, Email-Verifier, Create-Lead-If-Missing",
+          "Using Hunter, verify patrick@stripe.com and save it as a lead only if the email is valid.",
+        tools_triggered: "Email-Verifier, Create-Lead-If-Missing",
         expected_output:
-          "Hunter returns a contact from hubspot.com, verifies deliverability, and saves it only if valid. If the lead already exists, it reports no changes were made."
+          "Hunter returns the deliverability status of the given address. Only a valid address is saved as a lead. If the lead already exists, it reports that no changes were made."
       },
       {
-        description: "Run a multi-company prospecting flow with consent",
+        description: "Find companies and add the ones the user picks to a new company list",
         user_prompt:
-          "Using Hunter, find 3 marketing leads at SaaS companies in Spain and save valid contacts to my leads.",
-        tools_triggered:
-          "Plan-Prospecting-Flow, Find-Companies, Domain-Search, Email-Verifier, Create-Lead-If-Missing",
+          "Using Hunter, find fintech companies in Berlin with 50 to 200 employees, then add the two I pick to a new company list called 'Berlin Fintech'.",
+        tools_triggered: "Find-Companies, Create-Company-List, Save-Company, Add-Company-To-List",
         expected_output:
-          "A prospecting plan starts with company discovery, asks before bulk credit use, then after approval verifies and saves valid contacts without overwriting existing leads."
+          "Matching companies are shown and the user picks two. A company list is created, and each picked company is saved and added to it. No credits are used and no contacts are looked up."
       },
       {
         description: "Review account and sequences without sending emails",
@@ -1045,12 +995,12 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
           "Before anything moves, a confirmation states how many leads are affected. Only after the user approves are the leads moved to the destination list; declining aborts with no change."
       },
       {
-        description: "Extract people availability from discovered companies",
+        description: "Save a Discover search and list saved searches",
         user_prompt:
-          "Using Hunter, find fintech companies in Berlin, then tell me which of them have marketing contacts and how many, without spending credits.",
-        tools_triggered: "Find-Companies, Find-People",
+          "Using Hunter, find SaaS companies in Portugal with 11 to 50 employees, save this search as 'Portugal SaaS', then list my saved searches.",
+        tools_triggered: "Find-Companies, Create-Saved-Search, List-Saved-Searches",
         expected_output:
-          "Company discovery runs first, then Find-People returns per-company email counts and department breakdowns for free. No credits are spent and no addresses are revealed yet."
+          "Matching companies are shown, the search is saved under the name 'Portugal SaaS', and the saved searches are listed with that one included. No credits are used."
       },
       {
         description: "Check credit usage without spending credits",
@@ -1073,6 +1023,11 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
       {
         description: "Consumer discovery outside Hunter prospecting",
         user_prompt: "Find vegan restaurants near me for dinner tonight."
+      },
+      {
+        description:
+          "Person email request: the app must not look it up. It says person emails are not available in ChatGPT and points to https://hunter.io.",
+        user_prompt: "Find the email address of the CEO of stripe.com."
       }
     ]
   };
@@ -1175,14 +1130,14 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
 
 ## Appendix — Tool inventory
 
-The 101 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). Use this as a reference if a new tool is added — extend the matrix in Section 2 before the next test run. All 45 tools added in V3 (marked "(V3)") are free; the credit cost of a full playbook run is unchanged at ~25 credits, since no V3 prompt spends credits.
+The 93 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). If a tool is added, extend the matrix in Section 2 before the next test run. Only `Email-Verifier` and `Company-Enrichment` use credits; all other tools are free.
 
 | Group | Tools |
 |-------|-------|
-| Search | `Find-Companies`, `Domain-Search`, `Email-Finder`, `Email-Verifier`, `Email-Count` |
-| Enrichment | `Person-Enrichment`, `Company-Enrichment`, `Combined-Enrichment` |
+| Company search & email verification | `Find-Companies`, `Email-Verifier` (checks an address the user gives), `Email-Count` (counts only, with a hunter.io link) |
+| Enrichment | `Company-Enrichment` |
 | Account | `Get-Account-Details` |
-| Usage & API keys (V3) | `Get-Usage`, `List-API-Keys`, `Create-API-Key`, `Delete-API-Key` |
+| Usage (V3) | `Get-Usage` |
 | Email accounts | `List-Email-Accounts`, `Get-Email-Account` (V3), `List-Email-Account-Sequences` (V3) |
 | Sequences | `List-Sequences`, `Get-Sequence` (V3), `Create-Sequence` (V3), `Update-Sequence` (V3), `Delete-Sequence` (V3), `List-Sequence-Follow-Ups`, `Get-Sequence-Follow-Up` (V3), `Create-Sequence-Follow-Up` (V3), `Update-Sequence-Follow-Up` (V3), `Delete-Sequence-Follow-Up` (V3), `Pause-Sequence`, `Resume-Sequence`, `Archive-Sequence`, `Get-Sequence-Stats`, `List-Sequence-Recipients`, `Add-Sequence-Recipients`, `Remove-Sequence-Recipients`, `Start-Sequence` |
 | Message templates (V3) | `List-Message-Templates`, `Get-Message-Template`, `Create-Message-Template`, `Update-Message-Template`, `Delete-Message-Template` |
@@ -1194,11 +1149,10 @@ The 101 tools exposed by the Hunter ChatGPT MCP (V3), grouped by domain — mirr
 | Company list folders (HUN-20196) | `List-Company-List-Folders`, `Create-Company-List-Folder`, `Update-Company-List-Folder`, `Delete-Company-List-Folder` |
 | Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
 | Bulk operations (V3) | `Bulk-Move-Leads`, `Bulk-Delete-Leads`, `Bulk-Move-Companies`, `Bulk-Copy-Companies`, `Bulk-Delete-Companies` |
-| Discover people & saved searches (V3) | `Find-People`, `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
+| Discover people counts & saved searches (V3) | `Find-People` (counts only, with a hunter.io link), `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
 | Connected apps & integrations | `List-Connected-Apps`, `Get-Connected-App`, `Push-Leads-To-CRM` (V3), `List-Webhooks` (V3), `Update-Webhook` (V3) |
 | Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
-| Coordinator | `Plan-Prospecting-Flow` |
 | Feedback | `Report-API-Feedback` (free; agents report API/tool friction — missing endpoints, wrong docs, bad data, bugs) |
-| Named prompts | `prospect`, `build-list`, `sequence-prep` |
+| Named prompts | `build-list` (from email addresses the user gives), `sequence-prep` |
 | Widgets | `discover-widget`, `company-widget` |
-| Resources | `capabilities-recovery` (used implicitly by `Plan-Prospecting-Flow`) |
+| Resources | `capabilities-recovery` (read when the user asks for something the app cannot do, such as a person's email address) |

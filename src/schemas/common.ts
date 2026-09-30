@@ -132,23 +132,9 @@ export const pushLeadsToCrmArgsSchema = z
   })
   .strict()
 
-export const createApiKeyArgsSchema = z
-  .object({
-    name: z.string().max(255).optional(),
-    confirmed: z.literal(true),
-  })
-  .strict()
-
-export const deleteApiKeyArgsSchema = z
-  .object({
-    api_key_id: z.number().int().positive(),
-    confirmed: z.literal(true),
-  })
-  .strict()
-
-// One entry per ConfirmableToolName (helpers.ts NEXT_ACTION region). A plain
-// union (not discriminatedUnion) because the discriminator lives one level up
-// on `tool` with per-tool args shapes — Zod tries each branch in order.
+// One entry per ConfirmableToolName (helpers.ts). A plain union (not
+// discriminatedUnion) because the discriminator lives one level up on `tool`
+// with per-tool args shapes — Zod tries each branch in order.
 export const pendingToolCallSchema = z.union([
   z.object({ tool: z.literal(TOOL_NAMES.startSequence), args: startSequenceArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.deleteSequence), args: deleteSequenceArgsSchema }),
@@ -159,8 +145,6 @@ export const pendingToolCallSchema = z.union([
   z.object({ tool: z.literal(TOOL_NAMES.bulkCopyCompanies), args: bulkCopyCompaniesArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.bulkDeleteCompanies), args: bulkDeleteCompaniesArgsSchema }),
   z.object({ tool: z.literal(TOOL_NAMES.pushLeadsToCrm), args: pushLeadsToCrmArgsSchema }),
-  z.object({ tool: z.literal(TOOL_NAMES.createApiKey), args: createApiKeyArgsSchema }),
-  z.object({ tool: z.literal(TOOL_NAMES.deleteApiKey), args: deleteApiKeyArgsSchema }),
 ])
 
 export const nextActionSchema = z.discriminatedUnion("kind", [
@@ -234,8 +218,7 @@ export const mutationAckSchema = z.object({
 
 // ─── Verification ───────────────────────────────────────────────────────────
 //
-// Hunter's email-verification sub-shape (returned on `Domain-Search` email
-// entries, `Email-Finder`, and on saved leads). Small + stable: `{ status,
+// Hunter's email-verification sub-shape (returned on saved leads). Small + stable: `{ status,
 // date }`. `.loose()` only because Hunter has historically added optional
 // fields here (e.g. `confidence`) without notice — but the known keys are
 // typed so jbuilder typos surface in vitest. See HUN-19943 todos/018.
@@ -319,39 +302,6 @@ export const buildResponseSchema = <T extends z.ZodType, M extends z.ZodType = z
       nextAction: nextActionSchema.optional(),
     })
     .loose()
-
-// ─── Bulk-consent approval-required envelope ─────────────────────────────────
-//
-// `requireBulkConsent` (helpers.ts) short-circuits an unconsented bulk/save entry
-// with `structuredContent = { kind: "approval_required", ok: true,
-// estimated_credits: { search, verification } }` plus an `ask_user` nextAction.
-// Every tool that can EMIT this envelope must DECLARE it in its outputSchema —
-// otherwise `registerTool` publishes `.shape` as a closed
-// (`additionalProperties: false`) object and a schema-validating client rejects
-// the approval prompt with -32602 (HUN-20651 review fix N). Domain-Search already
-// had these fields inlined in its custom schema; Email-Verifier and
-// Create-Lead-If-Missing gained the gate (review fixes J/L/O) and so must declare
-// them too.
-//
-// `buildResponseSchema` declares `kind: z.literal("ack")` (the 202/204 path). The
-// bulk-consent path adds `kind: "approval_required"`, so these tools need `kind`
-// to accept BOTH literals AND to declare `estimated_credits`. This helper returns
-// the raw-shape fragment to merge into a `buildResponseSchema(...).extend(...)`
-// (or to spread alongside other fields) so the declaration stays identical across
-// every approval-emitting tool and can't drift. Lives here (outside any byte-
-// locked region) per the cross-MCP constraint.
-export const approvalRequiredShape = {
-  // Widen `kind` to the union both envelopes use. `buildResponseSchema` already
-  // declares `kind: z.literal("ack")`; `.extend` overrides it with this union,
-  // which still admits "ack" so the 202/204 ack envelope keeps validating.
-  kind: z.union([z.literal("approval_required"), z.literal("ack")]).optional(),
-  estimated_credits: z
-    .object({
-      search: z.number().int().nonnegative(),
-      verification: z.number().int().nonnegative(),
-    })
-    .optional(),
-} as const
 
 // `sanitizeUpstreamMessage` (Bearer / api_key scrub for upstream error bodies)
 // is defined directly in `helpers.ts` to avoid a runtime circular import:

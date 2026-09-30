@@ -134,14 +134,16 @@ describe("discover tools: registration", () => {
     }
   })
 
-  it("Find-People description bridges Find-Companies to Domain-Search and explains the aggregations", () => {
+  // HUN-23709: the ChatGPT app shows counts only, and points to hunter.io for
+  // the addresses. The description must not send the model to a removed tool.
+  it("Find-People description explains the counts and the Hunter link, and names no removed tool", () => {
     const description = registeredTools.get("Find-People")!.description
     expect(description).toContain("Find-Companies")
-    expect(description).toContain("Domain-Search")
     expect(description).toContain("emails_count.personal")
     expect(description).toContain("emails_count.generic")
     expect(description).toContain("meta.total_emails")
-    expect(description).toMatch(/credits/)
+    expect(description).toContain("emails_on_hunter")
+    expect(description).not.toContain("Domain-Search")
   })
 
   it("List-Saved-Searches offers to rerun a previous search", () => {
@@ -264,6 +266,22 @@ describe("Find-People handler", () => {
     expect(() => schema.parse(errorEnvelope)).not.toThrow()
   })
 
+  it("links each company row to its Hunter Domain Search page (HUN-23709)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload)))
+
+    const result = await registeredTools.get("Find-People")!.handler({ query: "payment companies in Europe" })
+
+    const rows = (result.structuredContent as { data: Array<{ domain: string; emails_on_hunter?: string }> }).data
+    expect(rows.map((row) => row.emails_on_hunter)).toEqual([
+      "https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people",
+      "https://hunter.io/search/adyen.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people",
+    ])
+    expect(result.content[0].text).toContain("https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people")
+    const next = (result.structuredContent as { nextAction: { kind: string; summary: string } }).nextAction
+    expect(next.kind).toBe("complete")
+    expect(next.summary).toContain("emails_on_hunter")
+  })
+
   it("passes a 422 Rails error body through as a typed isError envelope", async () => {
     const mockFetch = vi
       .fn()
@@ -290,7 +308,7 @@ describe("List-Saved-Searches handler", () => {
     const [url, opts] = mockFetch.mock.calls[0] as [string, { method: string }]
     expect(url).toBe("https://api.hunter.io/v2/discover/views?offset=5&limit=10")
     expect(opts.method).toBe("GET")
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/discover")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/discover?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
   })
 
   it("published output schema validates the jbuilder success payload and the error envelope", async () => {
@@ -329,7 +347,7 @@ describe("Get-Saved-Search handler", () => {
     expect(url).toBe("https://api.hunter.io/v2/discover/views/12")
     expect(opts.method).toBe("GET")
     expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
-      "https://hunter.io/discover?view_id=12",
+      "https://hunter.io/discover?view_id=12&utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
     )
 
     const schema = publishedOutputSchema("Get-Saved-Search")
@@ -379,7 +397,7 @@ describe("Create-Saved-Search handler", () => {
     })
     // Deep link derived from the created record's id.
     expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
-      "https://hunter.io/discover?view_id=12",
+      "https://hunter.io/discover?view_id=12&utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
     )
   })
 

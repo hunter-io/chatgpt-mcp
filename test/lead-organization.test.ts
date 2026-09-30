@@ -375,8 +375,8 @@ describe("Per-lead tagging", () => {
     const body = new URLSearchParams(opts.body)
     expect(body.get("tag_id")).toBe("7")
     expect(result.isError).toBeUndefined()
-    expect((result.structuredContent as { viewInHunter: string }).viewInHunter).toBe("https://hunter.io/leads/42")
-    expect(result.content[0].text).toContain("View in Hunter: https://hunter.io/leads/42")
+    expect((result.structuredContent as { viewInHunter: string }).viewInHunter).toBe("https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect(result.content[0].text).toContain("View in Hunter: https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
 
     const schema = publishedOutputSchema(
       registeredTools.get("Add-Tag-To-Lead")!.outputSchema as Record<string, z.ZodTypeAny>,

@@ -1,17 +1,25 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
+  buildNextAction,
   callHunterApi,
+  embedNextAction,
+  HUNTER_SOURCE_SUFFIX,
+  hunterDomainSearchPath,
+  hunterLink,
+  type McpTextResult,
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
   READ_ONLY_PUBLIC_ANNOTATIONS,
+  sanitizeUpstreamMessage,
   TOOL_NAMES,
   withDeepLink,
   withDeepLinkFromId,
 } from "../helpers"
 import {
   buildResponseSchema,
+  hunterUrl,
   jsonArgs,
   mutationAckSchema,
   nullableString,
@@ -27,9 +35,11 @@ import {
 // — null for a found-but-nameless company, same null-tolerance class as the
 // Find-Companies widget schema), and the `emails_count` breakdown
 // (personal/generic/total integer counters from the domains ES index).
+// `emails_on_hunter` is stamped by the handler, not Rails (HUN-23709).
 const findPeopleCompanySchema = z
   .object({
     domain: z.string().optional(),
+    emails_on_hunter: hunterUrl.optional(),
     organization: nullableString().optional(),
     emails_count: z
       .object({
@@ -104,12 +114,41 @@ interface RailsFormParams {
   [key: string]: string | string[] | RailsFormParams
 }
 
+/**
+ * Stamps each Find-People company row with `emails_on_hunter`, the Hunter page
+ * that shows the addresses. The ChatGPT app returns counts only (HUN-23709).
+ * Rewrites `content[0]` from the new structuredContent and runs the credential
+ * scrub again, like `stripResponseFields`.
+ */
+function withHunterLinks(result: McpTextResult): McpTextResult {
+  if (result.isError) return result
+  const sc = result.structuredContent as { data?: unknown } | undefined
+  if (!sc || !Array.isArray(sc.data)) return result
+  const data = sc.data.map((row) => {
+    const domain = (row as { domain?: unknown } | null)?.domain
+    if (typeof domain !== "string" || domain.length === 0) return row
+    return {
+      ...(row as Record<string, unknown>),
+      emails_on_hunter: hunterLink(hunterDomainSearchPath(domain), "find-people"),
+    }
+  })
+  const structured = { ...sc, data }
+  const rawText = `${JSON.stringify(structured)}${HUNTER_SOURCE_SUFFIX}`
+  return {
+    ...result,
+    content: [
+      { ...result.content[0], type: "text" as const, text: sanitizeUpstreamMessage(rawText, Number.POSITIVE_INFINITY) },
+    ],
+    structuredContent: structured,
+  }
+}
+
 export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
     TOOL_NAMES.findPeople,
     {
       description:
-        "Use this when the user wants to extract people from companies — the natural next step right after a Find-Companies result ('now get me the people at these companies'). For each matching company it reports how many email addresses Hunter's public index holds: `emails_count.personal` counts addresses tied to a named person (the people you can actually extract), `emails_count.generic` counts role-based addresses such as info@ or sales@, and `emails_count.total` combines both. `meta.total_emails` aggregates the same three counters across ALL companies matching the search — not just the current page — so use it to size a prospecting batch upfront. This tool returns counts only, from Hunter's public index: to reveal the actual email addresses, names, and positions at a company, call Domain-Search with that company's domain (uses credits). Provide either `query` (natural-language criteria, translated to filters exactly like Find-Companies) or `domains` (exact company domains, e.g. lifted from a Find-Companies result); when both are given, `query` takes precedence and `domains` is not sent. Free to call.",
+        "Use this when the user wants to know how many email addresses Hunter has at a set of companies — for example, right after a Find-Companies result. For each company it reports `emails_count.personal` (addresses tied to a named person), `emails_count.generic` (role-based addresses such as info@ or sales@), and `emails_count.total`. `meta.total_emails` sums the same counters across ALL matching companies, not just the current page. Returns counts only. Each company row has an `emails_on_hunter` link where the user can see the addresses on hunter.io. Provide either `query` (natural-language criteria, translated to filters exactly like Find-Companies) or `domains` (exact company domains, e.g. lifted from a Find-Companies result); when both are given, `query` takes precedence and `domains` is not sent. Free to call.",
       inputSchema: {
         query: z
           .string()
@@ -125,7 +164,7 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
           .max(100)
           .optional()
           .describe(
-            "Exact company domains to extract people counts for (e.g. from a Find-Companies result). Ignored when `query` is provided.",
+            "Exact company domains to count email addresses for (e.g. from a Find-Companies result). Ignored when `query` is provided.",
           ),
         limit: z
           .number()
@@ -150,7 +189,7 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
       // and there is nothing meaningful to return — fail fast with a typed
       // envelope instead of burning a round-trip.
       if (!query && (!domains || domains.length === 0)) {
-        const message = "Provide either `query` or `domains` — at least one is required to find people."
+        const message = "Provide either `query` or `domains` — at least one is required."
         return {
           content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
           structuredContent: { error: { code: "invalid_input" as const, retryable: false, message } },
@@ -169,13 +208,21 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
       // Rails ignores structured filters when `query` is present
       // (Api::Discover::Params#api_input_params), so don't send them.
       if (!query && domains && domains.length > 0) params.organization = { domain: domains }
-      return callHunterApi({
+      const result = await callHunterApi({
         path: qs ? `/discover/people?${qs}` : "/discover/people",
         apiKey,
         baseUrl,
         method: "POST",
         params,
       })
+      return embedNextAction(
+        withHunterLinks(result),
+        buildNextAction({
+          kind: "complete",
+          summary:
+            "Tell the user how many email addresses Hunter has at each company, and give each company's emails_on_hunter link to see them on Hunter.",
+        }),
+      )
     },
   )
 

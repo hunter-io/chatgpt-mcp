@@ -68,21 +68,20 @@ export const HUNTER_SOURCE_SUFFIX = "\n\nSource: Hunter.io (https://hunter.io)"
 // `Start-Campaign` → `Start-Sequence`, recipient tools renamed to match) —
 // "sequence" is the canonical product term and the tools hit /v2/sequences/*.
 //
-// This block must be BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and
-// remote-mcp/src/helpers.ts — enforced by scripts/check-tool-names-aligned.mjs.
+// Shared with chatgpt-mcp/src/helpers.ts and remote-mcp/src/helpers.ts. The
+// entries of chatgpt-mcp's TOOL_NAMES must be a subset of remote-mcp's, with the
+// same keys and values: the ChatGPT app does not ship the person-email,
+// people-finding, and API-key tools (HUN-23709). The rest of this block must be
+// BYTE-IDENTICAL. Enforced by scripts/check-tool-names-aligned.mjs.
 //
 // See docs/plans/2026-04-28-feat-chatgpt-app-review-readiness-plan.md (Pillar 0).
 export const TOOL_NAMES = {
   // search
   discover: "Find-Companies",
-  domainSearch: "Domain-Search",
-  emailFinder: "Email-Finder",
   emailVerifier: "Email-Verifier",
   emailCount: "Email-Count",
   // enrichment
-  personEnrichment: "Person-Enrichment",
   companyEnrichment: "Company-Enrichment",
-  combinedEnrichment: "Combined-Enrichment",
   // account
   account: "Get-Account-Details",
   // email accounts
@@ -185,13 +184,8 @@ export const TOOL_NAMES = {
   pushLeadsToCrm: "Push-Leads-To-CRM",
   listWebhooks: "List-Webhooks",
   updateWebhook: "Update-Webhook",
-  // usage + API keys
+  // usage
   getUsage: "Get-Usage",
-  listApiKeys: "List-API-Keys",
-  createApiKey: "Create-API-Key",
-  deleteApiKey: "Delete-API-Key",
-  // coordinator
-  prospecting: "Plan-Prospecting-Flow",
   // feedback
   reportFeedback: "Report-API-Feedback",
 } as const satisfies Record<string, string>
@@ -238,9 +232,23 @@ export interface McpTextResult {
   _meta?: Record<string, unknown>
 }
 
-export function withDeepLink(result: McpTextResult, path: string): McpTextResult {
+/**
+ * A hunter.io link with the ChatGPT app's UTM parameters (HUN-23709). The
+ * widgets use the same `utm_source`. Rails stores the UTMs on the account when
+ * a new visitor signs up; PostHog sees them on the pageview of a logged-in user.
+ * `utmContent` names the tool, to measure which link the user opened.
+ */
+export function hunterLink(path: string, utmContent?: string): string {
+  const url = new URL(path, HUNTER_BASE)
+  url.searchParams.set("utm_source", "hunter-chatgpt")
+  url.searchParams.set("utm_medium", "chatgpt-app")
+  if (utmContent) url.searchParams.set("utm_content", utmContent)
+  return url.toString()
+}
+
+export function withDeepLink(result: McpTextResult, path: string, utmContent?: string): McpTextResult {
   if (result.isError) return result
-  const url = `${HUNTER_BASE}${path}`
+  const url = hunterLink(path, utmContent)
   const text = result.content[0]?.text ?? ""
   return {
     ...result,
@@ -520,19 +528,10 @@ const INJECTED_FIELD_NAMES = new Set([
   "nextAction",
   "pendingToolCall",
   "viewInHunter",
-  // `save_leads` (HUN-20651 Phase 2): the coordinator-resolved research-vs-save
-  // mode flag. The server treats it like `confirmed_credit_use` — set once at the
-  // consented start and carried forward via `carryLoopFilters`. A Hunter response
-  // record carrying `save_leads` (e.g. an attacker-controlled lead note or
-  // scraped record) must never be able to flip a research loop into a write loop,
-  // so we strip it at any depth before the model ever sees it.
+  // `save_leads` (HUN-20651 Phase 2): the save-request flag on Email-Verifier.
+  // A Hunter response record carrying it (e.g. an attacker-controlled lead
+  // note) must never steer the model into a write, so we strip it at any depth.
   "save_leads",
-  // `confirmed_save_use` (HUN-20651 review fix B): the save-SCOPED bulk consent
-  // token. It authorizes the write path (Email-Verifier → Create-Lead-If-Missing
-  // in a bulk loop), so an attacker-controlled Hunter record carrying it must
-  // never reach the model and let a research loop start saving without the
-  // save-cost approval. Strip it like `save_leads`.
-  "confirmed_save_use",
   // Telemetry / internal-ID fields. OpenAI Apps SDK submission privacy
   // guidance: "session IDs, trace IDs, request IDs, timestamps" must not
   // appear in user-facing tool responses. Hunter's Rails API doesn't
@@ -771,6 +770,30 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   }
 }
 
+/**
+ * Tools whose chained `nextAction` may carry a `pendingToolCall` for hard
+ * confirmation. `Start-Sequence` sends real emails (Phase 4); the HUN-20852 /
+ * HUN-20858 / HUN-20861 additions gate bulk mutations, CRM pushes, and sequence
+ * deletion behind the same explicit-confirmation pattern (first call returns
+ * ask_user + pendingToolCall; the re-issued call with `confirmed: true`
+ * executes). Narrowing the type prevents future
+ * emissions from steering the model into arbitrary tools under cover of an
+ * `ask_user` question.
+ *
+ * Lives outside the NEXT_ACTION region: each MCP lists only the confirmable
+ * tools it registers (chatgpt-mcp has no API-key tools, HUN-23709).
+ */
+export type ConfirmableToolName =
+  | typeof TOOL_NAMES.startSequence
+  | typeof TOOL_NAMES.deleteSequence
+  | typeof TOOL_NAMES.addSequenceRecipients
+  | typeof TOOL_NAMES.bulkMoveLeads
+  | typeof TOOL_NAMES.bulkDeleteLeads
+  | typeof TOOL_NAMES.bulkMoveCompanies
+  | typeof TOOL_NAMES.bulkCopyCompanies
+  | typeof TOOL_NAMES.bulkDeleteCompanies
+  | typeof TOOL_NAMES.pushLeadsToCrm
+
 // NEXT_ACTION_START
 // ─── NextAction chaining (Pillar 1) ────────────────────────────────────────
 //
@@ -790,29 +813,6 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 // — enforced by scripts/check-tool-names-aligned.mjs.
 //
 // See docs/plans/2026-04-29-feat-chatgpt-mcp-confirmation-gates-plan.md (Phase 1).
-
-/**
- * Tools whose chained `nextAction` may carry a `pendingToolCall` for hard
- * confirmation. `Start-Sequence` sends real emails (Phase 4); the HUN-20852 /
- * HUN-20858 / HUN-20861 additions gate bulk mutations, CRM pushes, sequence
- * deletion, and API-key management behind the same explicit-confirmation
- * pattern (first call returns ask_user + pendingToolCall; the re-issued call
- * with `confirmed: true` executes). Narrowing the type prevents future
- * emissions from steering the model into arbitrary tools under cover of an
- * `ask_user` question.
- */
-export type ConfirmableToolName =
-  | typeof TOOL_NAMES.startSequence
-  | typeof TOOL_NAMES.deleteSequence
-  | typeof TOOL_NAMES.addSequenceRecipients
-  | typeof TOOL_NAMES.bulkMoveLeads
-  | typeof TOOL_NAMES.bulkDeleteLeads
-  | typeof TOOL_NAMES.bulkMoveCompanies
-  | typeof TOOL_NAMES.bulkCopyCompanies
-  | typeof TOOL_NAMES.bulkDeleteCompanies
-  | typeof TOOL_NAMES.pushLeadsToCrm
-  | typeof TOOL_NAMES.createApiKey
-  | typeof TOOL_NAMES.deleteApiKey
 
 /**
  * The chaining hint a tool emits to tell the model what to do next.
@@ -1032,12 +1032,11 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 // kept only because it sits inside the byte-locked NEXT_ACTION region above.
 //
 // Matrix mapping:
-//   READ_ONLY_PUBLIC_ANNOTATIONS    → public-data lookups (Find-Companies, Email-Count)
+//   READ_ONLY_PUBLIC_ANNOTATIONS    → public-data lookups (Find-Companies)
 //   PRIVATE_READ_ANNOTATIONS         → private-workspace reads (Get-Account-Details,
 //                                       List/Get-Lead, Lead-Exists, lists, attributes,
 //                                       sequences reads)
-//   BILLABLE_LOOKUP_ANNOTATIONS      → paid lookups (Domain-Search, Email-Finder,
-//                                       Email-Verifier, Person/Company/Combined-Enrichment)
+//   BILLABLE_LOOKUP_ANNOTATIONS      → paid lookups (Email-Verifier, Company-Enrichment)
 //   PRIVATE_WRITE_ANNOTATIONS        → private-workspace writes (Create-Lead,
 //                                       Create-Lead-If-Missing, Save-Company, Create lists &
 //                                       attributes; Pause-Sequence — HUN-20797)
@@ -1045,8 +1044,6 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 //                                       Create-Or-Update-Lead, Delete-Lead, Delete/Merge
 //                                       lists, Delete-Custom-Attribute; Archive-Sequence,
 //                                       Remove-Sequence-Recipients — HUN-20797)
-//   LOCAL_PLAN_ANNOTATIONS           → Plan-Prospecting-Flow (synthesizes a plan locally;
-//                                       no Hunter API call, no external effect)
 
 /** Public-data lookup tools that read from Hunter's hosted index of public-internet data. */
 export const READ_ONLY_PUBLIC_ANNOTATIONS = {
@@ -1064,9 +1061,7 @@ export const PRIVATE_READ_ANNOTATIONS = {
 
 /**
  * Paid lookup. Credit-spend (not read-only) but no delete/overwrite of user data
- * (not destructive). Bulk credit consent is enforced server-side via
- * `confirmed_credit_use` on Domain-Search. See HUN-20170-v3 plan, Phase 1.1c.
- * https://developers.openai.com/apps-sdk/reference
+ * (not destructive). https://developers.openai.com/apps-sdk/reference
  */
 export const BILLABLE_LOOKUP_ANNOTATIONS = {
   readOnlyHint: false,
@@ -1092,13 +1087,6 @@ export const PRIVATE_DESTRUCTIVE_ANNOTATIONS = {
   openWorldHint: false,
 } as const
 
-/** Local plan synthesis only; no Hunter API call. Used by Plan-Prospecting-Flow. */
-export const LOCAL_PLAN_ANNOTATIONS = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  openWorldHint: false,
-} as const
-
 /**
  * Report-API-Feedback. Records a free, non-billable feedback note about the
  * Hunter API/tools. Not read-only (it writes a feedback row), not destructive
@@ -1112,10 +1100,9 @@ export const FEEDBACK_ANNOTATIONS = {
 
 /**
  * RFC 1035-shaped hostname regex used to validate the primary `domain` input
- * on Domain-Search / Email-Finder / Email-Count and every element of
- * `pending_companies`. Rejects non-domain payloads (control chars, newlines,
+ * on Email-Count. Rejects non-domain payloads (control chars, newlines,
  * free-form prose, "ignore prior instructions" strings) so they can't ride
- * into chained `suggestedArgs` and reflect into the model-only content block.
+ * into the Hunter link or the model-only content block.
  * Matches punycode (`xn--*`) for IDN; UTF-8 IDNs must be encoded by the caller.
  */
 export const DOMAIN_REGEX = /^([a-z0-9-]+\.)+[a-z]{2,}$/i
@@ -1129,151 +1116,13 @@ export const DOMAIN_REGEX = /^([a-z0-9-]+\.)+[a-z]{2,}$/i
 export const domainStringSchema = z.string().regex(DOMAIN_REGEX, "must be a valid domain").max(253)
 
 /**
- * Shared schema for the multi-company loop carry, used by Domain-Search,
- * Email-Verifier, and Upsert-Lead. Three defenses baked in:
- *
- *   - `.max(50)` bounds the credit-spend blast radius. Without a cap, a
- *     prompt-injection that coerces the model into seeding a 200-entry array
- *     would silently spend that many verification credits inside the chain
- *     (the loop drops `requiresConfirmation: true` on Email-Verifier because
- *     populating the array IS the user's authorization). 50 is a generous
- *     ceiling for legitimate prospecting picks — typical briefs are 5-20,
- *     longer ones (30-50) come up for B2B list-building. Beyond 50 the
- *     synchronous chain runtime (~5-10s/iter × 50 ≈ 4-8 min) becomes
- *     user-hostile anyway, so the cap aligns with UX boundaries.
- *
- *   - Each element validated by `DOMAIN_REGEX` so non-domain payloads can't
- *     flow through chained suggestedArgs.
- *
- *   - `.transform()` lowercases each entry and dedupes via Set. Hunter's API
- *     treats domains case-insensitively, so `["Stripe.com", "stripe.com"]`
- *     would otherwise burn two verification credits on the same lead. The
- *     transform fires on every entry point (DS, EV, US) so the dedup
- *     guarantee survives even when a model invokes EV/US directly without
- *     going through DS's handler.
+ * Path of the Hunter Domain Search page for a domain. Email-Count and
+ * Find-People return counts only; this page is where the user sees the
+ * addresses (HUN-23709). A logged-out visitor is redirected to the public
+ * `/try/search/<domain>` page.
  */
-export const PENDING_COMPANIES_MAX = 50
-export const pendingCompaniesSchema = z
-  .array(domainStringSchema)
-  .max(PENDING_COMPANIES_MAX, `Multi-company loop is capped at ${PENDING_COMPANIES_MAX} picks per chain.`)
-  .transform((arr) => Array.from(new Set(arr.map((d) => d.toLowerCase()))))
-  .optional()
-  .describe(
-    desc`Multi-company loop carry (capped at 50 domains). When the user has picked 2+ companies, set this on the first ${TOOL_NAMES.domainSearch} call to the array of REMAINING picks (everything except the first picked domain that goes in the 'domain' arg). The response chain threads through ${TOOL_NAMES.domainSearch} → ${TOOL_NAMES.emailVerifier} → ${TOOL_NAMES.createLeadIfMissing} per company and auto-continues to the next pending domain without between-company confirmation gates. Downstream tools receive this via suggestedArgs and shrink it as the chain advances; pass it through verbatim from the prior tool's chained nextAction. Leave UNDEFINED for single-call usage and for prospecting flows where the user picked exactly ONE company (single-company mode preserves the confirmation gate on Email-Verifier).`,
-  )
-
-/**
- * Builds an `ask_user` recovery next-action for an in-loop tool failure (Hunter
- * API error mid-chain). Used by Domain-Search, Email-Verifier, and Upsert-Lead
- * handlers — each emits the same skip/retry/stop prompt, just with a different
- * failure context. The next pending domain is named explicitly so the agent's
- * "skip" option is concrete (per agent-native review).
- *
- * Caller MUST verify `pending_companies?.length > 0` before invoking — the
- * helper assumes there's a next domain to advance to.
- */
-export function loopRecoveryAction(
-  result: McpTextResult,
-  pending_companies: readonly string[],
-  failureContext: string,
-): McpTextResult {
-  const remaining = pending_companies.length
-  const noun = remaining === 1 ? "company" : "companies"
-  const nextDomain = pending_companies[0]
-  return embedNextAction(
-    result,
-    buildNextAction({
-      kind: "ask_user",
-      question: `${failureContext}. ${remaining} ${noun} remain in the loop (next: ${nextDomain}). Skip and continue, retry, or stop?`,
-    }),
-    { evenOnError: true },
-  )
-}
-
-/**
- * Domain-Search filter args that should travel along the multi-company loop
- * chain so the next Domain-Search call applies the same filters as the first
- * (e.g. `seniority`, `department`). Without this carry, "find marketing
- * executives at companies X, Y, Z" would filter at X but run an unfiltered
- * search at Y and Z. Email-Verifier and Upsert-Lead accept these as carry-only
- * fields (ignored for their own API calls; only forwarded in chained
- * suggestedArgs). `offset` is intentionally NOT carried — each company starts
- * a fresh page-1 search.
- */
-export interface LoopFilters {
-  limit?: number
-  type?: "personal" | "generic"
-  seniority?: string
-  department?: string
-  required_field?: "full_name" | "position" | "phone_number"
-  // Bulk credit-consent flag (HUN-20170-v3 Phase 1.1c). When set true on the
-  // first Domain-Search call in a `pending_companies` batch, authorizes the
-  // entire chain. Carried through chained `suggestedArgs` so subsequent
-  // Domain-Search calls in the loop don't re-trigger the server-side guard.
-  confirmed_credit_use?: boolean
-  // Save-SCOPED bulk credit-consent flag (HUN-20651 review fix B). Distinct from
-  // `confirmed_credit_use` (the research-scoped consent) so a research-mode
-  // approval — whose estimate carried verification: 0 — can NOT authorize the
-  // save path (search + verify + write). `requireBulkConsent` requires THIS token
-  // in save mode; it's only ever produced by the save loop carry below, so a
-  // research loop's carry can never forge it. One-time-set + carried like the
-  // others. Stripped from upstream Hunter responses (INJECTED_FIELD_NAMES).
-  confirmed_save_use?: boolean
-  // Research-vs-save mode flag (HUN-20651 Phase 2). Coordinator-resolved and
-  // one-time-set, like `confirmed_credit_use`: absent/false ⇒ research (default,
-  // return-a-table; the loop advances Domain-Search → next Domain-Search and
-  // NEVER chains to a write tool); `true` ⇒ save (the loop terminates at
-  // Create-Lead-If-Missing). Carried through chained `suggestedArgs` so the mode
-  // chosen on the first Domain-Search call governs the whole loop and can't be
-  // silently re-decided mid-chain. Stripped from upstream Hunter responses (see
-  // INJECTED_FIELD_NAMES) so a scraped record can't flip the mode.
-  save_leads?: boolean
-  // Destination list for the save loop (HUN-20651 review fix M). When the user
-  // asked to save the gathered contacts INTO a list, the coordinator resolves the
-  // list id once (Create-Leads-List for a new/named list, or List-Leads-Lists for
-  // an existing one) and carries it through every chained Create-Lead-If-Missing
-  // so the saved leads land in the intended list instead of unlisted. Carried
-  // verbatim like the other save fields; only forwarded when present. Domain-Search
-  // and Email-Verifier accept it as a carry-only field (they never read it), and
-  // Create-Lead-If-Missing consumes it as a real lead field. Research loops simply
-  // never set it.
-  leads_list_id?: number
-}
-
-/**
- * Picks the loop-filter fields out of an args object and returns them as a
- * plain record suitable for spreading into chained `suggestedArgs`. Undefined
- * fields are dropped so the chained payload stays minimal.
- */
-export function carryLoopFilters(args: LoopFilters): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {}
-  if (args.limit !== undefined) out.limit = args.limit
-  if (args.type) out.type = args.type
-  if (args.seniority) out.seniority = args.seniority
-  if (args.department) out.department = args.department
-  if (args.required_field) out.required_field = args.required_field
-  if (args.confirmed_credit_use === true) out.confirmed_credit_use = true
-  // Save-scoped consent carry (HUN-20651 review fix B). Only forwarded inside a
-  // bona-fide save loop (save_leads === true AND the save consent was granted).
-  // A research loop never carries `save_leads`, so it can never propagate
-  // `confirmed_save_use` either — which is exactly what stops a research-scoped
-  // approval from later authorizing the save path. Kept monotonic-toward-save
-  // like `save_leads`.
-  if (args.save_leads === true && args.confirmed_save_use === true) out.confirmed_save_use = true
-  // Only carry `save_leads` when it's explicitly true. Carrying `false`/absent
-  // would be redundant (research is the default) and would also give a mid-loop
-  // `false` a foothold to flip a save loop back to research — keep the carry
-  // monotonic-toward-save-only and let the handler own the one-time-set guard.
-  if (args.save_leads === true) out.save_leads = true
-  // Destination list carry (HUN-20651 review fix M). Forward `leads_list_id`
-  // whenever it's present so the loop-emitted Create-Lead-If-Missing suggestedArgs
-  // carry the intended list id through to the save terminal. It's a passive carry
-  // on Domain-Search/Email-Verifier (they don't read it) and a real lead field on
-  // Create-Lead-If-Missing. Research loops never set it, so it's naturally absent
-  // there. Not mode-bound: a list id without save_leads is inert (no save tool is
-  // ever reached), so no extra guard is needed.
-  if (args.leads_list_id !== undefined) out.leads_list_id = args.leads_list_id
-  return out
+export function hunterDomainSearchPath(domain: string): string {
+  return `/search/${encodeURIComponent(domain)}`
 }
 
 /**
@@ -1368,280 +1217,4 @@ export function stripResponseFields(result: McpTextResult, fieldsToStrip: Readon
     ],
     structuredContent: trimmedStructured,
   }
-}
-
-/**
- * Server-side bulk credit-consent guard. When the call is an unconsented bulk
- * (or save) entry, returns a synthesized `McpTextResult` carrying an `ask_user`
- * nextAction with the credit-cost summary — the caller should `return` it
- * immediately, short-circuiting the Hunter API call. Returns `null` when the
- * call is authorized to proceed.
- *
- * Today `Domain-Search` is the only tool that calls this, because it's the
- * only credit-debit entry to bulk loops. As soon as a second tool wants to
- * accept `pending_companies` directly (e.g. a future bulk-verification entry
- * point), it MUST call this helper at handler-top — otherwise the implicit
- * invariant "the loop always re-enters Domain-Search before next credit
- * debit" silently breaks. Extracted from the original inline guard so the
- * contract is grep-able (`grep -r requireBulkConsent`).
- *
- * `pending === undefined` (a genuine single-company call) is always allowed —
- * single-company save keeps its own per-email `requiresConfirmation` gate in the
- * handler. The distinction that matters for the gate is "pending is a DEFINED
- * array" (the model entered the bulk shape) vs "pending is undefined".
- *
- * HUN-20651 review fix H — empty-pending save backdoor. `pending: []` (an empty
- * but DEFINED array) routes the handler through the multi-company `advanceLoop`
- * path, which chains straight to Create-Lead-If-Missing without a per-email gate.
- * If the gate early-returned on `length === 0`, a save_leads call with empty
- * pending and no consent wrote a lead with NEITHER the bulk consent gate NOR the
- * single-company per-email gate. Fix: in SAVE mode, an empty-but-defined pending
- * is treated as a 1-company save batch and the gate fires when the save isn't yet
- * consented (count the current company). Research mode keeps the old behavior —
- * an empty-pending research call has nothing to charge for beyond this single
- * company's search (which the model already authorized by entering the loop) and
- * just completes with a table, so it never gates on empty.
- *
- * Lives outside the NEXT_ACTION byte-aligned region so each MCP adopts
- * independently. See HUN-20170-v3 plan Phase 1.1c + todo #106.
- */
-export function requireBulkConsent(
-  pending: readonly string[] | undefined,
-  confirmed: boolean | undefined,
-  summary: string,
-  estimatedCredits: { search: number; verification: number },
-  // Mode-binding (HUN-20651 review fix B). The carried consent token is
-  // mode-SCOPED: a research-scoped approval (verification estimate 0) must NOT
-  // authorize the save path (search + verify + write). Without this, a research
-  // batch's `confirmed_credit_use: true` carried forward to a later `save_leads:
-  // true` hop bypassed the gate and Email-Verifier / Create-Lead-If-Missing ran
-  // on the higher save cost the user never approved. So:
-  //   - research mode (saveLeads !== true): the gate is satisfied by
-  //     `confirmed` (the research consent) — unchanged.
-  //   - save mode (saveLeads === true): the gate requires the SAVE-scoped
-  //     `confirmedSave` token. A research consent alone re-fires the gate with
-  //     the (higher) save estimate. `confirmedSave` is only ever produced by the
-  //     server's save loop carry (carryLoopFilters), so a research loop's carry
-  //     can never satisfy the save gate.
-  opts?: { saveLeads?: boolean; confirmedSave?: boolean },
-): McpTextResult | null {
-  // Genuine single-company call (pending undefined): never gate here; the handler
-  // owns the single-company per-email confirmation.
-  if (!pending) return null
-  const isSave = opts?.saveLeads === true
-  // Research mode + empty pending: nothing to gate (the loop is on its last hop
-  // and just renders a table). Save mode + empty pending IS gated (review fix H):
-  // the current company is a 1-company save batch that still needs save consent.
-  if (pending.length === 0 && !isSave) return null
-  const consented = isSave ? opts?.confirmedSave === true : confirmed === true
-  if (consented) return null
-  return embedNextAction(
-    {
-      content: [{ type: "text" as const, text: summary, annotations: { audience: ["user"] } }],
-      structuredContent: {
-        kind: "approval_required" as const,
-        ok: true as const,
-        estimated_credits: estimatedCredits,
-      },
-    },
-    buildNextAction({ kind: "ask_user", question: summary }),
-  )
-}
-
-/**
- * Shared terminal-step nextAction emitter for the multi-company prospecting
- * loop. Used by `Create-Or-Update-Lead` and `Create-Lead-If-Missing` after a
- * successful save (or already-existed no-op):
- *
- *   - If `pending_companies` is non-empty: chain into the next Domain-Search
- *     with the filter-carry forwarded, so the loop advances to the next
- *     selected company without a between-company confirmation gate.
- *   - If `pending_companies` is `undefined` (single-call mode) OR an empty
- *     array (last hop in a loop): emit `complete`. The flag distinguishes
- *     the two so the user-facing summary reads correctly in each path.
- *
- * Extracted in HUN-20170 todo #103 to dedupe two near-identical blocks in
- * leads.ts. Lives outside the NEXT_ACTION byte-aligned region so each MCP
- * can adopt independently.
- */
-export function chainOrComplete(
-  result: McpTextResult,
-  pending: readonly string[] | undefined,
-  filters: LoopFilters,
-  copy: { reason: string; loopCompleteSummary: string; singleCompleteSummary: string },
-): McpTextResult {
-  if (pending !== undefined && pending.length > 0) {
-    const [next, ...rest] = pending
-    const filterCarry = carryLoopFilters(filters)
-    return embedNextAction(
-      result,
-      buildNextAction({
-        kind: "call_tool",
-        tool: TOOL_NAMES.domainSearch,
-        reason: copy.reason,
-        suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
-      }),
-    )
-  }
-  const isLastLoopHop = pending !== undefined
-  return embedNextAction(
-    result,
-    buildNextAction({
-      kind: "complete",
-      summary: isLastLoopHop ? copy.loopCompleteSummary : copy.singleCompleteSummary,
-    }),
-  )
-}
-
-// Three-way verification routing outcome (HUN-20651 review fix A). Defined here
-// (not in tools/search.ts) so `advanceLoop` can take it without a circular import
-// — search.ts already imports from helpers.ts. The authoritative producer is
-// `verificationDecision` in tools/search.ts, which re-exports this type.
-//   - "skip_and_use"  : trustworthy as returned (save / include; skip verify)
-//   - "skip_and_drop" : accept_all/invalid (not saveable; skip verify; drop)
-//   - "verify"        : run Email-Verifier first (everything else)
-export type VerificationDecision = "skip_and_use" | "skip_and_drop" | "verify"
-
-/**
- * Terminal router for a successful Domain-Search hop in the multi-company loop
- * (HUN-20651 Phase 2). Lives outside the NEXT_ACTION byte-aligned region so each
- * MCP adopts it independently. The Domain-Search handler funnels BOTH modes
- * through this one helper so the mode-branch lives in a single, testable place
- * instead of duplicated inline.
- *
- * The original prospecting flow was hardwired toward saving leads: every
- * Domain-Search success chained into Email-Verifier → Create-Lead-If-Missing.
- * Research mode (the new default) wants the opposite — a gate-free read loop that
- * returns a table and writes nothing.
- *
- *   - SAVE mode (`filters.save_leads === true`) — unchanged from the shipped
- *     loop: when this company yielded an email, chain into Create-Lead-If-Missing
- *     (skip-verify) or Email-Verifier (verify); the create-only terminal is
- *     preserved (never Create-Or-Update-Lead). When it yielded none, advance to
- *     the next pending company, or `complete` the loop.
- *
- *   - RESEARCH mode (default) — NEVER chains into Email-Verifier or any write
- *     tool. Whether or not this company yielded an email, advance straight to the
- *     next pending Domain-Search (carrying the same filters + mode + bulk-consent
- *     flag), or — when no companies remain — emit `complete` with a table-render
- *     instruction so the model renders the rows it collected across the loop.
- *     Research persists nothing; the table IS the deliverable.
- *
- * Self-reference dedup and `loopRecoveryAction` recovery are handled by the
- * caller BEFORE it invokes this (it has already cleaned `pending` of the current
- * domain and short-circuited on `result.isError`). `email` is `null` when the
- * company returned no usable contact (the 0-contact advance). This helper is only
- * reached when `pending !== undefined` (multi-company mode); single-company
- * routing stays inline in the handler because its terminals differ (`complete`
- * table vs. the per-email confirmation gate).
- */
-export function advanceLoop(
-  result: McpTextResult,
-  pending: readonly string[],
-  filters: LoopFilters,
-  ctx: {
-    domain: string
-    email: string | null
-    // Three-way verification routing (HUN-20651 review fix A). `"skip_and_use"`
-    // = trustworthy as returned (save it / skip Email-Verifier). `"verify"` =
-    // run Email-Verifier first. `"skip_and_drop"` = accept_all/invalid — a
-    // re-verify is pointless AND the address is NOT trustworthy to save, so save
-    // mode must advance WITHOUT creating a lead (the 0-contact path). Replaces
-    // the old `skipVerify` boolean, which conflated `skip_and_use` and
-    // `skip_and_drop` and let an invalid/accept_all first contact get SAVED.
-    decision: VerificationDecision
-    reasons: { save: string; verify: string; advanceNoEmail: string; advanceDrop: string; advanceResearch: string }
-    summaries: { loopComplete: string; dropComplete: string; researchComplete: string }
-  },
-): McpTextResult {
-  const filterCarry = carryLoopFilters(filters)
-  const isResearch = filters.save_leads !== true
-
-  // Defense-in-depth per-email gate (HUN-20651 review fix H). The bulk loop only
-  // suppresses the per-email `requiresConfirmation` because the upfront
-  // `requireBulkConsent` already covered the whole save batch via
-  // `confirmed_save_use`. If we reached a SAVE terminal WITHOUT that save consent
-  // (e.g. an empty-pending entry that slipped past the gate, or a direct
-  // Email-Verifier bulk entry — review fix J), the write is uncovered, so we must
-  // NOT suppress the gate: re-attach `requiresConfirmation: true` to the save
-  // terminal. A legitimate consented loop carries `confirmed_save_use: true` and
-  // advances ungated as before.
-  const saveGate = !isResearch && filters.confirmed_save_use !== true ? { requiresConfirmation: true } : {}
-
-  // SAVE mode, `skip_and_drop`, WITH an email in hand (HUN-20651 review fix F): a
-  // contact WAS found at this domain — it's just accept_all/invalid, so we won't
-  // create a lead from it. This is a distinct outcome from the genuine 0-contact
-  // case below, and must NOT reuse the "No contacts found" copy (which would
-  // misreport that Domain-Search found nothing). It gets its own drop-specific
-  // reason/summary. Research mode never sets this (it falls through to the
-  // research advance/complete copy regardless of decision).
-  const isSaveDrop = !isResearch && ctx.email != null && ctx.decision === "skip_and_drop"
-
-  // SAVE mode with a SAVEABLE email in hand: chain to the create-only terminal
-  // (skip_and_use) or to Email-Verifier first (verify). `skip_and_drop`
-  // (accept_all/invalid) falls through to the next-company advance below WITHOUT
-  // saving — surfacing the unsaveable row but never creating a lead from it.
-  // Research mode never enters here — it falls through to the next-company
-  // advance regardless of `email`.
-  if (!isResearch && ctx.email && ctx.decision !== "skip_and_drop") {
-    if (ctx.decision === "skip_and_use") {
-      return embedNextAction(
-        result,
-        buildNextAction({
-          kind: "call_tool",
-          tool: TOOL_NAMES.createLeadIfMissing,
-          reason: ctx.reasons.save,
-          suggestedArgs: { email: ctx.email, pending_companies: pending, ...filterCarry },
-          ...saveGate,
-        }),
-      )
-    }
-    return embedNextAction(
-      result,
-      buildNextAction({
-        kind: "call_tool",
-        tool: TOOL_NAMES.emailVerifier,
-        reason: ctx.reasons.verify,
-        suggestedArgs: { email: ctx.email, pending_companies: pending, ...filterCarry },
-        ...saveGate,
-      }),
-    )
-  }
-
-  // Advance to the next pending company. In research mode this is the ONLY
-  // forward edge (a found email is rendered into the table, not saved); in save
-  // mode this is either the 0-contact advance (no email worth saving) OR the
-  // drop advance (a contact was found but its email was accept_all/invalid, so it
-  // was intentionally not saved — distinct copy, never the "no contacts" copy).
-  if (pending.length > 0) {
-    const [next, ...rest] = pending
-    return embedNextAction(
-      result,
-      buildNextAction({
-        kind: "call_tool",
-        tool: TOOL_NAMES.domainSearch,
-        reason: isResearch
-          ? ctx.reasons.advanceResearch
-          : isSaveDrop
-            ? ctx.reasons.advanceDrop
-            : ctx.reasons.advanceNoEmail,
-        suggestedArgs: { domain: next, pending_companies: rest, ...filterCarry },
-      }),
-    )
-  }
-
-  // No companies left. Research ends with a table-render instruction; a save run
-  // whose last company was dropped (accept_all/invalid) gets the drop-complete
-  // summary; a genuine no-contact save run gets the loop-complete summary.
-  return embedNextAction(
-    result,
-    buildNextAction({
-      kind: "complete",
-      summary: isResearch
-        ? ctx.summaries.researchComplete
-        : isSaveDrop
-          ? ctx.summaries.dropComplete
-          : ctx.summaries.loopComplete,
-    }),
-  )
 }

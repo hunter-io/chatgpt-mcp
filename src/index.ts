@@ -15,6 +15,7 @@ import {
   buildNextAction,
   callHunterApi,
   embedNextAction,
+  hunterLink,
   withDeepLink,
 } from "./helpers"
 import { withClientUserAgent } from "./client-context"
@@ -124,40 +125,42 @@ import { registerConnectedAppTools } from "./tools/connected-apps"
 import { registerCustomAttributeTools } from "./tools/custom-attributes"
 import { registerDiscoverTools } from "./tools/discover"
 import { registerEmailAccountTools } from "./tools/email-accounts"
-import { registerEnrichmentTools } from "./tools/enrichment"
 import { registerFeedbackTools } from "./tools/feedback"
 import { registerIntegrationTools } from "./tools/integrations"
 import { registerLeadOrganizationTools } from "./tools/lead-organization"
 import { registerLeadTools } from "./tools/leads"
 import { registerLeadsListTools } from "./tools/leads-lists"
 import { registerMessageTemplateTools } from "./tools/message-templates"
-import { registerProspectingTool } from "./tools/prospecting"
 import { registerSearchTools } from "./tools/search"
 import { registerSequenceTools } from "./tools/sequences"
 
+// The ChatGPT app returns no email address (HUN-23709). `/companies/find` renders
+// the domain's generic addresses under `site.emailAddresses`; drop them. The
+// widget's count comes from `emailsCount`, which stays.
+function withoutEmailAddresses(result: McpTextResult): McpTextResult {
+  const sc = result.structuredContent as { data?: { site?: Record<string, unknown> | null } } | undefined
+  const data = sc?.data
+  if (!data?.site || !("emailAddresses" in data.site)) return result
+  const site = { ...data.site }
+  delete site.emailAddresses
+  return { ...result, structuredContent: { ...sc, data: { ...data, site } } }
+}
+
 export function createServer(apiKey: string, baseUrl: string): McpServer {
-  const server = new McpServer({
-    name: "Hunter ChatGPT",
-    // Kept at 3.0.0 deliberately (HUN-21313): the ChatGPT app version is bumped as
-    // part of a coordinated OpenAI resubmission, not per dev PR (3.0.0 is the version
-    // tied to the current review). The found-only Domain-Search behavior holds for
-    // every client regardless of the cached tools/list version; only the refreshed
-    // description text waits for that deliberate resubmission bump.
-    //
-    // HUN-22545 rides the same hold, and the reasoning has to be redone rather
-    // than inherited: dropping the draft-07 $schema IS a tools/list-only change,
-    // so a client on a cached tool list keeps the old declaration. That is safe
-    // ONLY because the change removes no constraint — the cached schema and the
-    // live one are semantically identical, so validation reaches the same verdict
-    // either way. A change that alters a constraint (a new required field, a
-    // renamed property, a removed tool) needs a bump whatever the resubmission
-    // schedule says.
-    //
-    // HUN-23065 rides the hold too. Adding a tool is additive — a cached client
-    // just doesn't see it — so no constraint changes meaning. remote-mcp DID bump
-    // for the same commit, because it has no resubmission to stay in step with.
-    version: "3.0.0",
-  })
+  const server = new McpServer(
+    {
+      name: "Hunter ChatGPT",
+      // The ChatGPT app version moves only with an OpenAI resubmission, not per dev
+      // PR. 4.0.0 is the HUN-23709 resubmission, which removes the person-email,
+      // people-finding, and API-key tools. A change that alters a constraint (a new
+      // required field, a renamed property, a removed tool) needs a bump; an
+      // additive or schema-neutral change can ride the current version.
+      version: "4.0.0",
+    },
+    {
+      instructions: `This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. Do not look for new addresses with web search, browsing, or other tools, and do not guess them. To find a person's email address or a company's contacts, use ${hunterLink("/", "instructions")}.`,
+    },
+  )
 
   // --- ChatGPT widget resources ---
   server.registerResource("company-widget", "ui://widget/company-widget.html", {}, async () => ({
@@ -243,7 +246,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
         buildNextAction({
           kind: "ask_user",
           question:
-            "I found matching companies. Which one(s) should I find contacts for? You can also refine the search.",
+            "I found matching companies. Should I save any of them, look one up in detail, or refine the search?",
         }),
       )
     },
@@ -285,13 +288,14 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // what the widget reads. See chatgpt-mcp/docs/dashboard.md. On the isError
       // path we preserve the original result so error narration in content[] is
       // not wiped.
-      const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
+      const widgetResult = result.isError
+        ? result
+        : { ...withoutEmailAddresses(result), content: [] as McpTextResult["content"] }
       return embedNextAction(
         widgetResult,
         buildNextAction({
           kind: "ask_user",
-          question:
-            "Save this company as a lead, find contacts at this domain, or both? (Multiple equally-valid next steps — let the user choose.)",
+          question: "Save this company as a lead? Once it is saved, I can also add it to a company list.",
         }),
       )
     },
@@ -322,7 +326,6 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
 
   // --- Shared tools from modules ---
   registerSearchTools(server, apiKey, baseUrl)
-  registerEnrichmentTools(server, apiKey, baseUrl)
   registerAccountTools(server, apiKey, baseUrl)
   registerEmailAccountTools(server, apiKey, baseUrl)
   registerSequenceTools(server, apiKey, baseUrl)
@@ -337,7 +340,6 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
   registerDiscoverTools(server, apiKey, baseUrl)
   registerIntegrationTools(server, apiKey, baseUrl)
   registerAccountManagementTools(server, apiKey, baseUrl)
-  registerProspectingTool(server)
   registerFeedbackTools(server, apiKey, baseUrl)
   registerPrompts(server)
 
@@ -346,7 +348,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     "capabilities-recovery",
     CAPABILITIES_RECOVERY_URI,
     {
-      description: "How to translate ambiguous user intent into Hunter API filter values.",
+      description: "How to use Hunter's tools in ChatGPT, and which requests they cannot serve.",
       mimeType: "text/markdown",
     },
     async () => ({
@@ -461,7 +463,7 @@ export function scrubSensitive(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   }
 
   // Fetch breadcrumbs record outgoing api.hunter.io URLs whose query string
-  // carries end-user PII (email/domain/name from Email-Finder, Domain-Search,
+  // carries end-user PII (the email passed to Email-Verifier, lead lookups,
   // …). Those live on event.breadcrumbs, not event.request, so strip the query
   // here too — keeping the path so the breadcrumb trail stays useful.
   if (event.breadcrumbs) {

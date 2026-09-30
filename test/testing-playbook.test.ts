@@ -11,7 +11,7 @@ import { TOOL_NAMES } from "../src/helpers"
 // Counts are explicit so adding/removing a test case (or a tool) is a deliberate
 // edit — bump the constant below when you change the script or the tool surface.
 const EXPECTED_POSITIVE_CASES = 16
-const EXPECTED_NEGATIVE_CASES = 3
+const EXPECTED_NEGATIVE_CASES = 4
 
 // OpenAI submission form field-length caps (mirrored from the Section 6 script's MAX).
 const FIELD_MAX = { description: 200, user_prompt: 500, tools_triggered: 200, expected_output: 300 } as const
@@ -54,9 +54,10 @@ describe("TESTING_PLAYBOOK.md — OpenAI submission autofill script (Section 6)"
   it("keeps every negative test-case field within the limit", () => {
     DATA.negative_test_cases.forEach((tc, i) => {
       ;(["description", "user_prompt"] as const).forEach((key) => {
-        expect(tc[key].length, `negative_test_cases[${i}].${key} is ${tc[key].length}/${FIELD_MAX[key]}`).toBeLessThanOrEqual(
-          FIELD_MAX[key],
-        )
+        expect(
+          tc[key].length,
+          `negative_test_cases[${i}].${key} is ${tc[key].length}/${FIELD_MAX[key]}`,
+        ).toBeLessThanOrEqual(FIELD_MAX[key])
       })
     })
   })

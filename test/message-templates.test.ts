@@ -327,7 +327,7 @@ describe("Create-Message-Template handler", () => {
 
     // Deep link to the created template's dashboard page.
     expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
-      "https://hunter.io/message-templates/42",
+      "https://hunter.io/message-templates/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
     )
   })
 
@@ -387,7 +387,7 @@ describe("Update-Message-Template handler", () => {
     expect(body.has("body")).toBe(false)
     expect(body.has("message_format")).toBe(false)
     expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
-      "https://hunter.io/message-templates/42",
+      "https://hunter.io/message-templates/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
     )
   })
 

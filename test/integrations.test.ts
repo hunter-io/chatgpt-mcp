@@ -295,7 +295,7 @@ describe("Push-Leads-To-CRM", () => {
     expect(body.has("leads_list_id")).toBe(false)
 
     expect(result.isError).toBeFalsy()
-    expect(result.structuredContent.viewInHunter).toBe("https://hunter.io/leads")
+    expect(result.structuredContent.viewInHunter).toBe("https://hunter.io/leads?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
     const schema = publishedOutputSchema(tool.outputSchema!)
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })
