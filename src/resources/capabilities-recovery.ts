@@ -18,9 +18,9 @@ The ChatGPT app cannot find new people or email addresses. It has no tool that l
 
 Hunter has these addresses on hunter.io. When the user wants emails at a company:
 
-1. Call \`Email-Count\` for one domain, or \`Find-People\` for several companies. Both are free.
+1. Call \`Email-Count\` for one domain, or \`Count-Company-Emails\` for several companies. Both are free.
 2. Tell the user how many addresses Hunter has.
-3. Give the Hunter link from the response (\`viewInHunter\` on Email-Count, \`emails_on_hunter\` on each Find-People row). The user sees the addresses there.
+3. Give the Hunter link from the response (\`viewInHunter\` on Email-Count, \`emails_on_hunter\` on each Count-Company-Emails row). The user sees the addresses there.
 
 For a named person, point the user to ${hunterLink("/", "recovery")}.
 
@@ -32,7 +32,7 @@ What the app can do with people:
 
 ## Saved searches
 
-Open prospecting conversations with \`List-Saved-Searches\` ("want to rerun one of your saved searches?"). To rerun one, read its stored \`filters\`/\`name\` and reformulate them as a natural-language \`query\` for Find-Companies or Find-People — that reformulation is approximate, since those tools can't re-apply the structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. There is no update endpoint — to change a saved search, \`Delete-Saved-Search\` then \`Create-Saved-Search\`.
+Open prospecting conversations with \`List-Saved-Searches\` ("want to rerun one of your saved searches?"). To rerun one, read its stored \`filters\`/\`name\` and reformulate them as a natural-language \`query\` for Find-Companies or Count-Company-Emails — that reformulation is approximate, since those tools can't re-apply the structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. There is no update endpoint — to change a saved search, \`Delete-Saved-Search\` then \`Create-Saved-Search\`.
 
 ## Lead organization
 

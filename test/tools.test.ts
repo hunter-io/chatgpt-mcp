@@ -182,7 +182,7 @@ const ALL_TOOL_NAMES = [
   "Bulk-Move-Companies",
   "Bulk-Copy-Companies",
   "Bulk-Delete-Companies",
-  "Find-People",
+  "Count-Company-Emails",
   "List-Saved-Searches",
   "Get-Saved-Search",
   "Create-Saved-Search",
@@ -258,7 +258,7 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
 
   // READ_ONLY_PUBLIC: public-data lookups (Hunter's hosted index of public-
   // internet data). readOnly=true, destructive=false, openWorld=true.
-  const readOnlyPublicTools = ["Find-Companies", "Email-Count", "Find-People"]
+  const readOnlyPublicTools = ["Find-Companies", "Email-Count", "Count-Company-Emails"]
 
   it.each(readOnlyPublicTools)("tool '%s' has read-only-public annotations", (name) => {
     const tool = registeredTools.get(name)

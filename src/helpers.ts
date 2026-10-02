@@ -175,7 +175,6 @@ export const TOOL_NAMES = {
   bulkCopyCompanies: "Bulk-Copy-Companies",
   bulkDeleteCompanies: "Bulk-Delete-Companies",
   // discover people + saved searches
-  findPeople: "Find-People",
   listSavedSearches: "List-Saved-Searches",
   getSavedSearch: "Get-Saved-Search",
   createSavedSearch: "Create-Saved-Search",
@@ -1137,7 +1136,7 @@ export const domainStringSchema = z.string().regex(DOMAIN_REGEX, "must be a vali
 
 /**
  * Path of the Hunter Domain Search page for a domain. Email-Count and
- * Find-People return counts only; this page is where the user sees the
+ * Count-Company-Emails return counts only; this page is where the user sees the
  * addresses (HUN-23709). A logged-out visitor is redirected to the public
  * `/try/search/<domain>` page.
  */

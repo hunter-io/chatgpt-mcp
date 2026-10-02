@@ -80,7 +80,7 @@ function railsErrorResponse(status: number, errors: Array<{ id: string; code: nu
   }
 }
 
-// Realistic Find-People payload derived from
+// Realistic Count-Company-Emails payload derived from
 // app/app/views/api/discover/people/index.json.jbuilder.
 const findPeoplePayload = {
   data: [
@@ -119,9 +119,16 @@ afterEach(() => {
 })
 
 describe("discover tools: registration", () => {
+  // remote-mcp keeps the name Find-People. OpenAI's MCP scan found it unclear
+  // for this counts-only tool, so the ChatGPT app uses its own name.
+  it("registers Count-Company-Emails, not Find-People", () => {
+    expect(registeredTools.has("Count-Company-Emails")).toBe(true)
+    expect(registeredTools.has("Find-People")).toBe(false)
+  })
+
   it("registers all five tools with non-empty descriptions", () => {
     for (const name of [
-      "Find-People",
+      "Count-Company-Emails",
       "List-Saved-Searches",
       "Get-Saved-Search",
       "Create-Saved-Search",
@@ -136,8 +143,8 @@ describe("discover tools: registration", () => {
 
   // HUN-23709: the ChatGPT app shows counts only, and points to hunter.io for
   // the addresses. The description must not send the model to a removed tool.
-  it("Find-People description explains the counts and the Hunter link, and names no removed tool", () => {
-    const description = registeredTools.get("Find-People")!.description
+  it("Count-Company-Emails description explains the counts and the Hunter link, and names no removed tool", () => {
+    const description = registeredTools.get("Count-Company-Emails")!.description
     expect(description).toContain("Find-Companies")
     expect(description).toContain("emails_count.personal")
     expect(description).toContain("emails_count.generic")
@@ -164,8 +171,8 @@ describe("discover tools: registration", () => {
 })
 
 describe("discover tools: annotations", () => {
-  it("Find-People is a public-index read (open world) with a descriptive title", () => {
-    expect(registeredTools.get("Find-People")!.annotations).toEqual({
+  it("Count-Company-Emails is a public-index read (open world) with a descriptive title", () => {
+    expect(registeredTools.get("Count-Company-Emails")!.annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,
       openWorldHint: true,
@@ -200,12 +207,12 @@ describe("discover tools: annotations", () => {
   })
 })
 
-describe("Find-People handler", () => {
+describe("Count-Company-Emails handler", () => {
   it("POSTs the natural-language query (and paging) as URL parameters, like Find-Companies", async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload))
     vi.stubGlobal("fetch", mockFetch)
 
-    const result = await registeredTools.get("Find-People")!.handler({
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({
       query: "payment companies in Europe",
       limit: 10,
       offset: 20,
@@ -222,7 +229,7 @@ describe("Find-People handler", () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload))
     vi.stubGlobal("fetch", mockFetch)
 
-    await registeredTools.get("Find-People")!.handler({ domains: ["stripe.com", "adyen.com"] })
+    await registeredTools.get("Count-Company-Emails")!.handler({ domains: ["stripe.com", "adyen.com"] })
 
     const [url, opts] = mockFetch.mock.calls[0] as [string, { method: string; body?: string }]
     expect(url).toBe("https://api.hunter.io/v2/discover/people")
@@ -235,7 +242,7 @@ describe("Find-People handler", () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload))
     vi.stubGlobal("fetch", mockFetch)
 
-    await registeredTools.get("Find-People")!.handler({ query: "fintechs", domains: ["stripe.com"] })
+    await registeredTools.get("Count-Company-Emails")!.handler({ query: "fintechs", domains: ["stripe.com"] })
 
     const [url, opts] = mockFetch.mock.calls[0] as [string, { method: string; body?: string }]
     expect(url).toBe("https://api.hunter.io/v2/discover/people?query=fintechs")
@@ -246,21 +253,21 @@ describe("Find-People handler", () => {
     const mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
 
-    const result = await registeredTools.get("Find-People")!.handler({})
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({})
 
     expect(mockFetch).not.toHaveBeenCalled()
     expect(result.isError).toBe(true)
     expect((result.structuredContent as { error: { code: string } }).error.code).toBe("invalid_input")
     // The local error envelope must validate against the published schema too.
-    expect(() => publishedOutputSchema("Find-People").parse(result.structuredContent)).not.toThrow()
+    expect(() => publishedOutputSchema("Count-Company-Emails").parse(result.structuredContent)).not.toThrow()
   })
 
   it("published output schema validates the jbuilder success payload and the error envelope", async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload))
     vi.stubGlobal("fetch", mockFetch)
 
-    const result = await registeredTools.get("Find-People")!.handler({ query: "payment companies in Europe" })
-    const schema = publishedOutputSchema("Find-People")
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ query: "payment companies in Europe" })
+    const schema = publishedOutputSchema("Count-Company-Emails")
     const parsed = schema.parse(result.structuredContent)
     expect(parsed.data).toHaveLength(2)
     expect(parsed.meta.total_emails.total).toBe(176)
@@ -270,7 +277,7 @@ describe("Find-People handler", () => {
   it("links each company row to its Hunter Domain Search page (HUN-23709)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload)))
 
-    const result = await registeredTools.get("Find-People")!.handler({ query: "payment companies in Europe" })
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ query: "payment companies in Europe" })
 
     const rows = (result.structuredContent as { data: Array<{ domain: string; emails_on_hunter?: string }> }).data
     expect(rows.map((row) => row.emails_on_hunter)).toEqual([
@@ -289,13 +296,13 @@ describe("Find-People handler", () => {
       .mockResolvedValueOnce(railsErrorResponse(422, [{ id: "invalid_query", code: 422, details: "Bad query." }]))
     vi.stubGlobal("fetch", mockFetch)
 
-    const result = await registeredTools.get("Find-People")!.handler({ query: "x" })
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ query: "x" })
 
     expect(result.isError).toBe(true)
     const error = (result.structuredContent as { error: { code: string; message: string } }).error
     expect(error.code).toBe("invalid_input")
     expect(error.message).toContain("Bad query.")
-    expect(() => publishedOutputSchema("Find-People").parse(result.structuredContent)).not.toThrow()
+    expect(() => publishedOutputSchema("Count-Company-Emails").parse(result.structuredContent)).not.toThrow()
   })
 })
 

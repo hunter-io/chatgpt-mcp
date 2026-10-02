@@ -10,7 +10,9 @@ because of the person-email features, so 4.0.0 removes 8 tools:
   refuse OAuth tokens, and the ChatGPT app connects with OAuth.
 
 `Email-Verifier` stays. It only checks an address that the user gives.
-`Email-Count` and `Find-People` stay. They return counts only, with a link to
+`Email-Count` and `Count-Company-Emails` stay. `Count-Company-Emails` is the
+ChatGPT name of the remote-mcp tool `Find-People`, because the OpenAI MCP scan
+found that name unclear. Both tools return counts only, with a link to
 hunter.io where the user sees the addresses. The server instructions tell the
 model that person email addresses are not available in ChatGPT, and point the
 user to hunter.io.
@@ -36,7 +38,7 @@ justifications from this file.
 
 > **4.0.0 — posture summary.** A tool is `openWorldHint: true` only if it reads
 > the Hunter index of open-internet data (`Find-Companies`, `Email-Count`,
-> `Find-People`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
+> `Count-Company-Emails`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
 > effect outside the account of the user. These tools have that effect: `Start-Sequence` (sends),
 > `Resume-Sequence` and `Add-Sequence-Recipients` (can schedule real email),
 > and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). The
@@ -56,7 +58,7 @@ justifications from this file.
 - [ ] In the OpenAI Developer dashboard, withdraw version 2.0.0 from review.
 - [ ] **Create a new app version.** Do not edit an existing version, because an edit does not refresh `tools/list`. Then click **Scan Tools**.
 - [ ] Make sure that the dashboard shows **93 tools**. Make sure that the `Read Only`, `Open World`, and `Destructive` flags agree with the posture summary. If a flag is different, correct the code and deploy again before you paste justifications.
-- [ ] Make sure that these tools show their title: `Verify Email`, `Enrich Company`, and `Count Emails at Companies` (`Find-People`).
+- [ ] Make sure that these tools show their title: `Verify Email`, `Enrich Company`, and `Count Emails at Companies` (`Count-Company-Emails`).
 - [ ] For **each** tool, paste the description (no edits) and the three justification lines from `tool-justifications.md`. Or run `justifications-autofill.console.js` in the dashboard console to fill all 93×3 fields. Each justification is 200 characters or fewer.
 - [ ] Make sure that no "Recommended: Add an `outputSchema`" warning shows.
 - [ ] Make sure that each tool in the deployed `tools/list` has `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null` or missing). See the `curl + jq` check in the 2026-05-28 v3 plan, Phase 5.2.

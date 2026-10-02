@@ -26,7 +26,12 @@ import {
   paginationMetaSchema,
 } from "../schemas/common"
 
-// ─── Find-People (HUN-20855) ────────────────────────────────────────────────
+// ─── Count-Company-Emails (HUN-20855) ──────────────────────────────────────
+//
+// remote-mcp registers this tool as `Find-People` (TOOL_NAMES.findPeople). The
+// ChatGPT app returns counts only, and OpenAI's MCP scan (2026-10-02) found
+// that name unclear, so this worker uses its own name.
+export const COUNT_COMPANY_EMAILS = "Count-Company-Emails"
 //
 // Per-company shape from app/app/views/api/discover/people/index.json.jbuilder:
 // `json.data @domains do |domain| ...` — `data` is an ARRAY of company rows
@@ -106,7 +111,7 @@ const listSavedSearchesOutputSchema = buildResponseSchema(
 // show.jbuilder and create.jbuilder both render `json.data { partial! _view }`.
 const savedSearchOutputSchema = buildResponseSchema(savedSearchSchema)
 
-// Find-People sends only scalar-array filters (`organization[domain][]`), which
+// Count-Company-Emails sends only scalar-array filters (`organization[domain][]`), which
 // form-encoding handles cleanly. Nested-object filter payloads that must
 // round-trip verbatim (Create-Saved-Search) travel as a JSON body instead — see
 // the createSavedSearch handler for why form-encoding can't preserve their shape.
@@ -115,7 +120,7 @@ interface RailsFormParams {
 }
 
 /**
- * Stamps each Find-People company row with `emails_on_hunter`, the Hunter page
+ * Stamps each Count-Company-Emails company row with `emails_on_hunter`, the Hunter page
  * that shows the addresses. The ChatGPT app returns counts only (HUN-23709).
  * Rewrites `content[0]` from the new structuredContent and runs the credential
  * scrub again, like `stripResponseFields`.
@@ -145,7 +150,7 @@ function withHunterLinks(result: McpTextResult): McpTextResult {
 
 export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl: string) {
   server.registerTool(
-    TOOL_NAMES.findPeople,
+    COUNT_COMPANY_EMAILS,
     {
       title: "Count Emails at Companies",
       description:
@@ -182,7 +187,6 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
           .describe("Number of companies to skip (paging past the first 100 results requires Discover paging access)"),
       },
       outputSchema: findPeopleOutputSchema.shape,
-      // OpenAI's MCP scan found the name unclear; the title says what it returns.
       annotations: { ...READ_ONLY_PUBLIC_ANNOTATIONS, title: "Count Emails at Companies" },
     },
     async ({ query, domains, limit, offset }) => {
@@ -232,7 +236,7 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listSavedSearches,
     {
       description:
-        "Use this when the user wants to see the Discover searches they saved earlier — a good opening move at the start of a prospecting conversation ('want to rerun one of your saved searches?'). Each saved search carries its `id`, `name`, the stored `filters` payload, and timestamps, ordered newest first. To rerun one, read its `filters` and `name` and describe them to the user as a natural-language `query` for Find-Companies or Find-People — that reformulation is approximate, since these tools take only a `query` (or exact `domains`) and cannot re-apply the stored structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. Supports `limit` and `offset` pagination (`meta.total` is the full count). Free to call.",
+        "Use this when the user wants to see the Discover searches they saved earlier — a good opening move at the start of a prospecting conversation ('want to rerun one of your saved searches?'). Each saved search carries its `id`, `name`, the stored `filters` payload, and timestamps, ordered newest first. To rerun one, read its `filters` and `name` and describe them to the user as a natural-language `query` for Find-Companies or Count-Company-Emails — that reformulation is approximate, since these tools take only a `query` (or exact `domains`) and cannot re-apply the stored structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. Supports `limit` and `offset` pagination (`meta.total` is the full count). Free to call.",
       inputSchema: {
         offset: z.number().int().nonnegative().optional().describe("Number of saved searches to skip (default 0)"),
         limit: z
@@ -259,7 +263,7 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSavedSearch,
     {
       description:
-        "Use this when the user wants the details of one saved Discover search, identified by ID — typically to rerun it. Read the stored `filters` payload and describe it back to the user as a natural-language `query` for Find-Companies or Find-People; this is an approximate rerun, because those tools accept only a `query` (or exact `domains`) and cannot re-apply the stored structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. Present the reformulated query and let the user confirm or refine before running it. Returns a not-found error if the saved search does not exist or belongs to another user. Free to call.",
+        "Use this when the user wants the details of one saved Discover search, identified by ID — typically to rerun it. Read the stored `filters` payload and describe it back to the user as a natural-language `query` for Find-Companies or Count-Company-Emails; this is an approximate rerun, because those tools accept only a `query` (or exact `domains`) and cannot re-apply the stored structured filters (locations, industries, funding, technologies, include/exclude lists) verbatim. Present the reformulated query and let the user confirm or refine before running it. Returns a not-found error if the saved search does not exist or belongs to another user. Free to call.",
       inputSchema: {
         saved_search_id: z.number().int().positive().describe("ID of the saved search to fetch"),
       },

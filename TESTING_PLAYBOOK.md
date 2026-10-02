@@ -4,7 +4,7 @@
 
 Manual test playbook for the Hunter ChatGPT app — **version 4.0.0 resubmission, 93 tools**. Run it before every app review submission. It checks the demo video flow, the marketplace test cases, and all 93 tools.
 
-**Why 4.0.0 has 93 tools, not 101 (HUN-23709).** OpenAI rejected version 2.0.0 because of person-email features. Version 4.0.0 removes 8 tools. Five return people or person emails: `Domain-Search`, `Email-Finder`, `Person-Enrichment`, `Combined-Enrichment`, and `Plan-Prospecting-Flow`. Three manage API keys and refuse OAuth tokens: `List-API-Keys`, `Create-API-Key`, and `Delete-API-Key`. The `prospect` prompt is removed too. The app cannot show people or email addresses. `Email-Verifier` stays, because it only checks an address that the user gives. `Email-Count` and `Find-People` stay, because they return counts only. Each gives a hunter.io link where the user sees the addresses.
+**Why 4.0.0 has 93 tools, not 101 (HUN-23709).** OpenAI rejected version 2.0.0 because of person-email features. Version 4.0.0 removes 8 tools. Five return people or person emails: `Domain-Search`, `Email-Finder`, `Person-Enrichment`, `Combined-Enrichment`, and `Plan-Prospecting-Flow`. Three manage API keys and refuse OAuth tokens: `List-API-Keys`, `Create-API-Key`, and `Delete-API-Key`. The `prospect` prompt is removed too. The app cannot show people or email addresses. `Email-Verifier` stays, because it only checks an address that the user gives. `Email-Count` and `Count-Company-Emails` stay, because they return counts only. Each gives a hunter.io link where the user sees the addresses.
 
 Rows marked "(V3)" cover tools added in the 3.0.0 submission (HUN-20838…HUN-20866, HUN-23065).
 
@@ -392,7 +392,7 @@ All five bulk tools are confirmation-gated: the confirmation must state the affe
 
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
-| FP1 | `Find-People` | `How many email addresses does Hunter have at stripe.com, adyen.com, and mollie.com?` | Per-company counts (personal / generic / total). Each row has an `emails_on_hunter` link to `https://hunter.io/search/<domain>` with `utm_source=hunter-chatgpt` and `utm_content=find-people`. No name or address is shown | ☐ | |
+| FP1 | `Count-Company-Emails` | `How many email addresses does Hunter have at stripe.com, adyen.com, and mollie.com?` | Per-company counts (personal / generic / total). Each row has an `emails_on_hunter` link to `https://hunter.io/search/<domain>` with `utm_source=hunter-chatgpt` and `utm_content=find-people`. No name or address is shown | ☐ | |
 | SS1 | `List-Saved-Searches` | `Show my saved Discover searches` | Saved searches with id + name | ☐ | |
 | SS2 | `Get-Saved-Search` | `Show saved search <SEARCH_ID>` | One saved search + its stored filters | ☐ | |
 | SS3 | `Create-Saved-Search` (write) | `Save this Discover search as "UK Fintech"` | Search saved with the current filters, id returned | ☐ | |
@@ -803,7 +803,7 @@ tools, down from 101.
 - No tool lists a company's contacts or finds a named person's email
   address. When a user asks for one, the app says that person email
   addresses are not available in ChatGPT and points to https://hunter.io.
-- `Email-Count` and `Find-People` return counts only, never a name or an
+- `Email-Count` and `Count-Company-Emails` return counts only, never a name or an
   address. Each gives a link to hunter.io, where the user can see the
   addresses.
 - `Email-Verifier` stays. It only checks an email address that the user
@@ -845,7 +845,7 @@ Annotations follow one posture:
 
 - **Reads** are `readOnlyHint: true` + `openWorldHint: false` — private
   reads of the user's own Hunter data.
-- **Public-index reads** (`Find-Companies`, `Email-Count`, `Find-People`)
+- **Public-index reads** (`Find-Companies`, `Email-Count`, `Count-Company-Emails`)
   are `readOnlyHint: true` + `openWorldHint: true`. They read the Hunter
   index of public web data.
 - **Creates** are private, non-destructive writes (`destructiveHint:
@@ -1155,7 +1155,7 @@ The 93 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domai
 | Company list folders (HUN-20196) | `List-Company-List-Folders`, `Create-Company-List-Folder`, `Update-Company-List-Folder`, `Delete-Company-List-Folder` |
 | Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
 | Bulk operations (V3) | `Bulk-Move-Leads`, `Bulk-Delete-Leads`, `Bulk-Move-Companies`, `Bulk-Copy-Companies`, `Bulk-Delete-Companies` |
-| Discover people counts & saved searches (V3) | `Find-People` (counts only, with a hunter.io link), `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
+| Discover people counts & saved searches (V3) | `Count-Company-Emails` (counts only, with a hunter.io link), `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
 | Connected apps & integrations | `List-Connected-Apps`, `Get-Connected-App`, `Push-Leads-To-CRM` (V3), `List-Webhooks` (V3), `Update-Webhook` (V3) |
 | Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
 | Feedback | `Report-API-Feedback` (free; agents report API/tool friction — missing endpoints, wrong docs, bad data, bugs) |
