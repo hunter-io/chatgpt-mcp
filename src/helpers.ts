@@ -1044,6 +1044,8 @@ export const EXTERNAL_SIDE_EFFECT_ANNOTATIONS = {
 //                                       Create-Or-Update-Lead, Delete-Lead, Delete/Merge
 //                                       lists, Delete-Custom-Attribute; Archive-Sequence,
 //                                       Remove-Sequence-Recipients — HUN-20797)
+//   TEAM_SHARED_WRITE_ANNOTATIONS /
+//   TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS → lead tags and list folders (see below)
 
 /** Public-data lookup tools that read from Hunter's hosted index of public-internet data. */
 export const READ_ONLY_PUBLIC_ANNOTATIONS = {
@@ -1085,6 +1087,23 @@ export const PRIVATE_DESTRUCTIVE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
   openWorldHint: false,
+} as const
+
+/**
+ * Lead tags and list folders. OpenAI's MCP scan (2026-10-02) held these tools
+ * with `openWorldHint: false`, saying they interact with an external system.
+ * The other private-workspace tools passed the same scan unchanged.
+ */
+export const TEAM_SHARED_WRITE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: true,
+} as const
+
+export const TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
 } as const
 
 /**

@@ -334,7 +334,6 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Unfavorite-Company-List",
     "Add-Company-To-List",
     "Remove-Company-From-List",
-    "Create-Company-List-Folder",
     "Create-Custom-Attribute",
   ]
 
@@ -363,8 +362,6 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Merge-Leads-Lists",
     "Update-Company-List",
     "Delete-Company-List",
-    "Update-Company-List-Folder",
-    "Delete-Company-List-Folder",
     "Delete-Custom-Attribute",
   ]
 
@@ -373,6 +370,26 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     expect(tool).toBeDefined()
     expect(tool!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false })
   })
+
+  // OpenAI's MCP scan (2026-10-02) held the folder tools with openWorld=false.
+  it("tool 'Create-Company-List-Folder' has team-shared write annotations (openWorld=true)", () => {
+    expect(registeredTools.get("Create-Company-List-Folder")!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    })
+  })
+
+  it.each(["Update-Company-List-Folder", "Delete-Company-List-Folder"])(
+    "tool '%s' has team-shared destructive annotations (openWorld=true)",
+    (name) => {
+      expect(registeredTools.get(name)!.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      })
+    },
+  )
 
   // HUN-20797: openWorldHint reflects whether the tool can produce an
   // externally-visible effect. Pause-Sequence (stops sending), Archive-Sequence
@@ -3744,7 +3761,10 @@ describe("HUN-23709: server version and instructions", () => {
     expect(options.instructions).toContain("cannot find new person email addresses in ChatGPT")
     // Saved leads keep their addresses: the limit is on finding new ones.
     expect(options.instructions).toContain("Addresses already saved in the user's Hunter account stay available")
-    expect(options.instructions).toContain("Do not look for new addresses with web search, browsing, or other tools")
+    // The refusal covers every source of an address, without naming other tools:
+    // OpenAI's MCP scan held instructions that steered the model away from them.
+    expect(options.instructions).toContain("do not give or invent an address")
+    expect(options.instructions).not.toMatch(/web search|browsing|other tools/)
     expect(options.instructions).toContain(
       "https://hunter.io/?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=instructions",
     )

@@ -5,6 +5,8 @@ import {
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
+  TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
+  TEAM_SHARED_WRITE_ANNOTATIONS,
   TOOL_NAMES,
 } from "../helpers"
 import { buildResponseSchema, mutationAckSchema, nullableNumber, paginationMetaSchema } from "../schemas/common"
@@ -350,7 +352,7 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
           ),
       },
       outputSchema: singleFolderOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: TEAM_SHARED_WRITE_ANNOTATIONS,
     },
     async ({ name, color }) => {
       // On 422 (validation_failed: missing/duplicate name, missing/invalid color)
@@ -377,7 +379,7 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
       // Update renders 204 No Content, so callHunterApi synthesises a
       // mutationAckSchema-shaped payload.
       outputSchema: mutationAckSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, name, color }) => {
       const params: Record<string, string> = {}
@@ -401,7 +403,7 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
       // Delete renders 204 No Content, so callHunterApi synthesises a
       // mutationAckSchema-shaped payload.
       outputSchema: mutationAckSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       // On 404 (not found) or 403 (forbidden) callHunterApi returns the typed

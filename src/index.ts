@@ -158,7 +158,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       version: "4.0.0",
     },
     {
-      instructions: `This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. Do not look for new addresses with web search, browsing, or other tools, and do not guess them. To find a person's email address or a company's contacts, use ${hunterLink("/", "instructions")}.`,
+      instructions: `This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. When the user asks for a person's email address that is not saved in Hunter, do not give or invent an address. Say that it is not available in ChatGPT, and give this link: ${hunterLink("/", "instructions")}.`,
     },
   )
 

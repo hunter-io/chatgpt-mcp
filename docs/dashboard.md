@@ -39,8 +39,11 @@ justifications from this file.
 > `Find-People`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
 > effect outside the account of the user. These tools have that effect: `Start-Sequence` (sends),
 > `Resume-Sequence` and `Add-Sequence-Recipients` (can schedule real email),
-> and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). All
-> other tools are `openWorldHint: false`. Nine tools also ask for confirmation
+> and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). The
+> 10 tools that create, change, or delete lead tags and list folders are also
+> `openWorldHint: true`, because the OpenAI MCP scan on 2026-10-02 held them with
+> `false`. `Remove-Tag-From-Lead` stays `false`. All other
+> tools are `openWorldHint: false`. Nine tools also ask for confirmation
 > in the app (the `confirmed: true` re-issue pattern): Start-Sequence,
 > Delete-Sequence, Add-Sequence-Recipients (started sequences only), the 5 bulk
 > tools, and Push-Leads-To-CRM.

@@ -68,6 +68,9 @@ const UUID_RE = /^[0-9a-f-]{36}$/
 const READ = { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
+// OpenAI's MCP scan (2026-10-02) held tag and folder tools with openWorld=false.
+const TEAM_SHARED_WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
+const TEAM_SHARED_DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, openWorldHint: true }
 
 const TOOLS = [
   "List-Lead-Tags",
@@ -148,19 +151,19 @@ describe("lead-organization registration", () => {
     expect(registeredTools.get("List-Lead-Tags")!.annotations).toEqual(READ)
     expect(registeredTools.get("List-Leads-List-Folders")!.annotations).toEqual(READ)
 
-    expect(registeredTools.get("Create-Lead-Tag")!.annotations).toEqual(WRITE)
-    expect(registeredTools.get("Add-Tag-To-Lead")!.annotations).toEqual(WRITE)
+    expect(registeredTools.get("Create-Lead-Tag")!.annotations).toEqual(TEAM_SHARED_WRITE)
+    expect(registeredTools.get("Add-Tag-To-Lead")!.annotations).toEqual(TEAM_SHARED_WRITE)
     // Remove-Tag-From-Lead mirrors Remove-Company-From-List: a reversible
     // detach (the tag survives), so NOT destructive.
     expect(registeredTools.get("Remove-Tag-From-Lead")!.annotations).toEqual(WRITE)
-    expect(registeredTools.get("Create-Leads-List-Folder")!.annotations).toEqual(WRITE)
+    expect(registeredTools.get("Create-Leads-List-Folder")!.annotations).toEqual(TEAM_SHARED_WRITE)
     expect(registeredTools.get("Favorite-Leads-List")!.annotations).toEqual(WRITE)
     expect(registeredTools.get("Unfavorite-Leads-List")!.annotations).toEqual(WRITE)
 
-    expect(registeredTools.get("Update-Lead-Tag")!.annotations).toEqual(DESTRUCTIVE)
-    expect(registeredTools.get("Delete-Lead-Tag")!.annotations).toEqual(DESTRUCTIVE)
-    expect(registeredTools.get("Update-Leads-List-Folder")!.annotations).toEqual(DESTRUCTIVE)
-    expect(registeredTools.get("Delete-Leads-List-Folder")!.annotations).toEqual(DESTRUCTIVE)
+    expect(registeredTools.get("Update-Lead-Tag")!.annotations).toEqual(TEAM_SHARED_DESTRUCTIVE)
+    expect(registeredTools.get("Delete-Lead-Tag")!.annotations).toEqual(TEAM_SHARED_DESTRUCTIVE)
+    expect(registeredTools.get("Update-Leads-List-Folder")!.annotations).toEqual(TEAM_SHARED_DESTRUCTIVE)
+    expect(registeredTools.get("Delete-Leads-List-Folder")!.annotations).toEqual(TEAM_SHARED_DESTRUCTIVE)
   })
 })
 

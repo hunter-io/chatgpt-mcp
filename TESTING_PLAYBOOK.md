@@ -850,6 +850,11 @@ Annotations follow one posture:
   index of public web data.
 - **Creates** are private, non-destructive writes (`destructiveHint:
   false`, `openWorldHint: false`).
+- **Lead tags and list folders** are the exception. The OpenAI MCP scan on
+  2026-10-02 held these tools with `openWorldHint: false`, so they are
+  `openWorldHint: true`: `Create-Lead-Tag`, `Update-Lead-Tag`,
+  `Delete-Lead-Tag`, `Add-Tag-To-Lead`, and the create, update, and delete
+  tools for leads-list folders and company-list folders.
 - **Updates, deletes, and bulk destructive operations** carry
   `destructiveHint: true` so the host confirms. Bulk confirmations state
   the affected record count; bulk deletes require a second explicit

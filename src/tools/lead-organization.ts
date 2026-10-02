@@ -2,9 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
   callHunterApi,
-  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
+  TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
+  TEAM_SHARED_WRITE_ANNOTATIONS,
   TOOL_NAMES,
   withDeepLink,
 } from "../helpers"
@@ -194,7 +195,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
           ),
       },
       outputSchema: singleTagOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: TEAM_SHARED_WRITE_ANNOTATIONS,
     },
     async ({ name, color }) => {
       const params: Record<string, string> = { name }
@@ -223,7 +224,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
       // Update renders the UPDATED tag body (app/app/views/api/tags/update.jbuilder,
       // status 200) — a rendered body, so buildResponseSchema, not mutationAck.
       outputSchema: singleTagOutputSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, name, color }) => {
       const params: Record<string, string> = {}
@@ -247,7 +248,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
       // Delete renders no body (`head :no_content`, 204), so callHunterApi
       // synthesises a mutationAckSchema-shaped payload.
       outputSchema: mutationAckSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       // On 404 (not found / other team) or 403 (not the owner nor a team
@@ -279,7 +280,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
           ),
       },
       outputSchema: addTagToLeadOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: TEAM_SHARED_WRITE_ANNOTATIONS,
     },
     async ({ lead_id, tag_id, tag_name }) => {
       // Mirror the controller's resolve_tag precedence: tag_id wins when both
@@ -369,7 +370,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
           ),
       },
       outputSchema: singleFolderOutputSchema.shape,
-      annotations: PRIVATE_WRITE_ANNOTATIONS,
+      annotations: TEAM_SHARED_WRITE_ANNOTATIONS,
     },
     async ({ name, color }) => {
       const params: Record<string, string> = { name }
@@ -399,7 +400,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
       // Update renders 204 No Content, so callHunterApi synthesises a
       // mutationAckSchema-shaped payload.
       outputSchema: mutationAckSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id, name, color }) => {
       const params: Record<string, string> = {}
@@ -423,7 +424,7 @@ export function registerLeadOrganizationTools(server: McpServer, apiKey: string,
       // Delete renders 204 No Content, so callHunterApi synthesises a
       // mutationAckSchema-shaped payload.
       outputSchema: mutationAckSchema.shape,
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      annotations: TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
     },
     async ({ id }) => {
       // On 404 (not found) or 403 (forbidden) callHunterApi returns the typed
