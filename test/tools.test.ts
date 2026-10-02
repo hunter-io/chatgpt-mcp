@@ -263,7 +263,16 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
   it.each(readOnlyPublicTools)("tool '%s' has read-only-public annotations", (name) => {
     const tool = registeredTools.get(name)
     expect(tool).toBeDefined()
-    expect(tool!.annotations).toEqual({ readOnlyHint: true, destructiveHint: false, openWorldHint: true })
+    expect(tool!.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: true })
+  })
+
+  // OpenAI's MCP scan (2026-10-02) held Report-API-Feedback with openWorld=false.
+  it("tool 'Report-API-Feedback' has feedback annotations (openWorld=true)", () => {
+    expect(registeredTools.get("Report-API-Feedback")!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    })
   })
 
   // BILLABLE_LOOKUP: paid lookups that consume credits. State change without

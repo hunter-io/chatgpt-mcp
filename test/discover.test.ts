@@ -164,11 +164,12 @@ describe("discover tools: registration", () => {
 })
 
 describe("discover tools: annotations", () => {
-  it("Find-People is a public-index read (open world)", () => {
+  it("Find-People is a public-index read (open world) with a descriptive title", () => {
     expect(registeredTools.get("Find-People")!.annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,
       openWorldHint: true,
+      title: "Count Emails at Companies",
     })
   })
 

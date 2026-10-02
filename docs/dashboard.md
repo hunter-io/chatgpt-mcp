@@ -42,7 +42,8 @@ justifications from this file.
 > and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). The
 > 10 tools that create, change, or delete lead tags and list folders are also
 > `openWorldHint: true`, because the OpenAI MCP scan on 2026-10-02 held them with
-> `false`. `Remove-Tag-From-Lead` stays `false`. All other
+> `false`. `Report-API-Feedback` is `true` for the same reason.
+> `Remove-Tag-From-Lead` stays `false`. All other
 > tools are `openWorldHint: false`. Nine tools also ask for confirmation
 > in the app (the `confirmed: true` re-issue pattern): Start-Sequence,
 > Delete-Sequence, Add-Sequence-Recipients (started sequences only), the 5 bulk
@@ -55,7 +56,7 @@ justifications from this file.
 - [ ] In the OpenAI Developer dashboard, withdraw version 2.0.0 from review.
 - [ ] **Create a new app version.** Do not edit an existing version, because an edit does not refresh `tools/list`. Then click **Scan Tools**.
 - [ ] Make sure that the dashboard shows **93 tools**. Make sure that the `Read Only`, `Open World`, and `Destructive` flags agree with the posture summary. If a flag is different, correct the code and deploy again before you paste justifications.
-- [ ] Make sure that the two billable lookups show their verb-form title: `Verify Email` and `Enrich Company`.
+- [ ] Make sure that these tools show their title: `Verify Email`, `Enrich Company`, and `Count Emails at Companies` (`Find-People`).
 - [ ] For **each** tool, paste the description (no edits) and the three justification lines from `tool-justifications.md`. Or run `justifications-autofill.console.js` in the dashboard console to fill all 93×3 fields. Each justification is 200 characters or fewer.
 - [ ] Make sure that no "Recommended: Add an `outputSchema`" warning shows.
 - [ ] Make sure that each tool in the deployed `tools/list` has `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null` or missing). See the `curl + jq` check in the 2026-05-28 v3 plan, Phase 5.2.

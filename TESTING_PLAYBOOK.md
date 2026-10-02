@@ -854,7 +854,8 @@ Annotations follow one posture:
   2026-10-02 held these tools with `openWorldHint: false`, so they are
   `openWorldHint: true`: `Create-Lead-Tag`, `Update-Lead-Tag`,
   `Delete-Lead-Tag`, `Add-Tag-To-Lead`, and the create, update, and delete
-  tools for leads-list folders and company-list folders.
+  tools for leads-list folders and company-list folders. `Report-API-Feedback`
+  is `openWorldHint: true` for the same reason.
 - **Updates, deletes, and bulk destructive operations** carry
   `destructiveHint: true` so the host confirms. Bulk confirmations state
   the affected record count; bulk deletes require a second explicit

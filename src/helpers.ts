@@ -1108,13 +1108,14 @@ export const TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS = {
 
 /**
  * Report-API-Feedback. Records a free, non-billable feedback note about the
- * Hunter API/tools. Not read-only (it writes a feedback row), not destructive
- * (it never touches user data), and stays inside Hunter (no open-world effect).
+ * Hunter API/tools. Not read-only (it writes a feedback row) and not destructive
+ * (it never touches user data). Open-world: OpenAI's MCP scan (2026-10-02) held
+ * it with `openWorldHint: false`, because the note goes to Hunter's team.
  */
 export const FEEDBACK_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
-  openWorldHint: false,
+  openWorldHint: true,
 } as const
 
 /**

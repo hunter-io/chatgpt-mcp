@@ -147,6 +147,7 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
   server.registerTool(
     TOOL_NAMES.findPeople,
     {
+      title: "Count Emails at Companies",
       description:
         "Use this when the user wants to know how many email addresses Hunter has at a set of companies — for example, right after a Find-Companies result. For each company it reports `emails_count.personal` (addresses tied to a named person), `emails_count.generic` (role-based addresses such as info@ or sales@), and `emails_count.total`. `meta.total_emails` sums the same counters across ALL matching companies, not just the current page. Returns counts only. Each company row has an `emails_on_hunter` link where the user can see the addresses on hunter.io. Provide either `query` (natural-language criteria, translated to filters exactly like Find-Companies) or `domains` (exact company domains, e.g. lifted from a Find-Companies result); when both are given, `query` takes precedence and `domains` is not sent. Free to call.",
       inputSchema: {
@@ -181,7 +182,8 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
           .describe("Number of companies to skip (paging past the first 100 results requires Discover paging access)"),
       },
       outputSchema: findPeopleOutputSchema.shape,
-      annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
+      // OpenAI's MCP scan found the name unclear; the title says what it returns.
+      annotations: { ...READ_ONLY_PUBLIC_ANNOTATIONS, title: "Count Emails at Companies" },
     },
     async ({ query, domains, limit, offset }) => {
       // Local gate: with neither `query` nor `domains` the Rails action skips
