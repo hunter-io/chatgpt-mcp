@@ -52,7 +52,9 @@ const leadFieldsSchema = {
 const leadSchema = z
   .object({
     id: z.number().int().positive(),
-    email: z.string(),
+    // `shareable(:email).presence`: null for a lead without an address and for a
+    // claimed one (HUN-23599, HUN-24022).
+    email: nullableString(),
     first_name: nullableString().optional(),
     last_name: nullableString().optional(),
     position: nullableString().optional(),

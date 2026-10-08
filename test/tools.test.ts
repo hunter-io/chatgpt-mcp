@@ -3664,6 +3664,73 @@ describe("HUN-20344 audit: new-endpoint output schemas admit null for nullable j
   })
 })
 
+// HUN-24022: same bug class as the HUN-20344 audit above, on older tools. Each
+// case runs the real handler against a payload shaped like the Rails view, then
+// validates `structuredContent` the way the MCP SDK does, so a call that Rails
+// answers fine can't fail with -32602 again:
+//   - List-Leads / Get-Lead: `_lead.jbuilder` emits `email` as
+//     `lead.shareable(:email).presence` — null for a lead without an address and
+//     for a claimed one (HUN-23599).
+//   - Add-Sequence-Recipients: `recipients/create.jbuilder` emits
+//     `Campaign::Audience#last_skipped_recipients`, which is nil when the add
+//     skipped nobody.
+describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rails emits", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  const okJson = (body: unknown) => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) })
+  const emaillessLead = { id: 1, email: null, first_name: "Ada", last_name: "Lovelace", company: "Acme" }
+
+  const validate = (name: string, structuredContent: unknown) => {
+    const shape = registeredTools.get(name)!.outputSchema as Record<string, z.ZodTypeAny>
+    return publishedOutputSchema(shape).safeParse(structuredContent)
+  }
+
+  it("List-Leads accepts a page holding a lead without an email", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        okJson({
+          data: { leads: [emaillessLead, { ...emaillessLead, id: 2, email: "grace@acme.com" }] },
+          meta: { count: 2, total: 2, params: { limit: 20, offset: 0 } },
+        }),
+      ),
+    )
+    const result = await registeredTools.get("List-Leads")!.handler({ offset: 0, limit: 20 })
+    expect(validate("List-Leads", result.structuredContent).error).toBeUndefined()
+  })
+
+  it("Get-Lead accepts a lead without an email", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: emaillessLead })))
+    const result = await registeredTools.get("Get-Lead")!.handler({ id: 1 })
+    expect(validate("Get-Lead", result.structuredContent).error).toBeUndefined()
+  })
+
+  it("Add-Sequence-Recipients accepts null skipped_recipients when nobody was skipped", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(okJson({ data: { id: 1, started: false, archived: false } }))
+        .mockResolvedValueOnce(
+          okJson({
+            data: { recipients_added: 1, skipped_recipients: null },
+            meta: { params: { emails: ["ada@acme.com"] } },
+          }),
+        ),
+    )
+    const result = await registeredTools.get("Add-Sequence-Recipients")!.handler({
+      sequence_id: 1,
+      emails: ["ada@acme.com"],
+      confirmed: false,
+    })
+    expect(result.structuredContent.data.recipients_added).toBe(1)
+    expect(validate("Add-Sequence-Recipients", result.structuredContent).error).toBeUndefined()
+  })
+})
+
 // ─── HUN-20460: error / ack envelopes must conform to the published schema ───
 //
 // callHunterApi puts NON-`{ data }` envelopes on `structuredContent` for the

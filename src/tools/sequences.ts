@@ -19,6 +19,7 @@ import {
   mutationAckSchema,
   nullableBoolean,
   nullableString,
+  nullish,
   paginationMetaSchema,
 } from "../schemas/common"
 
@@ -132,7 +133,9 @@ const addRecipientsOutputSchema = buildResponseSchema(
   z
     .object({
       recipients_added: z.number().int().nonnegative().optional(),
-      skipped_recipients: z.array(z.unknown()).optional(),
+      // Null when the add skipped nobody: `last_skipped_recipients` only has a
+      // Redis reference to read after a skip (HUN-24022).
+      skipped_recipients: nullish(z.array(z.unknown())),
       // Forward-compat / older API shape:
       recipients: z.array(recipientSchema).optional(),
       emails_added: z.number().int().nonnegative().optional(),
