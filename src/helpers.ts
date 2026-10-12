@@ -481,6 +481,12 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
       message: `A previous request with the same Idempotency-Key is still being processed — it may still complete or may have already succeeded. Wait ${retryAfterSeconds} seconds, then check whether the resource already exists (e.g. via List-Sequences) before re-issuing the create.`,
     }
   }
+  // HUN-24159: Rails answers a soft-failed verification (`verification_failed`)
+  // with HTTP 222 and an `errors` body. The cause is outside Hunter's control,
+  // so a later retry can succeed.
+  if (status === 222) {
+    return { code: "upstream_error", retryable: true, message }
+  }
   if (status === 401 || status === 403) {
     return { code: "unauthorized", retryable: false, message }
   }
@@ -577,6 +583,32 @@ function stripInjectedFieldsInner(value: unknown, path: string): unknown {
   return out
 }
 
+function hunterErrorResult(error: HunterError): McpTextResult {
+  return {
+    // `audience: ["user"]` so hosts route human-readable error narration
+    // distinct from the typed envelope in structuredContent.error
+    // (HUN-19943 todos/013).
+    // Use `error.message` (sanitized via `sanitizeUpstreamMessage` inside
+    // `mapHunterError`) instead of the raw body so Bearer / api_key patterns
+    // never reach the user-visible content block.
+    content: [{ type: "text" as const, text: error.message, annotations: { audience: ["user"] } }],
+    structuredContent: { error },
+    isError: true,
+  }
+}
+
+// HUN-24159: Rails' `api/errors/show` body is `{ errors: [...] }` with no
+// `data`. It normally comes with a non-2xx status, but a soft-failed
+// verification sends it with HTTP 222. Passed through as a success, the
+// `errors` key fails every closed outputSchema with -32602. A body that
+// carries `data` next to `errors` (per-row errors on a bulk upsert) is a
+// success and is not matched.
+function isHunterErrorBody(json: unknown): boolean {
+  if (json == null || typeof json !== "object" || Array.isArray(json)) return false
+  const body = json as { data?: unknown; errors?: unknown }
+  return body.data === undefined && Array.isArray(body.errors) && body.errors.length > 0
+}
+
 export async function callHunterApi(options: CallOptions): Promise<McpTextResult> {
   const isGet = !("method" in options)
   const method = isGet ? "GET" : options.method
@@ -669,18 +701,7 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
     } catch {
       errorText = `HTTP ${response.status}`
     }
-    const error = mapHunterError(response.status, response.headers.get("retry-after"), errorText)
-    return {
-      // `audience: ["user"]` so hosts route human-readable error narration
-      // distinct from the typed envelope in structuredContent.error
-      // (HUN-19943 todos/013). Same posture as success-path content blocks.
-      // Use `error.message` (sanitized via `sanitizeUpstreamMessage` inside
-      // `mapHunterError`) instead of raw `errorText` so Bearer / api_key
-      // patterns never reach the user-visible content block.
-      content: [{ type: "text" as const, text: error.message, annotations: { audience: ["user"] } }],
-      structuredContent: { error },
-      isError: true,
-    }
+    return hunterErrorResult(mapHunterError(response.status, response.headers.get("retry-after"), errorText))
   }
 
   // Detect 2xx responses with no body. Cloudflare Workers commonly omits
@@ -742,6 +763,9 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
       },
       isError: true,
     }
+  }
+  if (isHunterErrorBody(json)) {
+    return hunterErrorResult(mapHunterError(response.status, response.headers.get("retry-after"), text))
   }
   // Strip any attacker-injected `nextAction` keys (security defense-in-depth).
   const sanitized = stripInjectedFields(json) as Record<string, unknown>

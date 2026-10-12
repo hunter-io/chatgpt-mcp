@@ -3145,6 +3145,80 @@ describe("HUN-20170: 402 quota response scrubs the upstream upgrade CTA", () => 
   })
 })
 
+// HUN-24159: Rails answers a soft-failed verification with HTTP 222 and an
+// `{ errors }` body. callHunterApi treated every 2xx as success, so the raw
+// `errors` key reached the closed Email-Verifier schema and the client failed
+// with -32602 instead of showing a usable result.
+describe("HUN-24159: Email-Verifier code 222 soft-fail returns a structured error", () => {
+  beforeEach(async () => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  it("maps the 222 errors body to a retryable upstream_error that conforms to the published schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 222,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "verification_failed",
+                  code: 222,
+                  details:
+                    "We failed to verify the email address for reasons outside of our control. We advise you to retry later.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+    const tool = registeredTools.get("Email-Verifier")!
+    const result = await tool.handler({ email: "user@example.com" })
+
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toEqual({
+      error: {
+        code: "upstream_error",
+        retryable: true,
+        message:
+          "We failed to verify the email address for reasons outside of our control. We advise you to retry later.",
+      },
+    })
+    expect(result.content[0]?.text).toContain("retry later")
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+
+  // A body with `data` next to `errors` is a success (bulk upsert sends per-row
+  // errors this way), so it must pass through and not become an error.
+  it("keeps a 2xx body with data next to errors as a success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { status: "valid", email: "user@example.com", score: 95 },
+              errors: [{ id: "row_failed", code: 422, details: "One row failed." }],
+            }),
+          ),
+      }),
+    )
+    const result = await registeredTools.get("Email-Verifier")!.handler({ email: "user@example.com" })
+
+    expect(result.isError).toBeUndefined()
+    expect((result.structuredContent as { data?: { status?: string } }).data?.status).toBe("valid")
+  })
+})
+
 // HUN-20170-v3 todos #101/#102/#103: credential / telemetry scrub fixes from
 // the post-implementation review. The Phase 4.4 broadening shipped with a
 // BEARER_RE that over-matched plain English ("authorization required" became
