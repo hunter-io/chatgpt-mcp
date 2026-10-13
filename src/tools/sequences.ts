@@ -143,15 +143,15 @@ const addRecipientsOutputSchema = buildResponseSchema(
     .loose(),
 )
 // Hunter Rails (`app/app/views/api/campaigns/recipients/destroy.jbuilder`)
-// emits `{ data: { recipients_canceled: [...emails], messages_canceled:
-// <count> } }` — there is no `emails_removed` field. The previous schema declared a
-// fictional field that would have been advertised in the JSON Schema and
-// always resolved to `undefined` against real payloads (silent misdirection).
+// emits `recipients_removed` (draft), `recipients_canceled` + `messages_canceled`
+// (started), and `skipped_recipients` (`{ email, reason }`, null when none) (HUN-24161).
 const removeRecipientsOutputSchema = buildResponseSchema(
   z
     .object({
+      recipients_removed: z.array(z.string()).optional(),
       recipients_canceled: z.array(z.string()).optional(),
       messages_canceled: z.number().int().nonnegative().optional(),
+      skipped_recipients: nullish(z.array(z.unknown())),
     })
     .loose(),
 )
@@ -1400,15 +1400,14 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
   )
 
   // Remove-Sequence-Recipients uses PRIVATE_DESTRUCTIVE_ANNOTATIONS
-  // (destructiveHint: true, openWorldHint: false). The v2 DELETE handler calls
-  // campaign.cancel_messages_to_recipients (app/models/campaign.rb) — this is
-  // NOT blocked on started sequences (the started-guard lives in the unused
-  // remove_recipients path, app/models/campaign/audience.rb). It cancels the
-  // recipient's PENDING (not-yet-sent) outbound messages and their future
-  // pending follow-ups; already-sent messages are untouched. destructive: true
-  // captures the lost queued progress. openWorld stays FALSE because canceling
-  // an unsent message creates NO externally-visible artifact: the recipient was
-  // never sent the email and still isn't, so nothing reaches the outside world.
+  // (destructiveHint: true, openWorldHint: false). The v2 DELETE handler does what
+  // the web app's audience does (HUN-24161): on a draft it removes the recipients
+  // (Campaign#remove_recipients); on a started sequence it keeps them
+  // and cancels their PENDING (not-yet-sent) messages and future follow-ups
+  // (Campaign#cancel_messages_to_recipients); on an archived sequence it returns 422.
+  // Already-sent messages are untouched. destructive: true captures the lost
+  // recipients and queued progress. openWorld stays FALSE because neither creates
+  // an externally-visible artifact: no email reaches the outside world.
   // This is the mirror of Add-Sequence-Recipients (open-world — it makes an
   // email arrive) and the same external-visibility posture as Pause-Sequence.
   // (HUN-20797; Cursor Bugbot review on #13429)
@@ -1416,7 +1415,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.removeSequenceRecipients,
     {
       description:
-        "Use this when the user wants to remove recipients from a sequence by email address. Pending messages scheduled for the removed recipients are cancelled; messages already sent are not recalled. Free to call.",
+        "Use this when the user wants to remove recipients from a sequence by email address. On a draft sequence the recipients are removed (recipients_removed). On a started sequence they stay in the list and their pending messages are canceled (recipients_canceled): a recipient not contacted yet shows as canceled, one already contacted keeps their status, and messages already sent are not recalled. An archived sequence returns an error. skipped_recipients lists the emails not changed, with a reason: not_in_sequence or no_pending_messages. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence"),
         emails: z
