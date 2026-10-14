@@ -9,9 +9,9 @@ type DiscoverCompany = {
   organization?: string
   logo?: string
   emails_count?: {
-    personal?: number
-    generic?: number
-    total?: number
+    personal?: number | null
+    generic?: number | null
+    total?: number | null
   }
   industry?: string
   location?: string

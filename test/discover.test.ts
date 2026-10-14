@@ -274,6 +274,26 @@ describe("Count-Company-Emails handler", () => {
     expect(() => schema.parse(errorEnvelope)).not.toThrow()
   })
 
+  it("published output schema accepts a company with null email counts (HUN-24160)", async () => {
+    const payload = {
+      ...findPeoplePayload,
+      data: [
+        {
+          domain: "unindexed.example",
+          organization: null,
+          emails_count: { personal: null, generic: null, total: null },
+        },
+      ],
+    }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(okResponse(payload)))
+
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ domains: ["unindexed.example"] })
+
+    expect(result.isError).toBeFalsy()
+    const parsed = publishedOutputSchema("Count-Company-Emails").parse(result.structuredContent)
+    expect(parsed.data[0].emails_count.total).toBeNull()
+  })
+
   it("links each company row to its Hunter Domain Search page (HUN-23709)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload)))
 
@@ -284,7 +304,9 @@ describe("Count-Company-Emails handler", () => {
       "https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people",
       "https://hunter.io/search/adyen.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people",
     ])
-    expect(result.content[0].text).toContain("https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people")
+    expect(result.content[0].text).toContain(
+      "https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=find-people",
+    )
     const next = (result.structuredContent as { nextAction: { kind: string; summary: string } }).nextAction
     expect(next.kind).toBe("complete")
     expect(next.summary).toContain("emails_on_hunter")
@@ -316,7 +338,9 @@ describe("List-Saved-Searches handler", () => {
     const [url, opts] = mockFetch.mock.calls[0] as [string, { method: string }]
     expect(url).toBe("https://api.hunter.io/v2/discover/views?offset=5&limit=10")
     expect(opts.method).toBe("GET")
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/discover?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
+      "https://hunter.io/discover?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
   })
 
   it("published output schema validates the jbuilder success payload and the error envelope", async () => {

@@ -23,6 +23,7 @@ import {
   jsonArgs,
   mutationAckSchema,
   nullableString,
+  nullish,
   paginationMetaSchema,
 } from "../schemas/common"
 
@@ -39,7 +40,8 @@ export const COUNT_COMPANY_EMAILS = "Count-Company-Emails"
 // Each row carries `domain` (domain.value), `organization` (domain.company_name
 // — null for a found-but-nameless company, same null-tolerance class as the
 // Find-Companies widget schema), and the `emails_count` breakdown
-// (personal/generic/total integer counters from the domains ES index).
+// (personal/generic/total integer counters from the domains ES index, null
+// for a domain without counts — HUN-24160).
 // `emails_on_hunter` is stamped by the handler, not Rails (HUN-23709).
 const findPeopleCompanySchema = z
   .object({
@@ -48,9 +50,9 @@ const findPeopleCompanySchema = z
     organization: nullableString().optional(),
     emails_count: z
       .object({
-        personal: z.number().int().nonnegative().optional(),
-        generic: z.number().int().nonnegative().optional(),
-        total: z.number().int().nonnegative().optional(),
+        personal: nullish(z.number().int().nonnegative()),
+        generic: nullish(z.number().int().nonnegative()),
+        total: nullish(z.number().int().nonnegative()),
       })
       .loose()
       .optional(),
@@ -184,7 +186,9 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
           .int()
           .nonnegative()
           .optional()
-          .describe("Number of companies to skip (paging past the first 100 results requires Discover paging access)"),
+          .describe(
+            "Number of companies to skip (default 0). Plans without Discover paging get only the first page: any offset above 0 is rejected, so use `limit` for a smaller page.",
+          ),
       },
       outputSchema: findPeopleOutputSchema.shape,
       annotations: { ...READ_ONLY_PUBLIC_ANNOTATIONS, title: "Count Emails at Companies" },

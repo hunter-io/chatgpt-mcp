@@ -679,8 +679,12 @@ describe("HUN-23709: Email-Count links to the addresses on Hunter", () => {
       nextAction: { kind: string; summary: string }
     }
     expect(sc.data.total).toBe(128)
-    expect(sc.viewInHunter).toBe("https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=email-count")
-    expect(result.content[0].text).toContain("https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=email-count")
+    expect(sc.viewInHunter).toBe(
+      "https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=email-count",
+    )
+    expect(result.content[0].text).toContain(
+      "https://hunter.io/search/stripe.com?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=email-count",
+    )
     expect(sc.nextAction.kind).toBe("complete")
     expect(sc.nextAction.summary).toContain("viewInHunter")
     expect(() =>
@@ -3802,6 +3806,27 @@ describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rail
     })
     expect(result.structuredContent.data.recipients_added).toBe(1)
     expect(validate("Add-Sequence-Recipients", result.structuredContent).error).toBeUndefined()
+  })
+
+  // HUN-24160: an unindexed domain has null email counts.
+  it("Find-Companies accepts a company with null email counts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        okJson({
+          data: [
+            {
+              domain: "unindexed.example",
+              organization: null,
+              emails_count: { personal: null, generic: null, total: null },
+            },
+          ],
+          meta: { results: 1, limit: 100, offset: 0 },
+        }),
+      ),
+    )
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "unindexed companies" })
+    expect(validate("Find-Companies", result.structuredContent).error).toBeUndefined()
   })
 })
 

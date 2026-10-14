@@ -19,7 +19,7 @@ import {
   withDeepLink,
 } from "./helpers"
 import { withClientUserAgent } from "./client-context"
-import { buildResponseSchema, nullableString, paginationMetaSchema } from "./schemas/common"
+import { buildResponseSchema, nullableString, nullish, paginationMetaSchema } from "./schemas/common"
 import { stripDialectOnSend } from "./schema-dialect"
 
 // ─── Widget tool output schemas ──────────────────────────────────────────────
@@ -45,9 +45,9 @@ const discoverCompanySchema = z
     logo: nullableString().optional(),
     emails_count: z
       .object({
-        personal: z.number().int().nonnegative().optional(),
-        generic: z.number().int().nonnegative().optional(),
-        total: z.number().int().nonnegative().optional(),
+        personal: nullish(z.number().int().nonnegative()),
+        generic: nullish(z.number().int().nonnegative()),
+        total: nullish(z.number().int().nonnegative()),
       })
       .loose()
       .optional(),
