@@ -196,11 +196,11 @@ describe("integrations tool registration", () => {
     expect(tool.description).toMatch(/Free to call\.$/)
   })
 
-  it("Update-Webhook uses PRIVATE_DESTRUCTIVE_ANNOTATIONS", () => {
+  it("Update-Webhook uses EXTERNAL_SIDE_EFFECT_ANNOTATIONS", () => {
     expect(getTool("Update-Webhook").annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     })
   })
 })

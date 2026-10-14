@@ -6,7 +6,6 @@ import {
   embedNextAction,
   HUNTER_SOURCE_SUFFIX,
   type McpTextResult,
-  PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   sanitizeUpstreamMessage,
   TOOL_NAMES,
@@ -351,10 +350,10 @@ export function registerIntegrationTools(server: McpServer, apiKey: string, base
       // DESTRUCTIVE: updating overwrites delivery configuration another system
       // may rely on — the old target_url/event stops receiving events with no
       // undo history — so destructiveHint:true makes the host confirm first.
-      // openWorld stays false: the change only rewires the user's own Hunter
-      // webhook row; deliveries to the (user-chosen) endpoint are the webhook
-      // feature itself, not a new externally-visible effect of this call.
-      annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
+      // openWorld: the new target_url is an external endpoint that receives
+      // Hunter data. OpenAI's MCP scan (2026-10-14) held the tool with
+      // openWorldHint: false for that reason.
+      annotations: EXTERNAL_SIDE_EFFECT_ANNOTATIONS,
     },
     async ({ webhook_id, target_url, event }) => {
       // Local pre-flight gate (mirrors invalidInput in bulk-operations.ts):
