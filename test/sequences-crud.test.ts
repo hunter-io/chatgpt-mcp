@@ -457,6 +457,27 @@ describe("Get-Sequence", () => {
     expect(schema.safeParse({ data: { ...SEQUENCE_DETAIL.data, name: null } }).success).toBe(true)
   })
 
+  // The detail payload gains `ab_testing` (HUN-24112); payloads without it must still validate.
+  it("published output schema accepts a detail payload with A/B state", () => {
+    const schema = publishedOutputSchema(tool("Get-Sequence").outputSchema!)
+    const running = {
+      enabled: true,
+      variant_a_percentage: 60,
+      variant_b_percentage: 40,
+      winner_variant: "B",
+      winner_selected_at: "2026-10-12T10:00:00Z",
+    }
+    const off = {
+      enabled: false,
+      variant_a_percentage: null,
+      variant_b_percentage: null,
+      winner_variant: null,
+      winner_selected_at: null,
+    }
+    expect(schema.safeParse({ data: { ...SEQUENCE_DETAIL.data, ab_testing: running } }).success).toBe(true)
+    expect(schema.safeParse({ data: { ...SEQUENCE_DETAIL.data, ab_testing: off } }).success).toBe(true)
+  })
+
   it("passes a 404 through as a typed error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(railsError(404, "sequence_not_found", "Sequence not found.")))
     const result = await tool("Get-Sequence").handler({ sequence_id: 999 })

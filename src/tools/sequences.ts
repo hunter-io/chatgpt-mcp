@@ -417,6 +417,17 @@ const sequenceDetailSchema = z.object({
     steps: z.array(z.number().int().nonnegative()),
   }),
   owner: z.union([z.object({ id: z.number().int().positive(), email: z.string() }).loose(), z.null()]),
+  // Optional so a worker deployed before the Rails field ships still validates (HUN-24112).
+  // When `enabled` is false every other field is null.
+  ab_testing: z
+    .object({
+      enabled: z.boolean(),
+      variant_a_percentage: z.union([z.number().int(), z.null()]),
+      variant_b_percentage: z.union([z.number().int(), z.null()]),
+      winner_variant: nullableString(),
+      winner_selected_at: nullableString(),
+    })
+    .optional(),
   created_at: z.string(),
   updated_at: z.string(),
 })
