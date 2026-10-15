@@ -1426,7 +1426,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.removeSequenceRecipients,
     {
       description:
-        "Use this when the user wants to remove recipients from a sequence by email address. On a draft sequence the recipients are removed (recipients_removed). On a started sequence they stay in the list and their pending messages are canceled (recipients_canceled): a recipient not contacted yet shows as canceled, one already contacted keeps their status, and messages already sent are not recalled. An archived sequence returns an error. skipped_recipients lists the emails not changed, with a reason: not_in_sequence or no_pending_messages. Free to call.",
+        "Use this when the user wants to remove recipients from a sequence by email address. On a draft sequence the recipients are removed (recipients_removed). On a started sequence they stay in the list and no more messages are sent to them (recipients_canceled): a recipient not contacted yet shows as canceled, also before their messages exist; one already contacted keeps their status and gets no new follow-up; messages already sent are not recalled. An archived sequence returns an error. skipped_recipients lists the emails not changed, with a reason: not_in_sequence, or no_pending_messages when sending to them already stopped. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence"),
         emails: z
