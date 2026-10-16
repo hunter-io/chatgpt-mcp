@@ -274,7 +274,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     TOOL_NAMES.companyEnrichment,
     {
       description:
-        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Uses Hunter credits, charged only when data is found. Do not use this for personal websites or webmail domains (gmail.com, yahoo.com, etc.) — there is no company behind those domains to enrich.",
+        "Use this when the user wants to look up a company by domain and see its industry, size, location, technologies, funding rounds, and social profiles. Does not return personal data (PII). Costs 0.2 credit on plans with a shared credit pool (but needs at least 1 credit left to start), or 1 search on other plans, charged only when data is found. Do not use this for personal websites or webmail domains (gmail.com, yahoo.com, etc.) — there is no company behind those domains to enrich.",
       inputSchema: {
         domain: z.string().min(1).max(253).describe("Domain name of the company to enrich"),
       },

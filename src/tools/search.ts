@@ -61,7 +61,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailVerifier,
     {
       description:
-        "Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Uses Hunter credits, charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all.",
+        "Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification (0.5 credit on plans with a shared credit pool), charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all.",
       inputSchema: {
         email: z.string().email().max(254).describe("Email address to verify"),
         save_leads: z
