@@ -478,14 +478,16 @@ const getSequenceFollowUpOutputSchema = buildResponseSchema(followUpDetailSchema
 // Created-step shape from app/app/views/api/campaigns/follow_ups/create.jbuilder
 // (POST /sequences/:sequence_id/follow-ups → Api::Campaigns::FollowUpsController
 // #create, 201). The payload nests under `follow_up` and differs from the show
-// shape: no `messages_sent`/`variant`, and `subject`/`body` are the raw
+// shape: no `messages_sent`, and `subject`/`body` are the raw
 // nullable columns (a blank subject on a follow-up step is stored as the
 // inheritance placeholder by the model's before_save, but null can still
 // surface). The jbuilder additionally emits the parent's internal numeric id
 // under a legacy key that is intentionally NOT declared here — hence
 // `.loose()` at both levels so schema-validating clients aren't broken by it.
+// `variant` is null for a plain step and "B" for a Variant B create (HUN-24112);
+// optional so a payload rendered before that field shipped still validates.
 // `meta.params` echoes the request's sequence_id/step/wait_days back as raw
-// request params (strings or null, not casts).
+// request params (strings or null, not casts), plus `variant` when it was sent.
 const createSequenceFollowUpDataSchema = z
   .object({
     follow_up: z
@@ -496,6 +498,7 @@ const createSequenceFollowUpDataSchema = z
         subject: nullableString(),
         body: nullableString(),
         message_format: z.union([z.enum(["text", "html"]), z.null()]),
+        variant: nullableString().optional(),
       })
       .loose(),
   })
@@ -507,6 +510,7 @@ const createSequenceFollowUpMetaSchema = z
       .object({
         sequence_id: z.union([z.string(), z.number(), z.null()]).optional(),
         step: z.union([z.string(), z.number(), z.null()]).optional(),
+        variant: z.union([z.string(), z.null()]).optional(),
         wait_days: z.union([z.string(), z.number(), z.null()]).optional(),
       })
       .loose()
@@ -796,7 +800,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSequence,
     {
       description:
-        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, and the `owner`. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, the `owner`, and the `ab_testing` state (`enabled`, the Variant A/B split percentages, and any `winner_variant`; every field but `enabled` is null when no A/B test is on). Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to fetch"),
       },
@@ -993,25 +997,31 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
   // ignored, not an error. The model rejects creation on an actively-sending
   // or archived sequence and caps wait_days at FollowUp::MAX_WAIT_DAYS (999),
   // which the dashboard picker also uses. callHunterApi adds the
-  // Idempotency-Key header automatically on every POST.
+  // Idempotency-Key header automatically on every POST, but this endpoint does
+  // not honor it and the network retry covers only POST /sequences.
+  //
+  // `variant: "B"` + `step` takes a different Rails path (HUN-24112): it adds
+  // Variant B to that EXISTING step (step 0 included) instead of appending, and
+  // the first one turns A/B testing on. A repeat at the same step 422s naming
+  // the existing follow-up, which is how a lost response surfaces.
   server.registerTool(
     TOOL_NAMES.createSequenceFollowUp,
     {
       description:
-        "Use this when the user wants to add an email step to a sequence. Author the sequence step-by-step in conversation: draft the `subject` and `body` with the user, set `wait_days` (days after the previous step, 0-999), create the step, then show the updated step list with List-Sequence-Follow-Ups. Also offer the team's saved templates (List-Message-Templates): passing `message_template_id` pre-fills whichever of `subject`, `body`, and `message_format` are left blank. The step number is assigned automatically after the current last step, so this tool always appends a new follow-up and can never target step 0 — to author the introduction email (step 0), or to rewrite any existing step, use Update-Sequence-Follow-Up instead. Omitting `subject` makes the step inherit the previous step's subject so the emails thread together. A sequence holds at most 6 steps in total (the introduction plus up to 5 follow-ups); exceeding that, or adding to an actively sending sequence (pause it first) or an archived one, is rejected with an invalid_input error. Free to call.",
+        "Use this when the user wants to add an email step to a sequence, or to A/B test an existing step with a Variant B. Author the sequence step-by-step in conversation: draft the `subject` and `body` with the user, set `wait_days` (days after the previous step, 0-999), create the step, then show the updated step list with List-Sequence-Follow-Ups. Also offer the team's saved templates (List-Message-Templates): passing `message_template_id` pre-fills whichever of `subject`, `body`, and `message_format` are left blank. Without `variant`, the step number is assigned automatically after the current last step, so a plain create always appends a new follow-up and never reaches an existing step — to author the introduction email (step 0), or to rewrite any existing step, use Update-Sequence-Follow-Up instead. Omitting `subject` makes the step inherit the previous step's subject so the emails thread together. A sequence holds at most 6 steps in total (the introduction plus up to 5 follow-ups); exceeding that, or adding to an actively sending sequence (pause it first) or an archived one, is rejected with an invalid_input error. To A/B test a step, pass `variant: \"B\"` with that step's `step` number (step 0 included): this adds Variant B to the existing step, and the step itself becomes Variant A. Send the B copy in `body`, `subject`, or both: omitted `subject`, `body`, `wait_days`, and `message_format` are copied from Variant A, so a subject-line test sends only `subject`. The first Variant B turns A/B testing on for the sequence, sets a 50/50 target split (recipients already sent an email stay on Variant A; only unsent recipients are split), and switches off the AI writing assistant. It needs A/B testing in the user's plan (error id ab_testing_requires_upgrade) and is rejected while the sequence is sending (sequence_active) or scheduled to start (sequence_planned). Edit either arm afterwards with Update-Sequence-Follow-Up, and read the test state from `ab_testing` in Get-Sequence. Changing the split, picking a winner, and removing Variant B are only possible in the Hunter dashboard. Hunter does not deduplicate this call. If it fails with \"already has a Variant B\" after a create whose response was lost or timed out, the earlier call succeeded. Confirm with List-Sequence-Follow-Ups and do not create it again. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to add the step to"),
         subject: z
           .string()
           .optional()
           .describe(
-            "Email subject. Personalization placeholders take a fallback after a colon, as in {{first_name:\"there\"}} — the colon is the only separator that works. When omitted, the step inherits the previous step's subject so replies thread together (or takes the template's subject when message_template_id is set)",
+            'Email subject. Personalization placeholders take a fallback after a colon, as in {{first_name:"there"}} — the colon is the only separator that works. When omitted, the step inherits the previous step\'s subject so replies thread together (or takes the template\'s subject when message_template_id is set). With `variant: "B"`, an omitted subject copies Variant A\'s',
           ),
         body: z
           .string()
           .optional()
           .describe(
-            'Email body — plain text or HTML depending on message_format. Personalization placeholders must carry a fallback, written after a colon: {{first_name:"there"}}. The colon is the only separator that works — a piped form like {{first_name|fallback:"there"}} silently renders as an empty string. Required unless message_template_id supplies it',
+            'Email body — plain text or HTML depending on message_format. Personalization placeholders must carry a fallback, written after a colon: {{first_name:"there"}}. The colon is the only separator that works — a piped form like {{first_name|fallback:"there"}} silently renders as an empty string. Required for a new step unless message_template_id supplies it. With `variant: "B"`, omit it to copy Variant A\'s body',
           ),
         wait_days: z
           .number()
@@ -1019,11 +1029,15 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
           .min(0)
           .max(999)
           .optional()
-          .describe("Days to wait after the previous step before this one sends (0-999, default 0)"),
+          .describe(
+            'Days to wait after the previous step before this one sends (0-999, default 0). With `variant: "B"`, omit it to copy Variant A\'s',
+          ),
         message_format: z
           .enum(["text", "html"])
           .optional()
-          .describe("Body format; defaults to html (or the template's format when message_template_id is set)"),
+          .describe(
+            "Body format; defaults to html (or the template's format when message_template_id is set). With `variant: \"B\"`, omit it to copy Variant A's",
+          ),
         message_template_id: z
           .number()
           .int()
@@ -1032,11 +1046,53 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
           .describe(
             "ID of a saved message template (see List-Message-Templates) whose subject, body, and format pre-fill whichever of those fields are left blank. A non-existent template id is silently ignored",
           ),
+        variant: z
+          .enum(["B"])
+          .optional()
+          .describe(
+            'Set to "B" together with `step` to add Variant B to that existing step and start an A/B test. Only "B" is accepted: the existing step is Variant A. Omit it to append a plain step',
+          ),
+        step: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            'Number of the existing step that gets Variant B (0 is the introduction email; see List-Sequence-Follow-Ups). Only valid with `variant: "B"` — omit it for a plain step, which always goes after the last step',
+          ),
       },
       outputSchema: createSequenceFollowUpOutputSchema.shape,
       annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
-    async ({ sequence_id, subject, body, wait_days, message_format, message_template_id }) => {
+    async ({ sequence_id, subject, body, wait_days, message_format, message_template_id, variant, step }) => {
+      // `step` only selects the step that gets Variant B. Accepting it on a plain
+      // create would let the model insert a step mid-sequence, which the
+      // "always appends" contract rules out.
+      if ((variant === undefined) !== (step === undefined)) {
+        const message =
+          variant === undefined
+            ? '`step` only works with `variant: "B"`. Omit `step` to append a plain step after the last one, or add `variant: "B"` to add Variant B to that step.'
+            : 'Pass the `step` that gets Variant B together with `variant: "B"` (0 is the introduction email). Get the step numbers from List-Sequence-Follow-Ups.'
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "step", message } },
+          isError: true,
+        }
+      }
+      // A Variant B with no copy of its own would duplicate Variant A yet still start the test. A
+      // template id alone does not count: Hunter silently ignores one it cannot resolve. After step 0
+      // an empty subject is real copy: B inherits the previous step's subject.
+      const inheritsSubject = subject?.trim() === "" && (step ?? 0) > 0
+      const hasOwnCopy = Boolean(subject?.trim() || body?.trim() || inheritsSubject)
+      if (variant !== undefined && !hasOwnCopy) {
+        const message =
+          "Variant B needs its own copy: pass `subject`, `body`, or both. Omitted fields are copied from Variant A."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, field: "body", message } },
+          isError: true,
+        }
+      }
       // Fail fast when neither a body nor a template that supplies one is given.
       // The Rails FollowUp create path (Api::Campaigns::FollowUpsController#create)
       // accepts a blank body — the body-presence check only runs at Start-Sequence
@@ -1045,7 +1101,8 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
       // Update-Sequence-Follow-Up can repair one, but a complete create is cheaper.
       // `message_template_id` passes with a blank body because
       // apply_template_defaults fills it server-side.
-      if ((body === undefined || body.trim() === "") && message_template_id === undefined) {
+      // A Variant B may omit the body: Rails copies Variant A's (subject-line tests).
+      if (variant === undefined && (body === undefined || body.trim() === "") && message_template_id === undefined) {
         const message =
           "Provide `body` (a non-empty email body) or `message_template_id` — a step created without either has no body and blocks Start-Sequence. Include the body in this call, or fill it in afterwards with Update-Sequence-Follow-Up."
         return {
@@ -1060,8 +1117,12 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
       if (wait_days !== undefined) params.wait_days = String(wait_days)
       if (message_format !== undefined) params.message_format = message_format
       if (message_template_id !== undefined) params.message_template_id = String(message_template_id)
+      if (variant !== undefined) params.variant = variant
+      if (step !== undefined) params.step = String(step)
       // On 422 (step limit reached, actively-sending or archived sequence,
-      // wait_days out of range, missing merge-field fallbacks) or 404
+      // wait_days out of range, missing merge-field fallbacks, and the Variant B
+      // refusals: ab_testing_requires_upgrade, sequence_planned, missing step,
+      // existing Variant B) or 404
       // callHunterApi returns the typed error envelope unchanged.
       const result = await callHunterApi({
         path: `/sequences/${sequence_id}/follow-ups`,

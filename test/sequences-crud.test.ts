@@ -205,6 +205,24 @@ describe("sequence CRUD registration", () => {
     expect(description).toContain("wait_days")
   })
 
+  // HUN-24112: the same tool adds Variant B to an existing step. The model must learn that step 0
+  // is reachable only this way, what the first Variant B changes, and how to read a lost response.
+  it("Create-Sequence-Follow-Up documents Variant B creation at an existing step", () => {
+    const description = tool("Create-Sequence-Follow-Up").description
+    expect(description).toContain('`variant: "B"`')
+    expect(description).toContain("step 0")
+    expect(description).toContain("50/50")
+    expect(description).toContain("AI writing assistant")
+    expect(description).toContain("ab_testing_requires_upgrade")
+    expect(description).toContain("Update-Sequence-Follow-Up")
+    expect(description).toContain("already has a Variant B")
+    expect(description).not.toContain("can never target step 0")
+  })
+
+  it("Get-Sequence mentions the ab_testing block", () => {
+    expect(tool("Get-Sequence").description).toContain("ab_testing")
+  })
+
   // HUN-23066: the v2 docs used to publish `{{first_name|fallback:"there"}}`, which
   // OutgoingMessage.replace_attributes parses as the attribute name `first_name|fallback` — it
   // matches nothing, renders as an empty string, and discards the fallback, all without raising.
@@ -228,7 +246,7 @@ describe("sequence CRUD registration", () => {
       for (const surface of surfaces) {
         // The body description names the piped form to warn against it, so require that any
         // mention is adjacent to the correction rather than banning the string outright.
-        if (surface.includes('{{first_name|fallback:')) {
+        if (surface.includes("{{first_name|fallback:")) {
           expect(surface, `${name} mentions the piped form without the supported one`).toContain(
             '{{first_name:"there"}}',
           )
@@ -247,7 +265,7 @@ describe("sequence CRUD registration", () => {
     expect(description).toContain("never echo back a subject")
     expect(description).toContain("List-Sequence-Follow-Ups")
     expect(description).toContain("variant")
-    expect(description).toContain('{{first_name:\"there\"}}')
+    expect(description).toContain('{{first_name:"there"}}')
     expect(description).toContain("sequence_active")
   })
 
@@ -518,7 +536,9 @@ describe("Create-Sequence", () => {
     expect(body.get("tracked_links")).toBe("false")
     expect(body.get("add_unsubscribe_link")).toBe("true")
     expect(result.isError).toBeUndefined()
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
+      "https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
     const schema = publishedOutputSchema(tool("Create-Sequence").outputSchema!)
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })
@@ -549,7 +569,9 @@ describe("Update-Sequence", () => {
     expect(body.getAll("schedule_days[]")).toEqual(["1", "5"])
     expect(body.has("tracked")).toBe(false)
     expect(body.has("email_account_ids[]")).toBe(false)
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
+      "https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
     const schema = publishedOutputSchema(tool("Update-Sequence").outputSchema!)
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })
@@ -696,6 +718,22 @@ describe("Get-Sequence-Follow-Up", () => {
   })
 })
 
+const createdVariantBForSubjectTest = {
+  data: {
+    follow_up: {
+      id: 1003,
+      campaign_id: 42,
+      step: 0,
+      wait_days: 0,
+      subject: "Shorter subject",
+      body: "<p>Copied from A</p>",
+      message_format: "html",
+      variant: "B",
+    },
+  },
+  meta: { params: { sequence_id: "42", step: "0", variant: "B", wait_days: null } },
+}
+
 describe("Create-Sequence-Follow-Up", () => {
   // Grounded in app/app/views/api/campaigns/follow_ups/create.jbuilder: the
   // created step nests under `follow_up`; meta.params echoes raw request
@@ -711,6 +749,7 @@ describe("Create-Sequence-Follow-Up", () => {
         subject: "Quick follow-up",
         body: "<p>Hi again</p>",
         message_format: "html",
+        variant: null,
         internal_parent_ref: 42,
       },
     },
@@ -739,7 +778,9 @@ describe("Create-Sequence-Follow-Up", () => {
     expect(body.get("message_format")).toBe("html")
     expect(body.get("message_template_id")).toBe("5")
     expect(result.isError).toBeUndefined()
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
+      "https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
     const schema = publishedOutputSchema(tool("Create-Sequence-Follow-Up").outputSchema!)
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })
@@ -801,6 +842,155 @@ describe("Create-Sequence-Follow-Up", () => {
     expect(mockFetch).toHaveBeenCalledOnce()
     expect(result.isError).toBeUndefined()
   })
+
+  // HUN-24112: `variant: "B"` + `step` adds Variant B to that existing step, step 0 included.
+  it("creates Variant B at step 0: forwards variant and step and passes variant through", async () => {
+    const createdVariantB = {
+      data: {
+        follow_up: {
+          ...CREATED_FOLLOW_UP.data.follow_up,
+          id: 10,
+          step: 0,
+          wait_days: 0,
+          body: "<p>Variant B</p>",
+          variant: "B",
+        },
+      },
+      meta: { params: { sequence_id: "42", step: "0", variant: "B", wait_days: null } },
+    }
+    const mockFetch = vi.fn().mockResolvedValue(okJson(createdVariantB))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      variant: "B",
+      step: 0,
+      body: "<p>Variant B</p>",
+    })
+    const { url, opts } = fetchCall(mockFetch)
+    expect(url).toBe(`${BASE}/sequences/42/follow-ups`)
+    expect(opts.method).toBe("POST")
+    const body = new URLSearchParams(opts.body)
+    expect(body.get("variant")).toBe("B")
+    expect(body.get("step")).toBe("0")
+    expect(body.get("body")).toBe("<p>Variant B</p>")
+    expect(result.isError).toBeUndefined()
+    const followUp = (result.structuredContent as { data: { follow_up: { variant: string; step: number } } }).data
+      .follow_up
+    expect(followUp.variant).toBe("B")
+    expect(followUp.step).toBe(0)
+    const schema = publishedOutputSchema(tool("Create-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("sends a subject-only Variant B without a body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(createdVariantBForSubjectTest))
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      variant: "B",
+      step: 0,
+      subject: "Shorter subject",
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const body = new URLSearchParams(fetchCall(mockFetch).opts.body)
+    expect(body.get("subject")).toBe("Shorter subject")
+    expect(body.has("body")).toBe(false)
+    expect(result.isError).toBeUndefined()
+  })
+
+  it("accepts an empty subject as Variant B copy after step 0", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(createdVariantBForSubjectTest))
+    vi.stubGlobal("fetch", mockFetch)
+    await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, variant: "B", step: 1, subject: "" })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(new URLSearchParams(fetchCall(mockFetch).opts.body).get("subject")).toBe("")
+  })
+
+  it("does not accept a template id alone as Variant B copy", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      variant: "B",
+      step: 0,
+      message_template_id: 9,
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+  })
+
+  it("rejects a Variant B with no copy of its own before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, variant: "B", step: 0 })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.message).toContain("own copy")
+  })
+
+  it("rejects `step` without `variant` before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, step: 2, body: "<p>Hi</p>" })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("step")
+    expect(error.message).toContain("variant")
+    const schema = publishedOutputSchema(tool("Create-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("rejects `variant` without `step` before any fetch", async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+    const result = await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, variant: "B", body: "<p>Hi</p>" })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("step")
+    expect(error.message).toContain("step")
+    const schema = publishedOutputSchema(tool("Create-Sequence-Follow-Up").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("input schema accepts only variant B and a non-negative integer step", () => {
+    const fields = tool("Create-Sequence-Follow-Up").inputSchema
+    const variant = fields.variant as z.ZodTypeAny
+    const step = fields.step as z.ZodTypeAny
+    expect(variant.safeParse("B").success).toBe(true)
+    expect(variant.safeParse("A").success).toBe(false)
+    expect(step.safeParse(0).success).toBe(true)
+    expect(step.safeParse(-1).success).toBe(false)
+    expect(step.safeParse(1.5).success).toBe(false)
+  })
+
+  // The create endpoint is not idempotency-protected, so the "already exists" 422 after a lost
+  // response is how the model learns the first call landed.
+  it("passes the Variant B already-exists 422 through as a typed error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          railsError(422, "validation_failed", "Step 0 already has a Variant B (follow-up 123). Update it instead."),
+        ),
+    )
+    const result = await tool("Create-Sequence-Follow-Up").handler({
+      sequence_id: 42,
+      variant: "B",
+      step: 0,
+      body: "<p>Variant B</p>",
+    })
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.message).toContain("follow-up 123")
+  })
 })
 
 describe("Update-Sequence-Follow-Up", () => {
@@ -836,7 +1026,9 @@ describe("Update-Sequence-Follow-Up", () => {
     expect(body.has("body")).toBe(false)
     expect(body.has("message_format")).toBe(false)
     expect(result.isError).toBeUndefined()
-    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe("https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter?: string }).viewInHunter).toBe(
+      "https://hunter.io/sequences/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
     const schema = publishedOutputSchema(tool("Update-Sequence-Follow-Up").outputSchema!)
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })

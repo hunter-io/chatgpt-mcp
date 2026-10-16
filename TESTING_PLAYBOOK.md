@@ -297,7 +297,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | SQ9 | `Update-Sequence` (V3, write) | `Rename sequence <SEQUENCE_ID> to "Playbook Renamed"` | Sequence updated, deep link returned | ☐ | |
 | SQ10 | `Delete-Sequence` (V3, destructive) | `Delete sequence <DRAFT_SEQUENCE_ID>` | Confirmation prompt; drafts only — deleting a started sequence returns invalid_input | ☐ | |
 | SQ11 | `Get-Sequence-Follow-Up` (V3) | `Show step 2 of sequence <SEQUENCE_ID>` | One step: subject, body, wait_days, position | ☐ | |
-| SQ12 | `Create-Sequence-Follow-Up` (V3, write) | `Add a follow-up to sequence <SEQUENCE_ID>: subject "Quick nudge", wait 3 days` | Step appended with automatic step assignment (subject/body/wait_days); model offers a saved message template as the body before drafting from scratch | ☐ | |
+| SQ12 | `Create-Sequence-Follow-Up` (V3, write) | `Add a follow-up to sequence <SEQUENCE_ID>: subject "Quick nudge", wait 3 days` | Step appended with automatic step assignment (subject/body/wait_days); model offers a saved message template as the body before drafting from scratch. Variant B: `A/B test step 0 of sequence <DRAFT_SEQUENCE_ID> with body "..."` → one call with `variant: "B"` + `step: 0`; response `follow_up.variant` is `B` and Get-Sequence shows `ab_testing.enabled: true` at 50/50. A repeat → invalid_input naming the existing follow-up. On a plan without A/B testing → `ab_testing_requires_upgrade` | ☐ | |
 | SQ13 | `Update-Sequence-Follow-Up` (V3, destructive) | `Write the introduction email for sequence <DRAFT_SEQUENCE_ID>: subject "Quick question about {{company:"your team"}}", body "Hi {{first_name:"there"}} — ..."` | Model calls List-Sequence-Follow-Ups for the step-0 id, then PUTs subject + body; step 0 comes back authored, and Start-Sequence then passes validation provided the draft already has recipients and a connected sender. Re-run on an actively sending sequence → invalid_input (`sequence_active`) | ☐ | |
 | SQ14 | `Delete-Sequence-Follow-Up` (V3, destructive) | `Delete the last step of sequence <SEQUENCE_ID>` | Confirmation; last step only — deleting a middle step returns an error | ☐ | |
 
@@ -623,7 +623,7 @@ Create a new outreach sequence called "Playbook E2E" from my <EMAIL_ACCOUNT> acc
 ```
 
 - [ ] `Create-Sequence` fires first — a draft is created, and the POST carries an `Idempotency-Key` header (network panel)
-- [ ] `List-Sequence-Follow-Ups` then `Update-Sequence-Follow-Up` author the INTRO email — `Create-Sequence` leaves step 0 empty and `Create-Sequence-Follow-Up` can only append, so the model must look up the step-0 id and PUT it. A run that writes the intro with `Create-Sequence-Follow-Up` is a failure, not a pass
+- [ ] `List-Sequence-Follow-Ups` then `Update-Sequence-Follow-Up` author the INTRO email — `Create-Sequence` leaves step 0 empty and a plain `Create-Sequence-Follow-Up` (no `variant`) can only append, so the model must look up the step-0 id and PUT it. A run that writes the intro with `Create-Sequence-Follow-Up` is a failure, not a pass
 - [ ] `Create-Sequence-Follow-Up` then fires once per ADDITIONAL step with subject/body/wait_days; step positions are auto-assigned (the model never asks for manual step numbers)
 - [ ] Before drafting a body from scratch, the model checks saved templates (`List-Message-Templates`) and offers one if it exists
 - [ ] `Add-Sequence-Recipients` adds patrick@stripe.com to the draft
