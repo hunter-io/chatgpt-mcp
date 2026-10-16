@@ -209,13 +209,29 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     TOOL_NAMES.discover,
     {
       description:
-        "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `offset` to paginate. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call. Do not use this when the user has already named a specific company — call Company-Enrichment directly with that company's domain.",
+        "Use this when the user wants to search for companies that match natural-language criteria such as location, industry, size, type, or technologies. Returns up to 100 matching companies per page; use `limit` and `offset` to paginate. Plans without Discover paging get only the first page. The response includes `meta.permalink` — a link to the same query on hunter.io that the user can open to view all results with the inferred filters applied. Free to call. Do not use this when the user has already named a specific company — call Company-Enrichment directly with that company's domain.",
       inputSchema: {
         query: z
           .string()
           .min(1)
           .max(500)
           .describe("Your search query. Example: 'software companies in San Francisco with more than 50 employees'"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Maximum number of companies to return (default 100, max 100)"),
+        offset: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(10_000)
+          .optional()
+          .describe(
+            "Number of companies to skip (default 0, max 10000). Plans without Discover paging get only the first page: any offset above 0 is rejected, so use `limit` for a smaller page.",
+          ),
       },
       outputSchema: discoverOutputSchema.shape,
       annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
@@ -226,12 +242,14 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
         "openai/toolInvocation/invoked": "Results ready",
       },
     },
-    async ({ query }: { query: string }) => {
+    async ({ query, limit, offset }: { query: string; limit?: number; offset?: number }) => {
       // Route through callHunterApi for typed errorSchema envelope on isError,
       // mutationAck on empty bodies, and `stripInjectedFields` defense-in-depth
-      // (HUN-19943 todos/011). Query goes in the path because POST /discover
-      // takes it as a URL parameter, not a form body.
-      const search = new URLSearchParams({ query }).toString()
+      // (HUN-19943 todos/011). Query and paging go in the path because POST /discover
+      // takes them as URL parameters, not a form body.
+      const search = new URLSearchParams({ query })
+      if (limit !== undefined) search.set("limit", String(limit))
+      if (offset !== undefined) search.set("offset", String(offset))
       const result = await callHunterApi({ path: `/discover?${search}`, apiKey, baseUrl, method: "POST" })
       // Widget contract: discover-widget.tsx renders the result list + a
       // "See all on Hunter" link via meta.permalink. The widget is the sole

@@ -3849,6 +3849,27 @@ describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rail
     const result = await registeredTools.get("Find-Companies")!.handler({ query: "unindexed companies" })
     expect(validate("Find-Companies", result.structuredContent).error).toBeUndefined()
   })
+
+  // HUN-24165: the description promises `limit`/`offset` paging, so the input
+  // schema must declare them and the handler must forward them to POST /discover.
+  it("Find-Companies forwards limit and offset as URL parameters", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson({ data: [], meta: { results: 0, limit: 50, offset: 100 } }))
+    vi.stubGlobal("fetch", mockFetch)
+    const tool = registeredTools.get("Find-Companies")!
+    expect(tool.description).toContain("`limit` and `offset`")
+    expect(tool.inputSchema).toHaveProperty("limit")
+    expect(tool.inputSchema).toHaveProperty("offset")
+    // Api::Discover::Validations::MAX_OFFSET rejects anything above 10,000.
+    const input = z.object(tool.inputSchema as Record<string, z.ZodTypeAny>)
+    expect(input.safeParse({ query: "tech companies", offset: 10_000 }).success).toBe(true)
+    expect(input.safeParse({ query: "tech companies", offset: 10_001 }).success).toBe(false)
+
+    await tool.handler({ query: "tech companies", limit: 50, offset: 100 })
+
+    const [url, opts] = mockFetch.mock.calls[0] as [string, { method: string }]
+    expect(url).toBe("https://api.hunter.io/v2/discover?query=tech+companies&limit=50&offset=100")
+    expect(opts.method).toBe("POST")
+  })
 })
 
 // ─── HUN-20460: error / ack envelopes must conform to the published schema ───
