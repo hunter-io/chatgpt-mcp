@@ -104,7 +104,10 @@ const sequenceSchema = z
 // `sending_status_comment` is only ever a cancellation reason -- send-error text is
 // never published. Both fields carry .describe(), so the model sees this too.
 const recipientSchema = z.object({
-  email: z.string(),
+  // Null for a claimed address (HUN-23599, HUN-24167).
+  email: nullableString().describe(
+    "Null when the recipient asked Hunter to delete their address. Do not try to find or guess the address.",
+  ),
   first_name: nullableString().optional(),
   last_name: nullableString().optional(),
   position: nullableString().optional(),
@@ -120,7 +123,7 @@ const recipientSchema = z.object({
     .union([z.number().int().positive(), z.null()])
     .optional()
     .describe(
-      "Hunter lead this recipient is linked to. Null is normal, not corruption, and a non-null id can point at a deleted lead. Identify the recipient by email, which is unique within the sequence, and treat a lead you cannot fetch as gone.",
+      "Hunter lead this recipient is linked to. Null is normal, not corruption, and a non-null id can point at a deleted lead. Identify the recipient by email, which is unique within the sequence when it is not null, and treat a lead you cannot fetch as gone.",
     ),
 })
 

@@ -3808,6 +3808,27 @@ describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rail
     expect(validate("Add-Sequence-Recipients", result.structuredContent).error).toBeUndefined()
   })
 
+  // HUN-24167: `recipients/index.jbuilder` emits null for a claimed address (HUN-23599).
+  it("List-Sequence-Recipients accepts a recipient with a claimed (null) email", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        okJson({
+          data: {
+            recipients: [
+              { email: null, first_name: "Ada", sending_status: "sent", lead_id: null },
+              { email: "grace@acme.com", first_name: "Grace", sending_status: "pending", lead_id: 2 },
+            ],
+          },
+          meta: { limit: 20, offset: 0 },
+        }),
+      ),
+    )
+    const result = await registeredTools.get("List-Sequence-Recipients")!.handler({ sequence_id: 1 })
+    expect(result.structuredContent.data.recipients[0].email).toBeNull()
+    expect(validate("List-Sequence-Recipients", result.structuredContent).error).toBeUndefined()
+  })
+
   // HUN-24160: an unindexed domain has null email counts.
   it("Find-Companies accepts a company with null email counts", async () => {
     vi.stubGlobal(
