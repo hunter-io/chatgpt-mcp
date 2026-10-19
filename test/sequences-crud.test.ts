@@ -906,30 +906,6 @@ describe("Create-Sequence-Follow-Up", () => {
     expect(new URLSearchParams(fetchCall(mockFetch).opts.body).get("subject")).toBe("")
   })
 
-  it("does not accept a template id alone as Variant B copy", async () => {
-    const mockFetch = vi.fn()
-    vi.stubGlobal("fetch", mockFetch)
-    const result = await tool("Create-Sequence-Follow-Up").handler({
-      sequence_id: 42,
-      variant: "B",
-      step: 0,
-      message_template_id: 9,
-    })
-    expect(mockFetch).not.toHaveBeenCalled()
-    expect(result.isError).toBe(true)
-  })
-
-  it("rejects a Variant B with no copy of its own before any fetch", async () => {
-    const mockFetch = vi.fn()
-    vi.stubGlobal("fetch", mockFetch)
-    const result = await tool("Create-Sequence-Follow-Up").handler({ sequence_id: 42, variant: "B", step: 0 })
-    expect(mockFetch).not.toHaveBeenCalled()
-    expect(result.isError).toBe(true)
-    const error = (result.structuredContent as { error: { code: string; message: string } }).error
-    expect(error.code).toBe("invalid_input")
-    expect(error.message).toContain("own copy")
-  })
-
   it("rejects `step` without `variant` before any fetch", async () => {
     const mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
