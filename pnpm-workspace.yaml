@@ -4,6 +4,13 @@ allowBuilds:
 overrides:
   lodash: ">=4.18.0"
   sharp: ">=0.35.0"
+  # Security floors (Dependabot alerts). katex 0.18 is outside rehype-katex's
+  # ^0.16 range, but only the unused apps-sdk-ui Markdown component loads it.
+  "@babel/core@>=7.0.0 <7.29.6": "^7.29.6"
+  "katex@>=0.11.0 <0.18.2": "0.18.10" # 0.18.11 is deprecated
+  "qs@>=6.0.0 <6.16.0": "^6.16.0"
+  "tinypool@<2.1.2": "^2.1.2"
+  "undici@>=7.0.0 <7.29.1": "^7.29.1"
 
 # Keeps pnpm-lock.yaml a single YAML document: GitHub's dependency graph reads
 # only the first one, so the env document pnpm writes for the packageManager pin
