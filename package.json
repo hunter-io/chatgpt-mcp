@@ -21,7 +21,7 @@
 		"build:widgets:discover": "WIDGET_ENTRY=discover-widget vite build"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.30.0",
+		"@modelcontextprotocol/sdk": "^1.32.1",
 		"@openai/apps-sdk-ui": "^0.2.2",
 		"@sentry/cloudflare": "^10.71.0",
 		"fs-extra": "^11.4.0",

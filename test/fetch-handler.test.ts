@@ -72,7 +72,7 @@ describe("fetch handler /mcp method handling", () => {
   it("still routes POST /mcp to the stateless transport", async () => {
     const res = await worker.fetch(mcpRequest("POST", { origin: "https://chatgpt.com" }), env, ctx)
 
-    expect(mockTransportCtor).toHaveBeenCalledWith({ sessionIdGenerator: undefined })
+    expect(mockTransportCtor).toHaveBeenCalledWith({ sessionIdGenerator: undefined, maxRequestBodySize: 512 * 1024 })
     expect(mockHandleRequest).toHaveBeenCalled()
     expect(await res.text()).toBe("mcp ok")
   })

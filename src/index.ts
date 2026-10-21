@@ -146,6 +146,22 @@ function withoutEmailAddresses(result: McpTextResult): McpTextResult {
   return { ...result, structuredContent: { ...sc, data: { ...data, site } } }
 }
 
+// The largest legitimate tool call (a 100-id bulk operation or CRM push, a
+// 50-recipient sequence add) carries a few hundred elements. Without a ceiling,
+// one request within the transport's 4 MiB body limit can pack millions of
+// elements and exhaust memory in the SDK's input validation
+// (GHSA-46jr-4wx8-v453). /mcp lets keyless requests through, so the cap must
+// hold before any authentication.
+export const MAX_TOOL_INPUT_ELEMENTS = 10_000
+
+// The element cap is per call, and a JSON-RPC batch carries up to 100 calls, so
+// the body size bounds the total a request can make the Worker validate. The
+// largest legitimate body is a message template update: a 50,000-character
+// body, under 200 KB even if every character takes 3 bytes in UTF-8. 512 KiB
+// leaves room for that and holds a request to about 260,000 elements, against
+// roughly 2 million at the SDK's 4 MiB default.
+export const MAX_REQUEST_BODY_BYTES = 512 * 1024
+
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer(
     {
@@ -158,6 +174,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       version: "4.0.0",
     },
     {
+      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
       instructions: `This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. When the user asks for a person's email address that is not saved in Hunter, do not give or invent an address. Say that it is not available in ChatGPT, and give this link: ${hunterLink("/", "instructions")}.`,
     },
   )
@@ -588,7 +605,10 @@ const handler = {
       // what dispatches the tool call. See client-context.ts.
       return await withClientUserAgent(request.headers.get("user-agent"), async () => {
         const server = createServer(apiKey || "", baseUrl)
-        const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+        })
         // The SDK publishes every tool schema with a draft-07 `$schema` that no
         // Hunter code asks for — see schema-dialect.ts for why it is removed here
         // rather than rewritten (HUN-22545). No `version` bump goes with this: the
