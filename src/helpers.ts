@@ -134,6 +134,7 @@ export const TOOL_NAMES = {
   unfavoriteCompanyList: "Unfavorite-Company-List",
   addCompanyToList: "Add-Company-To-List",
   removeCompanyFromList: "Remove-Company-From-List",
+  findSimilarCompanies: "Find-Similar-Companies",
   // company list folders
   listCompanyListFolders: "List-Company-List-Folders",
   createCompanyListFolder: "Create-Company-List-Folder",

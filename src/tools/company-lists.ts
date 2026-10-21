@@ -1,15 +1,26 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
+  buildNextAction,
   callHunterApi,
+  desc,
+  embedNextAction,
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
+  READ_ONLY_PUBLIC_ANNOTATIONS,
   TEAM_SHARED_DESTRUCTIVE_ANNOTATIONS,
   TEAM_SHARED_WRITE_ANNOTATIONS,
   TOOL_NAMES,
 } from "../helpers"
-import { buildResponseSchema, mutationAckSchema, nullableNumber, paginationMetaSchema } from "../schemas/common"
+import {
+  buildResponseSchema,
+  jsonArgs,
+  mutationAckSchema,
+  nullableNumber,
+  nullableString,
+  paginationMetaSchema,
+} from "../schemas/common"
 
 // Company-list leaf shape from app/app/views/api/company_lists/_company_list.jbuilder:
 //   id, name, type ("static" | "dynamic"), filters (only when dynamic),
@@ -140,6 +151,35 @@ const companyMembershipOutputSchema = buildResponseSchema(companyMembershipSchem
 // Update + Delete render no body (204 No Content). callHunterApi synthesises a
 // mutationAckSchema-shaped payload, so the outputSchema MUST be mutationAckSchema.
 
+// ─── Find-Similar-Companies (HUN-24491) ─────────────────────────────────────
+//
+// Wraps GET /v2/lookalikes. Leaf shape from
+// app/app/views/api/lookalikes/index.json.jbuilder. Output `size` stays a string:
+// the enum guard belongs on the input, not the response leaf.
+const LOOKALIKE_SIZES = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"] as const
+
+// Velen treats any non-empty country as a ranking preference, so a near-miss
+// such as "UK" (for GB) would silently skew results instead of failing.
+// ISO 3166-1 alpha-2 officially assigned codes.
+const ISO_COUNTRY_CODES = new Set(
+  "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW".split(
+    " ",
+  ),
+)
+
+const lookalikeSchema = z.object({
+  domain: z.string(),
+  company_name: nullableString(),
+  country: nullableString(),
+  industry: nullableString(),
+  size: nullableString(),
+  similarity_score: z.number(),
+})
+const findSimilarCompaniesOutputSchema = buildResponseSchema(
+  z.array(lookalikeSchema),
+  paginationMetaSchema.extend({ params: jsonArgs.optional() }),
+)
+
 // `filters` is a free-form, sanitized key/value bag (the controller deep-stringifies
 // and sanitizes it). Accept it faithfully as an open record without inventing a
 // filter DSL — only dynamic lists use it.
@@ -167,6 +207,90 @@ function toFormParams(value: Record<string, unknown>): Record<string, FormValue>
 }
 
 export function registerCompanyListTools(server: McpServer, apiKey: string, baseUrl: string) {
+  server.registerTool(
+    TOOL_NAMES.findSimilarCompanies,
+    {
+      description: desc`Use this when the user wants companies similar to a company list or to one company, ranked by \`similarity_score\` (0-100, higher is closer). Seed with exactly one of \`company_list_id\` (a static company list; ${TOOL_NAMES.listCompanyLists} shows each list's \`type\`) or \`domain\` (one company). \`industry\` and \`size\` are hard filters. \`industry\` must match a LinkedIn industry name exactly (case-insensitive), so reuse the \`industry\` values from earlier results. \`country\` is a ranking preference, not a filter: same-country companies rank higher, but other countries and companies with no known country can still appear, so check each result's \`country\` before telling the user that all results are in one country. There is no paging. An empty \`data\` array means the domain is not in Hunter's index, the list has no companies, nothing similar was found, or the \`industry\`/\`size\` filters removed every result; say which is likely instead of telling the user that nothing similar exists. A dynamic list returns an invalid_input error (field unsupported_list_type): suggest a static company list or a \`domain\` seed instead. This feature is not available on free plans. An unauthorized error whose message says Lookalikes is not enabled on the plan means it is not available on the user's current Hunter plan: tell the user that and do not ask the user to reconnect. Any other unauthorized error means the Hunter account is not connected. To save results, call ${TOOL_NAMES.saveCompany} for each company the user picks to get its company id. For one or two companies, then call ${TOOL_NAMES.addCompanyToList}; for more, add all the ids in one ${TOOL_NAMES.bulkCopyCompanies} call. If a company is already in the target list, skip it and continue. Free to call.`,
+
+      inputSchema: {
+        company_list_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("ID of a static company list to seed from. Provide this or `domain`, not both."),
+        // Rails strips URLs down to the hostname and validates it (IDNs included),
+        // so this only bounds the raw string.
+        domain: z
+          .string()
+          .trim()
+          .min(1)
+          .max(2048)
+          .optional()
+          .describe(
+            "Domain or website URL of one company to seed from, e.g. stripe.com. Provide this or `company_list_id`, not both.",
+          ),
+        country: z
+          .string()
+          .refine((value) => ISO_COUNTRY_CODES.has(value.toUpperCase()), {
+            message: "must be an ISO 3166-1 alpha-2 country code (GB, not UK)",
+          })
+          .optional()
+          .describe("ISO 3166 alpha-2 country code, e.g. FR. Ranks same-country companies higher; it does not filter."),
+        industry: z
+          .array(z.string().min(1).max(200))
+          .min(1)
+          .max(20)
+          .optional()
+          .describe("Keep only these industries (exact LinkedIn industry names, case-insensitive)"),
+        size: z
+          .array(z.enum(LOOKALIKE_SIZES))
+          .min(1)
+          .max(LOOKALIKE_SIZES.length)
+          .optional()
+          .describe("Keep only these employee-count buckets"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Maximum number of companies to return (default 20, max 100)"),
+      },
+      outputSchema: findSimilarCompaniesOutputSchema.shape,
+      annotations: READ_ONLY_PUBLIC_ANNOTATIONS,
+    },
+    async ({ company_list_id, domain, country, industry, size, limit }) => {
+      if ((company_list_id === undefined) === (domain === undefined)) {
+        const message = "Provide exactly one of `company_list_id` or `domain` to seed the search."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, message } },
+          isError: true,
+        }
+      }
+      // Rails reads array filters only from bracket keys, and GET params cannot
+      // carry arrays, so the query string is built here.
+      const search = new URLSearchParams()
+      if (company_list_id !== undefined) search.set("company_list_id", String(company_list_id))
+      if (domain !== undefined) search.set("domain", domain)
+      if (country !== undefined) search.set("country", country.toUpperCase())
+      for (const value of industry ?? []) search.append("industry[]", value)
+      for (const value of new Set(size)) search.append("size[]", value)
+      if (limit !== undefined) search.set("limit", String(limit))
+      const result = await callHunterApi({ path: `/lookalikes?${search}`, apiKey, baseUrl })
+      const data = (result.structuredContent as { data?: unknown } | undefined)?.data
+      if (!Array.isArray(data) || data.length === 0) return result
+      return embedNextAction(
+        result,
+        buildNextAction({
+          kind: "ask_user",
+          question: "I found similar companies. Should I save any of them to a company list?",
+        }),
+      )
+    },
+  )
+
   server.registerTool(
     TOOL_NAMES.listCompanyLists,
     {

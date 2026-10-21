@@ -2,9 +2,9 @@
 
 > Linear: [HUN-19560](https://linear.app/hunter-io/issue/HUN-19560/testing-playbook-for-chatgpt-app), [HUN-23709](https://linear.app/hunter-io/issue/HUN-23709)
 
-Manual test playbook for the Hunter ChatGPT app — **version 4.0.0 resubmission, 93 tools**. Run it before every app review submission. It checks the demo video flow, the marketplace test cases, and all 93 tools.
+Manual test playbook for the Hunter ChatGPT app — **version 4.0.0 resubmission, 94 tools**. Run it before every app review submission. It checks the demo video flow, the marketplace test cases, and all 94 tools.
 
-**Why 4.0.0 has 93 tools, not 101 (HUN-23709).** OpenAI rejected version 2.0.0 because of person-email features. Version 4.0.0 removes 8 tools. Five return people or person emails: `Domain-Search`, `Email-Finder`, `Person-Enrichment`, `Combined-Enrichment`, and `Plan-Prospecting-Flow`. Three manage API keys and refuse OAuth tokens: `List-API-Keys`, `Create-API-Key`, and `Delete-API-Key`. The `prospect` prompt is removed too. The app cannot show people or email addresses. `Email-Verifier` stays, because it only checks an address that the user gives. `Email-Count` and `Count-Company-Emails` stay, because they return counts only. Each gives a hunter.io link where the user sees the addresses.
+**Why 4.0.0 has 94 tools, not 102 (HUN-23709).** OpenAI rejected version 2.0.0 because of person-email features. Version 4.0.0 removes 8 tools. Five return people or person emails: `Domain-Search`, `Email-Finder`, `Person-Enrichment`, `Combined-Enrichment`, and `Plan-Prospecting-Flow`. Three manage API keys and refuse OAuth tokens: `List-API-Keys`, `Create-API-Key`, and `Delete-API-Key`. The `prospect` prompt is removed too. The app cannot show people or email addresses. `Email-Verifier` stays, because it only checks an address that the user gives. `Email-Count` and `Count-Company-Emails` stay, because they return counts only. Each gives a hunter.io link where the user sees the addresses.
 
 Rows marked "(V3)" cover tools added in the 3.0.0 submission (HUN-20838…HUN-20866, HUN-23065).
 
@@ -120,7 +120,7 @@ Give me an overview of stripe.com
 
 ### 3. Build a company list from Discover
 
-**Goal:** Exercise a multi-step flow with the 93 tools. It shows discovery, saving, and list organization in one conversation.
+**Goal:** Exercise a multi-step flow with the 94 tools. It shows discovery, saving, and list organization in one conversation.
 
 **Prompt:**
 
@@ -330,6 +330,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | ME2 | `Unfavorite-Company-List` (write) | `Remove company list <LIST_ID> from my favorites` | List unfavorited | ☐ | |
 | ME3 | `Add-Company-To-List` (write) | `Add company <COMPANY_ID> to company list <LIST_ID>` | Company added to the static list (returns id, domain). Dynamic list → not_found | ☐ | |
 | ME4 | `Remove-Company-From-List` (write) | `Remove company <COMPANY_ID> from company list <LIST_ID>` | Membership removed (reversible by re-adding) | ☐ | |
+| ME5 | `Find-Similar-Companies` | `Find companies similar to the ones in company list <LIST_ID>` | Companies ranked by similarity_score. Dynamic list → invalid_input (unsupported_list_type). Free plan → "not available on your plan", no reconnect prompt | ☐ | |
 
 ### Connected apps (HUN-20196)
 
@@ -797,8 +798,8 @@ describe known limits, so a reviewer does not find them on a test run.
 ### A. 4.0.0 scope: no people or email addresses
 
 Version 2.0.0 was rejected because of person-email features. Version 4.0.0
-removes every tool that returns a person or an email address. The app has 93
-tools, down from 101.
+removes every tool that returns a person or an email address. The app has 94
+tools, down from 102.
 
 - No tool lists a company's contacts or finds a named person's email
   address. When a user asks for one, the app says that person email
@@ -845,7 +846,7 @@ Annotations follow one posture:
 
 - **Reads** are `readOnlyHint: true` + `openWorldHint: false` — private
   reads of the user's own Hunter data.
-- **Public-index reads** (`Find-Companies`, `Email-Count`, `Count-Company-Emails`)
+- **Public-index reads** (`Find-Companies`, `Find-Similar-Companies`, `Email-Count`, `Count-Company-Emails`)
   are `readOnlyHint: true` + `openWorldHint: true`. They read the Hunter
   index of public web data.
 - **Creates** are private, non-destructive writes (`destructiveHint:
@@ -1136,11 +1137,11 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
 
 ## Appendix — Tool inventory
 
-The 93 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). If a tool is added, extend the matrix in Section 2 before the next test run. Only `Email-Verifier` and `Company-Enrichment` use credits; all other tools are free.
+The 94 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). If a tool is added, extend the matrix in Section 2 before the next test run. Only `Email-Verifier` and `Company-Enrichment` use credits; all other tools are free.
 
 | Group | Tools |
 |-------|-------|
-| Company search & email verification | `Find-Companies`, `Email-Verifier` (checks an address the user gives), `Email-Count` (counts only, with a hunter.io link) |
+| Company search & email verification | `Find-Companies`, `Find-Similar-Companies` (companies similar to a static list or a domain), `Email-Verifier` (checks an address the user gives), `Email-Count` (counts only, with a hunter.io link) |
 | Enrichment | `Company-Enrichment` |
 | Account | `Get-Account-Details` |
 | Usage (V3) | `Get-Usage` |

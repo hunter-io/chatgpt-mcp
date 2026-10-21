@@ -1,7 +1,7 @@
 # OpenAI Apps SDK Dashboard — Hunter ChatGPT MCP
 
 This file is a **pointer**, not the dashboard source-of-truth. The current
-surface is **version 4.0.0 with 93 tools** (HUN-23709). OpenAI rejected 2.0.0
+surface is **version 4.0.0 with 94 tools** (HUN-23709). OpenAI rejected 2.0.0
 because of the person-email features, so 4.0.0 removes 8 tools:
 
 - Person email: `Domain-Search`, `Email-Finder`, `Person-Enrichment`,
@@ -37,7 +37,7 @@ justifications from this file.
 ## Pre-submission checklist (run before every resubmission)
 
 > **4.0.0 — posture summary.** A tool is `openWorldHint: true` only if it reads
-> the Hunter index of open-internet data (`Find-Companies`, `Email-Count`,
+> the Hunter index of open-internet data (`Find-Companies`, `Find-Similar-Companies`, `Email-Count`,
 > `Count-Company-Emails`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
 > effect outside the account of the user. These tools have that effect: `Start-Sequence` (sends),
 > `Resume-Sequence` and `Add-Sequence-Recipients` (can schedule real email),
@@ -54,12 +54,12 @@ justifications from this file.
 - [ ] Make sure that `McpServer.version` in `chatgpt-mcp/src/index.ts` is `4.0.0`.
 - [ ] Deploy: `pnpm --filter chatgpt-mcp run deploy`.
 - [ ] Send `initialize` to `https://chatgpt.hunter.io/mcp`. Make sure that `serverInfo.version` is `4.0.0`.
-- [ ] Send `tools/list`. Make sure that it returns 93 tools and none of the 8 removed tools.
+- [ ] Send `tools/list`. Make sure that it returns 94 tools and none of the 8 removed tools.
 - [ ] In the OpenAI Developer dashboard, withdraw version 2.0.0 from review.
 - [ ] **Create a new app version.** Do not edit an existing version, because an edit does not refresh `tools/list`. Then click **Scan Tools**.
-- [ ] Make sure that the dashboard shows **93 tools**. Make sure that the `Read Only`, `Open World`, and `Destructive` flags agree with the posture summary. If a flag is different, correct the code and deploy again before you paste justifications.
+- [ ] Make sure that the dashboard shows **94 tools**. Make sure that the `Read Only`, `Open World`, and `Destructive` flags agree with the posture summary. If a flag is different, correct the code and deploy again before you paste justifications.
 - [ ] Make sure that these tools show their title: `Verify Email`, `Enrich Company`, and `Count Emails at Companies` (`Count-Company-Emails`).
-- [ ] For **each** tool, paste the description (no edits) and the three justification lines from `tool-justifications.md`. Or run `justifications-autofill.console.js` in the dashboard console to fill all 93×3 fields. Each justification is 200 characters or fewer.
+- [ ] For **each** tool, paste the description (no edits) and the three justification lines from `tool-justifications.md`. Or run `justifications-autofill.console.js` in the dashboard console to fill all 94×3 fields. Each justification is 200 characters or fewer.
 - [ ] Make sure that no "Recommended: Add an `outputSchema`" warning shows.
 - [ ] Make sure that each tool in the deployed `tools/list` has `readOnlyHint`, `destructiveHint`, and `openWorldHint` as explicit booleans (never `null` or missing). See the `curl + jq` check in the 2026-05-28 v3 plan, Phase 5.2.
 - [ ] CSP and widgets: make sure that `_meta.ui.csp.connectDomains` includes `https://api.hunter.io` and `frameDomains` is `[]`. Make sure that both widgets show without CSP errors after Scan Tools.
