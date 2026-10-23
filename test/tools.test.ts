@@ -2732,11 +2732,12 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
 // HUN-18528 / Group 10: Company-list membership. Mounted at the hyphenated
 // member path /v2/company-lists/:company_list_id/companies (controller is
 // company_lists/companies). Add (POST) renders the added company via
-// create.jbuilder → 201 `{ data: { id, domain, created_at } }`; Remove (DELETE
-// /companies/:company_id) responds `head :no_content` (204 empty body → ack).
-// Both operate on static lists only (dynamic lists 404). Add can surface a 400
-// (missing company_id), 404 (list/company not found, other team, dynamic), or
-// 422 validation_failed (company already in the list). Remove surfaces 404
+// create.jbuilder → 201 `{ data: { id, domain, created_at, already_in_list: false } }`,
+// or 200 with `already_in_list: true` when the company is already in the list
+// (HUN-24597); Remove (DELETE /companies/:company_id) responds `head :no_content`
+// (204 empty body → ack). Both operate on static lists only (dynamic lists 404).
+// Add can surface a 400 (missing company_id) or 404 (list/company not found,
+// other team, dynamic). Remove surfaces 404
 // (list/company not found, other team, dynamic, or company not in the list).
 describe("Company-List Membership (Group 10)", () => {
   beforeEach(async () => {
@@ -2749,7 +2750,11 @@ describe("Company-List Membership (Group 10)", () => {
       ok: true,
       status: 201,
       text: () =>
-        Promise.resolve(JSON.stringify({ data: { id: 42, domain: "example.com", created_at: "2026-06-02" } })),
+        Promise.resolve(
+          JSON.stringify({
+            data: { id: 42, domain: "example.com", created_at: "2026-06-02", already_in_list: false },
+          }),
+        ),
     })
     vi.stubGlobal("fetch", mockFetch)
 
@@ -2767,9 +2772,12 @@ describe("Company-List Membership (Group 10)", () => {
     })
     expect(opts.body).toBe("company_id=42")
     expect(result.isError).toBeUndefined()
-    const structured = result.structuredContent as { data: { id: number; domain: string; created_at: string } }
+    const structured = result.structuredContent as {
+      data: { id: number; domain: string; created_at: string; already_in_list: boolean }
+    }
     expect(structured.data.id).toBe(42)
     expect(structured.data.domain).toBe("example.com")
+    expect(structured.data.already_in_list).toBe(false)
   })
 
   it("Add-Company-To-List surfaces a 400 wrong_params (missing company_id) as the typed validation envelope", async () => {
@@ -2799,30 +2807,30 @@ describe("Company-List Membership (Group 10)", () => {
     expect(err.message).toBe("You are missing the company_id parameter")
   })
 
-  it("Add-Company-To-List surfaces a 422 validation_failed (already in list) as the typed invalid_input envelope", async () => {
+  it("Add-Company-To-List returns a company already in the list as a success with already_in_list: true", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
-        ok: false,
-        status: 422,
-        headers: { get: () => null },
+        ok: true,
+        status: 200,
         text: () =>
           Promise.resolve(
             JSON.stringify({
-              errors: [{ id: "validation_failed", code: 422, details: "Company has already been taken." }],
+              data: { id: 42, domain: "example.com", created_at: "2026-06-02", already_in_list: true },
             }),
           ),
       }),
     )
 
-    const handler = registeredTools.get("Add-Company-To-List")!.handler
-    const result = await handler({ company_list_id: 7, company_id: 42 })
+    const tool = registeredTools.get("Add-Company-To-List")!
+    const result = await tool.handler({ company_list_id: 7, company_id: 42 })
 
-    expect(result.isError).toBe(true)
-    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
-    expect(err.code).toBe("invalid_input")
-    expect(err.field).toBe("validation_failed")
-    expect(err.message).toBe("Company has already been taken.")
+    expect(result.isError).toBeUndefined()
+    const parsed = z.object(tool.outputSchema as z.ZodRawShape).parse(result.structuredContent) as {
+      data: { id: number; already_in_list?: boolean }
+    }
+    expect(parsed.data.id).toBe(42)
+    expect(parsed.data.already_in_list).toBe(true)
   })
 
   it("Add-Company-To-List surfaces a 404 (dynamic list / not found) as the typed not_found error envelope", async () => {

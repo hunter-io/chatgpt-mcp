@@ -132,7 +132,8 @@ const favoriteToggleOutputSchema = buildResponseSchema(favoriteToggleSchema)
 //
 // companies_controller.rb#create renders the added company via
 // app/app/views/api/company_lists/companies/{create,_company}.jbuilder:
-//   `json.data { json.partial! "company" }` → { id, domain, created_at }.
+//   `json.data { json.partial! "company"; json.already_in_list }` →
+//   { id, domain, created_at, already_in_list }.
 // Leaf declares every key (not `.loose()`) so a renamed jbuilder field surfaces
 // in vitest as a missing-key parse error; the envelope stays loose via
 // buildResponseSchema. NOT `.strict()` (strips unknowns rather than rejecting an
@@ -141,6 +142,9 @@ const companyMembershipSchema = z.object({
   id: z.number().int().positive(),
   domain: z.string(),
   created_at: z.string(),
+  // true when the company was already in the list (200, nothing changed), false when added (201).
+  // Optional so a 201 body from a Rails build that predates the field still parses (HUN-24597).
+  already_in_list: z.boolean().optional(),
 })
 const companyMembershipOutputSchema = buildResponseSchema(companyMembershipSchema)
 
@@ -210,7 +214,7 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
   server.registerTool(
     TOOL_NAMES.findSimilarCompanies,
     {
-      description: desc`Use this when the user wants companies similar to a company list or to one company, ranked by \`similarity_score\` (0-100, higher is closer). Seed with exactly one of \`company_list_id\` (a static company list; ${TOOL_NAMES.listCompanyLists} shows each list's \`type\`) or \`domain\` (one company). \`industry\` and \`size\` are hard filters. \`industry\` must match a LinkedIn industry name exactly (case-insensitive), so reuse the \`industry\` values from earlier results. \`country\` is a ranking preference, not a filter: same-country companies rank higher, but other countries and companies with no known country can still appear, so check each result's \`country\` before telling the user that all results are in one country. There is no paging. An empty \`data\` array means the domain is not in Hunter's index, the list has no companies, nothing similar was found, or the \`industry\`/\`size\` filters removed every result; say which is likely instead of telling the user that nothing similar exists. A dynamic list returns an invalid_input error (field unsupported_list_type): suggest a static company list or a \`domain\` seed instead. This feature is not available on free plans. An unauthorized error whose message says Lookalikes is not enabled on the plan means it is not available on the user's current Hunter plan: tell the user that and do not ask the user to reconnect. Any other unauthorized error means the Hunter account is not connected. To save results, call ${TOOL_NAMES.saveCompany} for each company the user picks to get its company id. For one or two companies, then call ${TOOL_NAMES.addCompanyToList}; for more, add all the ids in one ${TOOL_NAMES.bulkCopyCompanies} call. If a company is already in the target list, skip it and continue. Free to call.`,
+      description: desc`Use this when the user wants companies similar to a company list or to one company, ranked by \`similarity_score\` (0-100, higher is closer). Seed with exactly one of \`company_list_id\` (a static company list; ${TOOL_NAMES.listCompanyLists} shows each list's \`type\`) or \`domain\` (one company). \`industry\` and \`size\` are hard filters. \`industry\` must match a LinkedIn industry name exactly (case-insensitive), so reuse the \`industry\` values from earlier results. \`country\` is a ranking preference, not a filter: same-country companies rank higher, but other countries and companies with no known country can still appear, so check each result's \`country\` before telling the user that all results are in one country. There is no paging. An empty \`data\` array means the domain is not in Hunter's index, the list has no companies, nothing similar was found, or the \`industry\`/\`size\` filters removed every result; say which is likely instead of telling the user that nothing similar exists. A dynamic list returns an invalid_input error (field unsupported_list_type): suggest a static company list or a \`domain\` seed instead. This feature is not available on free plans. An unauthorized error whose message says Lookalikes is not enabled on the plan means it is not available on the user's current Hunter plan: tell the user that and do not ask the user to reconnect. Any other unauthorized error means the Hunter account is not connected. To save results, call ${TOOL_NAMES.saveCompany} for each company the user picks to get its company id. For one or two companies, then call ${TOOL_NAMES.addCompanyToList}; for more, add all the ids in one ${TOOL_NAMES.bulkCopyCompanies} call. A company that is already in the target list counts as saved (${TOOL_NAMES.addCompanyToList} returns \`already_in_list: true\`); continue with the next one. Free to call.`,
 
       inputSchema: {
         company_list_id: z
@@ -583,21 +587,21 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
     TOOL_NAMES.addCompanyToList,
     {
       description:
-        "Use this when the user wants to save a company to a static company list. Identify the list by `company_list_id` and the company by `company_id` (a company already saved in the user's account). Both the list and the company must belong to the user's team, and the list must be static — dynamic lists collect companies automatically by their filters and cannot have companies added manually. Returns the added company (`id`, `domain`, `created_at`); surface the saved company's domain to confirm. Returns an invalid_input error (id validation_failed) if the company is already in the list, a not-found error if the list or company does not exist, belongs to another team, or the list is dynamic, or a forbidden error if the user is not allowed to modify this list. Free to call.",
+        "Use this when the user wants to save a company to a static company list. Identify the list by `company_list_id` and the company by `company_id` (a company already saved in the user's account). Both the list and the company must belong to the user's team, and the list must be static — dynamic lists collect companies automatically by their filters and cannot have companies added manually. Returns the company (`id`, `domain`, `created_at`, `already_in_list`); surface the saved company's domain to confirm. `already_in_list: false` means the company was added; `already_in_list: true` means it was already in the list and nothing changed, so tell the user it was already there, not that the save failed. An invalid_input error saying the company \"has already been taken\" means the same as `already_in_list: true`. Returns a not-found error if the list or company does not exist, belongs to another team, or the list is dynamic, or a forbidden error if the user is not allowed to modify this list. Free to call.",
       inputSchema: {
         company_list_id: z.number().int().positive().describe("ID of the static company list to add the company to"),
         company_id: z.number().int().positive().describe("ID of the company (already saved in the account) to add"),
       },
-      // create renders `{ data: { id, domain, created_at } }` (status 201), so
-      // the success path is a rendered body — buildResponseSchema, not mutationAck.
+      // create renders `{ data: { id, domain, created_at, already_in_list } }` (status 201,
+      // or 200 when the company was already in the list), so the success path is a
+      // rendered body — buildResponseSchema, not mutationAck.
       outputSchema: companyMembershipOutputSchema.shape,
       annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
     async ({ company_list_id, company_id }) => {
-      // On 400 (missing company_id), 404 (list/company not found, other team, or
-      // dynamic list), or 422 (validation_failed: company already in the list)
-      // callHunterApi returns the typed error envelope unchanged; we pass it
-      // through so the model gets `structuredContent.error`.
+      // On 400 (missing company_id) or 404 (list/company not found, other team, or
+      // dynamic list) callHunterApi returns the typed error envelope unchanged; we
+      // pass it through so the model gets `structuredContent.error`.
       return callHunterApi({
         path: `/company-lists/${company_list_id}/companies`,
         apiKey,
