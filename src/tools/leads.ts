@@ -281,7 +281,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.createLeadIfMissing,
     {
-      description: desc`Use this when the user wants to save a verified contact as a new lead without modifying any existing lead. If a lead with the email already exists, returns the existing record unchanged with \`alreadyExisted: true\` and reports "already exists; no changes made"; otherwise creates the lead with the supplied fields. Never overwrites, never moves to a list, never enriches existing records. Use ${TOOL_NAMES.upsertLead} instead when the user explicitly wants to overwrite an existing lead. Free (no credits).`,
+      description: desc`Use this when the user wants to save a verified contact as a new lead without modifying any existing lead. If a lead with the email already exists, returns it with \`alreadyExisted: true\` and never applies the supplied values to it; otherwise creates the lead with the supplied fields. An existing lead in no list (for example, one the team's automatic lead saving stored when ${TOOL_NAMES.emailVerifier} ran) is added to \`leads_list_id\` when you pass one, and Hunter can then refresh its fields from Hunter's own data, as for any lead saved in Hunter. A lead already in a list is never moved, added to another list, or changed. Use ${TOOL_NAMES.upsertLead} instead when the user explicitly wants to overwrite an existing lead. Free (no credits).`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the contact to save"),
@@ -291,20 +291,24 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
     },
     async ({ email, ...fields }) => {
       // Pre-flight: does the lead already exist?
-      // We use /leads/exist (free, no credit cost) BEFORE POST /leads because
+      // We use a free GET BEFORE POST /leads because
       // Hunter's create controller (app/controllers/api/leads/create_controller.rb)
       // reportedly enriches before validation, so a naive POST + catch-422 would
       // burn an enrichment credit on every duplicate. Two cheap GETs beat one
       // POST with hidden cost.
+      //
+      // /leads/bulk/exist, not /leads/exist: on a team with automatic lead saving,
+      // /leads/exist hides a lead that is in no list, and the Email Verifier
+      // auto-saves exactly such a lead right before this tool runs (HUN-24240).
       const existsResult = await callHunterApi({
-        path: "/leads/exist",
+        path: "/leads/bulk/exist",
         apiKey,
         baseUrl,
-        params: { email },
+        params: { "emails[]": email },
       })
       if (existsResult.isError) return existsResult
 
-      const existing = parseHunterApiData<{ id?: number | null }>(existsResult)
+      const existing = parseHunterApiData<Array<{ id?: number | null }>>(existsResult)?.[0]
       let leadResult: McpTextResult
 
       // Defense-in-depth: `parseHunterApiData` is a runtime-unchecked cast, so
@@ -313,13 +317,34 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       // before interpolating into a path, mirroring withDeepLinkFromId.
       const existingId = existing?.id
       if (typeof existingId === "number" && Number.isSafeInteger(existingId) && existingId > 0) {
-        // Already exists: fetch full record (free GET) and return unchanged.
+        // Already exists: fetch the full record (free GET), which also tells whether it is in a list.
         const getResult = await callHunterApi({ path: `/leads/${existingId}`, apiKey, baseUrl })
         if (getResult.isError) return getResult
-        leadResult = injectAlreadyExisted(
-          withDeepLink(getResult, `/leads/${existingId}`),
-          "Lead already exists; no changes made.",
-        )
+        const inNoList =
+          parseHunterApiData<{ leads_list?: { id?: number | null } | null }>(getResult)?.leads_list?.id == null
+        if (inNoList && fields.leads_list_id !== undefined) {
+          // POST /leads on an existing email adds the missing list membership and
+          // applies none of the posted fields (HUN-22831), so send only the list.
+          // It can still enrich the lead from Hunter's data (HUN-23085): the
+          // description says so.
+          const added = await callHunterApi({
+            path: "/leads",
+            apiKey,
+            baseUrl,
+            method: "POST",
+            params: buildLeadParams({ email, leads_list_id: fields.leads_list_id }),
+          })
+          if (added.isError) return added
+          leadResult = injectAlreadyExisted(
+            withDeepLink(added, `/leads/${existingId}`),
+            `Lead already existed in no list; added it to list ${fields.leads_list_id}. The supplied values were not applied.`,
+          )
+        } else {
+          leadResult = injectAlreadyExisted(
+            withDeepLink(getResult, `/leads/${existingId}`),
+            "Lead already exists; no changes made.",
+          )
+        }
       } else {
         // Doesn't exist: POST to create.
         const created = await callHunterApi({

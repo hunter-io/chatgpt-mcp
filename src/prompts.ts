@@ -26,7 +26,7 @@ export function registerPrompts(server: McpServer) {
 
 1. Use only the email addresses I provided. This app cannot find people or email addresses. If I gave none, ask me for them before you create anything, and tell me that ${hunterLink("/", "build-list")} can find contacts.
 2. Create a new leads list with a descriptive name using Create-Leads-List (free), and note its id.
-3. If I asked for verified contacts only, call Email-Verifier on each address with save_leads true and the new list's id as leads_list_id. A valid result chains to Create-Lead-If-Missing. Otherwise, save each address directly with Create-Lead-If-Missing and leads_list_id set to the new list. Create-Lead-If-Missing never overwrites an existing lead: if a lead already exists, it returns it unchanged and reports "already exists; no changes made", and the lead stays in its current list.
+3. If I asked for verified contacts only, call Email-Verifier on each address with save_leads true and the new list's id as leads_list_id. A valid result chains to Create-Lead-If-Missing. Otherwise, save each address directly with Create-Lead-If-Missing and leads_list_id set to the new list. Create-Lead-If-Missing never applies your values to an existing lead: a lead in no list is added to the new list, and a lead already in a list stays where it is.
 4. Present a summary with the count and the deep-link to view the list in Hunter.
 
 Leads operations are free. Email-Verifier uses Hunter credits, charged only for valid, invalid, or accept-all results.

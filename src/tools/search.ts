@@ -61,14 +61,14 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
     TOOL_NAMES.emailVerifier,
     {
       description:
-        "Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification (0.5 credit on plans with a shared credit pool), charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all.",
+        "Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification (0.5 credit on plans with a shared credit pool), charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all. If the team has automatic lead saving, Hunter itself stores a valid or accept_all address as a lead in no list, whatever save_leads is, and an existing lead with this address takes the new verification status.",
       inputSchema: {
         email: z.string().email().max(254).describe("Email address to verify"),
         save_leads: z
           .boolean()
           .optional()
           .describe(
-            desc`Set true only when the user asked to save this address as a lead. A valid result then chains to ${TOOL_NAMES.createLeadIfMissing}. Leave unset to only report the status.`,
+            desc`Set true only when the user asked to save this address as a lead. A valid result then chains to ${TOOL_NAMES.createLeadIfMissing}. Leave unset to only verify: the team's automatic lead saving still applies (see the tool description).`,
           ),
         leads_list_id: z
           .number()

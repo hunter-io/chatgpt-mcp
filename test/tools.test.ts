@@ -784,13 +784,13 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
   })
 
   it("(a) creates a new lead when email doesn't exist", async () => {
-    // First call: /leads/exist → not found (id: null)
+    // First call: /leads/bulk/exist → not found (id: null)
     // Second call: POST /leads → created
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "new@example.com", id: null }] })),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -804,7 +804,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
 
     expect(result.isError).toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls[0]?.[0]).toContain("/leads/exist")
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/leads/bulk/exist")
     expect(fetchMock.mock.calls[1]?.[0]).toContain("/leads")
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST")
     const data = (result.structuredContent as { data: { id: number; alreadyExisted?: boolean } }).data
@@ -813,15 +813,14 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
   })
 
   it("(b) returns existing lead unchanged when email already exists", async () => {
-    // First call: /leads/exist → found (id: 99)
+    // First call: /leads/bulk/exist → found (id: 99)
     // Second call: GET /leads/99 → returns existing record
     // No POST should occur.
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        text: () =>
-          Promise.resolve(JSON.stringify({ data: { id: 99, leads_list_id: 7, leads_list_name: "Existing list" } })),
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "dup@example.com", id: 99 }] })),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -850,7 +849,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        text: () => Promise.resolve(JSON.stringify({ data: { id: 99, leads_list_id: null, leads_list_name: null } })),
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "dup@example.com", id: 99 }] })),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -888,8 +887,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        text: () =>
-          Promise.resolve(JSON.stringify({ data: { id: 50, leads_list_id: 7, leads_list_name: "Original" } })),
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "dup@example.com", id: 50 }] })),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -919,7 +917,7 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        text: () => Promise.resolve(JSON.stringify({ data: { id: null, leads_list_id: null, leads_list_name: null } })),
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "new@example.com", id: null }] })),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -932,6 +930,75 @@ describe("HUN-20170: Create-Lead-If-Missing", () => {
     const next = (result.structuredContent as { nextAction: { kind: string; summary: string } }).nextAction
     expect(next.kind).toBe("complete")
     expect(next.summary).toContain("Lead saved")
+  })
+
+  // HUN-24240: the Email Verifier auto-saves a lead in no list on a team with
+  // automatic lead saving, and /leads/exist hides such a lead.
+  it("(e) adds an existing lead in no list to leads_list_id and reports alreadyExisted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "auto@example.com", id: 60 }] })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { id: 60, email: "auto@example.com", first_name: "Auto", leads_list: { id: null, name: null } },
+            }),
+          ),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              data: { id: 60, email: "auto@example.com", first_name: "Auto", leads_list: { id: 99, name: "New" } },
+            }),
+          ),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({ email: "auto@example.com", first_name: "Other", leads_list_id: 99 })
+
+    expect(result.isError).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/leads/bulk/exist?emails%5B%5D=auto%40example.com")
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST")
+    // Only the email and the list: no field of the existing lead is sent.
+    const body = new URLSearchParams(fetchMock.mock.calls[2]?.[1]?.body as string)
+    expect(Object.fromEntries(body)).toEqual({ email: "auto@example.com", leads_list_id: "99" })
+    const data = (result.structuredContent as { data: { id: number; alreadyExisted: boolean } }).data
+    expect(data.id).toBe(60)
+    expect(data.alreadyExisted).toBe(true)
+    expect(result.content[0]?.text).toContain("added it to list 99")
+  })
+
+  it("(f) returns an existing lead in no list unchanged when no leads_list_id is supplied", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: [{ email: "auto@example.com", id: 60 }] })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ data: { id: 60, email: "auto@example.com", leads_list: { id: null, name: null } } }),
+          ),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const handler = registeredTools.get("Create-Lead-If-Missing")!.handler
+    const result = await handler({ email: "auto@example.com" })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const data = (result.structuredContent as { data: { alreadyExisted: boolean } }).data
+    expect(data.alreadyExisted).toBe(true)
   })
 
   // Annotation assertion lives in the privateWriteTools it.each in the
