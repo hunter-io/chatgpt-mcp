@@ -69,7 +69,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           .boolean()
           .optional()
           .describe(
-            desc`Set true only when the user asked to save this address as a lead. A valid result then chains to ${TOOL_NAMES.createLeadIfMissing}. Leave unset to only verify: the team's automatic lead saving still applies (see the tool description).`,
+            desc`Only decides whether a valid result chains to ${TOOL_NAMES.createLeadIfMissing}, which creates the lead if it is missing and adds a new or unlisted lead to leads_list_id. A lead that is already in another list stays there. This flag does not decide whether Hunter stores the address: the team's automatic lead saving applies either way (see the tool description). Set true only when the user asked to save this address as a lead or add it to a list. Leave unset when the user only wants the check.`,
           ),
         leads_list_id: z
           .number()
@@ -112,8 +112,8 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
           summary:
             (isSave
               ? status
-                ? `Email is ${status} — not saving.`
-                : "Email verification status unavailable — not saving."
+                ? `Email is ${status} — only a valid address goes on to ${TOOL_NAMES.createLeadIfMissing}.`
+                : `Email verification status unavailable — ${TOOL_NAMES.createLeadIfMissing} skipped.`
               : status
                 ? `Email is ${status}.`
                 : "Email verification status unavailable.") + verifierAutoSaveNote(status),

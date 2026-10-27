@@ -641,7 +641,7 @@ describe("HUN-23709: Email-Verifier", () => {
     expect(next.suggestedArgs).toEqual({ email: "user@a.com", leads_list_id: 12 })
   })
 
-  it("save request: a non-valid result is not saved", async () => {
+  it("save request: a non-valid result does not chain to Create-Lead-If-Missing", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValueOnce({
@@ -652,7 +652,8 @@ describe("HUN-23709: Email-Verifier", () => {
     const result = await registeredTools.get("Email-Verifier")!.handler({ email: "x@a.com", save_leads: true })
     const next = (result.structuredContent as { nextAction: { kind: string; summary?: string } }).nextAction
     expect(next.kind).toBe("complete")
-    expect(next.summary).toMatch(/^Email is accept_all — not saving\. /)
+    expect(next.summary).toMatch(/^Email is accept_all — only a valid address goes on to Create-Lead-If-Missing\. /)
+    expect(next.summary).not.toMatch(/not saving|not saved/i)
   })
 
   // HUN-24663: on a team with automatic lead saving, Hunter saves a valid or

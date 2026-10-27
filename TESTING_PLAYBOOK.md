@@ -227,7 +227,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | # | Tool | Prompt | Expected | Pass | Notes |
 |---|------|--------|----------|------|-------|
 | S1 | `Email-Verifier` | `Is patrick@stripe.com a valid email?` | Returns status (valid / invalid / accept_all / etc.) + score. `save_leads` stays unset, and no lead-write tool follows | ☐ | |
-| S2 | `Email-Verifier` → `Create-Lead-If-Missing` | `Verify patrick@stripe.com and save it to leads list <LEADS_LIST_ID> only if it is valid` | Email-Verifier is called with `save_leads: true` and `leads_list_id`. A `valid` result chains to `Create-Lead-If-Missing` with the same email and list. Any other status → "not saving", no lead write. An existing lead → "already exists; no changes made" | ☐ | |
+| S2 | `Email-Verifier` → `Create-Lead-If-Missing` | `Verify patrick@stripe.com and save it to leads list <LEADS_LIST_ID> only if it is valid` | Email-Verifier is called with `save_leads: true` and `leads_list_id`. A `valid` result chains to `Create-Lead-If-Missing` with the same email and list. Any other status → "only a valid address goes on to Create-Lead-If-Missing", no lead write by the MCP (team auto-save can still store an `accept_all` address in All people). An existing lead → "already exists; no changes made" | ☐ | |
 | S3 | `Email-Count` | `How many email addresses does Hunter have at stripe.com?` | Counts only (total, personal, generic). The reply links to `https://hunter.io/search/stripe.com` with `utm_source=hunter-chatgpt` and `utm_content=email-count`. No name or address is shown | ☐ | |
 
 ### Leads
