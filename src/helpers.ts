@@ -246,6 +246,21 @@ export function hunterLink(path: string, utmContent?: string): string {
   return url.toString()
 }
 
+// Automatic lead saving (Team::Entitlement#leads_auto_save): on a team that has
+// it, Rails saves what /v2/email-verifier and /v2/email-finder return as a lead
+// in no list, which Leads shows under "All people". The API response does not
+// say whether it saved, and the save fails silently on a team at its leads
+// limit, so the MCP can only state the condition (HUN-24663).
+export const AUTO_SAVE_CONDITION = "If the team has automatic lead saving (on by default, off on Data Platform plans)"
+// Lead::VerifierResultSaver creates a new lead only for these statuses.
+const AUTO_SAVED_VERIFIER_STATUSES = new Set(["valid", "accept_all"])
+
+/** Where an auto-saved verified address is, or "" when Hunter saves no new lead for this status. */
+export function verifierAutoSaveNote(status: string | undefined): string {
+  if (!status || !AUTO_SAVED_VERIFIER_STATUSES.has(status)) return ""
+  return ` ${AUTO_SAVE_CONDITION}, Hunter saves this address in All people (${hunterLink("/leads", "email-verifier")}) unless the team is at its leads limit. Tell the user to look there before you say that nothing was saved or offer to save or import it again.`
+}
+
 export function withDeepLink(result: McpTextResult, path: string, utmContent?: string): McpTextResult {
   if (result.isError) return result
   const url = hunterLink(path, utmContent)

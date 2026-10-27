@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
+  AUTO_SAVE_CONDITION,
   BILLABLE_LOOKUP_ANNOTATIONS,
   READ_ONLY_PUBLIC_ANNOTATIONS,
   TOOL_NAMES,
@@ -11,6 +12,7 @@ import {
   embedNextAction,
   hunterDomainSearchPath,
   parseHunterApiData,
+  verifierAutoSaveNote,
   withDeepLink,
 } from "../helpers"
 import { buildResponseSchema, nullableNumber } from "../schemas/common"
@@ -60,8 +62,7 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
   server.registerTool(
     TOOL_NAMES.emailVerifier,
     {
-      description:
-        "Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification (0.5 credit on plans with a shared credit pool), charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all. If the team has automatic lead saving, Hunter itself stores a valid or accept_all address as a lead in no list, whatever save_leads is, and an existing lead with this address takes the new verification status.",
+      description: `Use this when the user wants to check whether an email address they provide is deliverable. Returns a status (valid, invalid, accept_all, etc.) and a confidence score. Costs 1 verification (0.5 credit on plans with a shared credit pool), charged only for valid, invalid, or accept_all results. Do not use this on role/group addresses (info@, support@, etc.) — deliverability of role addresses is not meaningful and the result will typically be accept_all. ${AUTO_SAVE_CONDITION}, Hunter itself saves a valid or accept_all address as a lead in All people (https://hunter.io/leads, the Leads page with no list selected), whatever save_leads is, and an existing lead with this address takes the new verification status. When the user asks where verified contacts are, point them to All people.`,
       inputSchema: {
         email: z.string().email().max(254).describe("Email address to verify"),
         save_leads: z
@@ -106,13 +107,16 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
         result,
         buildNextAction({
           kind: "complete",
-          summary: isSave
-            ? status
-              ? `Email is ${status} — not saving.`
-              : "Email verification status unavailable — not saving."
-            : status
-              ? `Email is ${status}.`
-              : "Email verification status unavailable.",
+          // Says where the team's automatic lead saving put a valid or accept_all
+          // address (HUN-24663).
+          summary:
+            (isSave
+              ? status
+                ? `Email is ${status} — not saving.`
+                : "Email verification status unavailable — not saving."
+              : status
+                ? `Email is ${status}.`
+                : "Email verification status unavailable.") + verifierAutoSaveNote(status),
         }),
       )
     },

@@ -652,7 +652,38 @@ describe("HUN-23709: Email-Verifier", () => {
     const result = await registeredTools.get("Email-Verifier")!.handler({ email: "x@a.com", save_leads: true })
     const next = (result.structuredContent as { nextAction: { kind: string; summary?: string } }).nextAction
     expect(next.kind).toBe("complete")
-    expect(next.summary).toBe("Email is accept_all — not saving.")
+    expect(next.summary).toMatch(/^Email is accept_all — not saving\. /)
+  })
+
+  // HUN-24663: on a team with automatic lead saving, Hunter saves a valid or
+  // accept_all address in All people. The API does not say whether it saved, so
+  // the summary states the condition and links to All people.
+  it("a valid result points to All people", async () => {
+    stubValid("user@a.com")
+    const result = await registeredTools.get("Email-Verifier")!.handler({ email: "user@a.com" })
+    const next = (result.structuredContent as { nextAction: { summary: string } }).nextAction
+    expect(next.summary).toBe(
+      "Email is valid. If the team has automatic lead saving (on by default, off on Data Platform plans), " +
+        "Hunter saves this address in All people " +
+        "(https://hunter.io/leads?utm_source=hunter-chatgpt&utm_medium=chatgpt-app&utm_content=email-verifier) " +
+        "unless the team is at its leads limit. " +
+        "Tell the user to look there before you say that nothing was saved or offer to save or import it again.",
+    )
+    expect(registeredTools.get("Email-Verifier")!.description).toContain("All people (https://hunter.io/leads")
+  })
+
+  it("an invalid result does not point to All people", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ data: { status: "invalid", email: "x@a.com", score: 0 } })),
+      }),
+    )
+    const result = await registeredTools.get("Email-Verifier")!.handler({ email: "x@a.com" })
+    expect((result.structuredContent as { nextAction: { summary: string } }).nextAction.summary).toBe(
+      "Email is invalid.",
+    )
   })
 })
 
