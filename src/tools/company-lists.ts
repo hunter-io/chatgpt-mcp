@@ -184,28 +184,17 @@ const findSimilarCompaniesOutputSchema = buildResponseSchema(
   paginationMetaSchema.extend({ params: jsonArgs.optional() }),
 )
 
-// `filters` is a free-form, sanitized key/value bag (the controller deep-stringifies
-// and sanitizes it). Accept it faithfully as an open record without inventing a
-// filter DSL — only dynamic lists use it.
-const filtersInputSchema = z.record(z.string(), z.unknown())
+// Flat values only: Rails rejects a nested object, and String() turned one in a list into "[object Object]" (HUN-24582).
+const filterScalarSchema = z.union([z.string(), z.number(), z.boolean()]).nullable()
+const filtersInputSchema = z.record(z.string(), z.union([filterScalarSchema, z.array(filterScalarSchema)]))
 
-// callHunterApi's mutation form body accepts `string | string[] | nested object`.
-// Convert the free-form `filters` record into that shape so Rails receives the
-// nested `filters[...]` params the controller's sanitize_filters expects. Values
-// are coerced to strings (or string arrays); nested objects recurse. null/undefined
-// entries are dropped.
+// Sent as the nested `filters[...]` form params the controller's sanitize_filters expects; nulls are dropped.
 type FormValue = string | string[] | { [key: string]: FormValue }
-function toFormParams(value: Record<string, unknown>): Record<string, FormValue> {
+function toFormParams(value: z.infer<typeof filtersInputSchema>): Record<string, FormValue> {
   const out: Record<string, FormValue> = {}
   for (const [key, raw] of Object.entries(value)) {
     if (raw == null) continue
-    if (Array.isArray(raw)) {
-      out[key] = raw.filter((item) => item != null).map((item) => String(item))
-    } else if (typeof raw === "object") {
-      out[key] = toFormParams(raw as Record<string, unknown>)
-    } else {
-      out[key] = String(raw)
-    }
+    out[key] = Array.isArray(raw) ? raw.filter((item) => item != null).map(String) : String(raw)
   }
   return out
 }
@@ -355,7 +344,9 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
           .describe("List type: 'static' (manual, the default) or 'dynamic' (auto-matched by filters)"),
         filters: filtersInputSchema
           .optional()
-          .describe("Saved matching criteria for a dynamic list (key/value pairs). Required when type is 'dynamic'."),
+          .describe(
+            "Saved matching criteria for a dynamic list, keyed by Leads > Companies filter name. Each value is a string, number or boolean, or a list of them, never an object: there is no include/exclude form. Required when type is 'dynamic'.",
+          ),
         company_list_folder_id: z
           .number()
           .int()
@@ -388,7 +379,9 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
         name: z.string().min(1).optional().describe("New name for the company list"),
         filters: filtersInputSchema
           .optional()
-          .describe("Updated matching criteria (applies only to dynamic lists; ignored for static lists)"),
+          .describe(
+            "Updated matching criteria, in the same shape as on create: each value is a string, number or boolean, or a list of them, never an object (applies only to dynamic lists; ignored for static lists)",
+          ),
         company_list_folder_id: z
           .union([z.number().int().positive(), z.null()])
           .optional()

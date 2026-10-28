@@ -2113,7 +2113,12 @@ describe("Company-Lists CRUD (Group 07)", () => {
     vi.stubGlobal("fetch", mockFetch)
 
     const handler = registeredTools.get("Create-Company-List")!.handler
-    await handler({ name: "Dynamic", type: "dynamic", filters: { industry: "software" }, company_list_folder_id: 3 })
+    await handler({
+      name: "Dynamic",
+      type: "dynamic",
+      filters: { industry: "software", country: null, company_size: ["11-50", null] },
+      company_list_folder_id: 3,
+    })
 
     const [, opts] = mockFetch.mock.calls[0]
     expect(opts.method).toBe("POST")
@@ -2121,6 +2126,23 @@ describe("Company-Lists CRUD (Group 07)", () => {
     expect(opts.body).toContain("type=dynamic")
     expect(opts.body).toContain("filters%5Bindustry%5D=software")
     expect(opts.body).toContain("company_list_folder_id=3")
+    expect(opts.body).toContain("filters%5Bcompany_size%5D%5B%5D=11-50")
+    expect(opts.body).not.toContain("country")
+    expect(opts.body).not.toContain("null")
+  })
+
+  it("Create-Company-List and Update-Company-List filters accept flat values and reject nested objects", () => {
+    for (const tool of ["Create-Company-List", "Update-Company-List"]) {
+      const schema = z.object(registeredTools.get(tool)!.inputSchema as Record<string, z.ZodType>)
+      const base = tool === "Create-Company-List" ? { name: "Dynamic" } : { id: 12 }
+      expect(schema.safeParse({ ...base, filters: { company_size: ["11-50"], company_name: "Acme" } }).success).toBe(
+        true,
+      )
+      expect(schema.safeParse({ ...base, filters: { company_type: { include: ["public company"] } } }).success).toBe(
+        false,
+      )
+      expect(schema.safeParse({ ...base, filters: { headquarters_location: [{ country: "SE" }] } }).success).toBe(false)
+    }
   })
 
   it("Create-Company-List surfaces a 422 validation_failed as the typed invalid_input envelope", async () => {
