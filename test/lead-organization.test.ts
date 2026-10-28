@@ -303,9 +303,7 @@ describe("Lead tags CRUD", () => {
   it("Update-Lead-Tag surfaces a 404 as the typed not_found error envelope", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(railsError(404, [{ id: "not_found", code: 404, details: "This tag does not exist." }])),
+      vi.fn().mockResolvedValue(railsError(404, [{ id: "not_found", code: 404, details: "This tag does not exist." }])),
     )
 
     const result = await registeredTools.get("Update-Lead-Tag")!.handler({ id: 999, name: "Champions" })
@@ -378,8 +376,12 @@ describe("Per-lead tagging", () => {
     const body = new URLSearchParams(opts.body)
     expect(body.get("tag_id")).toBe("7")
     expect(result.isError).toBeUndefined()
-    expect((result.structuredContent as { viewInHunter: string }).viewInHunter).toBe("https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
-    expect(result.content[0].text).toContain("View in Hunter: https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app")
+    expect((result.structuredContent as { viewInHunter: string }).viewInHunter).toBe(
+      "https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
+    expect(result.content[0].text).toContain(
+      "View in Hunter: https://hunter.io/leads/42?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
 
     const schema = publishedOutputSchema(
       registeredTools.get("Add-Tag-To-Lead")!.outputSchema as Record<string, z.ZodTypeAny>,

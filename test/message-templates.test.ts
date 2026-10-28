@@ -193,7 +193,7 @@ describe("message-template tool registration", () => {
         ...Object.values(registered.inputSchema).map((field) => (field as z.ZodTypeAny).description ?? ""),
       ]
       for (const surface of surfaces) {
-        if (surface.includes('{{first_name|fallback:')) {
+        if (surface.includes("{{first_name|fallback:")) {
           expect(surface, `${name} mentions the piped form without the supported one`).toContain(
             '{{first_name:"there"}}',
           )
