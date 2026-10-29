@@ -41,6 +41,12 @@ const leadFieldsSchema = {
   notes: z.string().optional().describe("Notes about the lead"),
   source: z.string().optional().describe("Source of the lead"),
   leads_list_id: z.number().int().positive().optional().describe("ID of the leads list to add the lead to"),
+  custom_attributes: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe(
+      desc`Custom attribute values, keyed by slug (not by label). Get each slug from ${TOOL_NAMES.listCustomAttributes}. The attribute must already exist: create it with ${TOOL_NAMES.createCustomAttribute} first. An unknown slug fails the call.`,
+    ),
 }
 
 // Hunter lead shape — covers fields the model and the UI both reason about.
@@ -108,13 +114,20 @@ const leadExistsOutputSchema = buildResponseSchema(
     .loose(),
 )
 
-function buildLeadParams(fields: Record<string, unknown>): Record<string, string> {
-  const params: Record<string, string> = {}
+type LeadParams = Record<string, string | Record<string, string>>
+
+function buildLeadParams({
+  custom_attributes,
+  ...fields
+}: Record<string, unknown> & { custom_attributes?: Record<string, string> }): LeadParams {
+  const params: LeadParams = {}
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined && value !== null) {
       params[key] = String(value)
     }
   }
+  // Form-encoded as `custom_attributes[slug]=value`, the hash Rails permits.
+  if (custom_attributes !== undefined) params.custom_attributes = custom_attributes
   return params
 }
 
@@ -246,8 +259,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.createLead,
     {
-      description:
-        "Use this when the user wants to create a new lead in their Hunter account. Email is required; other fields are optional. Pass `leads_list_id` to add the lead directly to a list. Free to call.",
+      description: desc`Use this when the user wants to create a new lead in their Hunter account. Email is required; other fields are optional. Pass \`leads_list_id\` to add the lead directly to a list. Free to call. If a lead with this email already exists, the call succeeds and returns that lead, but does not apply the supplied values, including \`custom_attributes\`. It only adds the lead to \`leads_list_id\` when you pass one. To change the values of an existing lead, use ${TOOL_NAMES.updateLead} or ${TOOL_NAMES.upsertLead}.`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the lead (required)"),
@@ -271,7 +283,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
     TOOL_NAMES.updateLead,
     {
       description:
-        "Use this when the user wants to update fields on an existing lead identified by ID. Free to call. Updating a lead overwrites the supplied fields in place.",
+        "Use this when the user wants to update fields on an existing lead identified by ID. Free to call. Updating a lead overwrites the supplied fields in place. In `custom_attributes`, a slug that you leave out keeps its value, and an empty string clears the value.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the lead to update"),
         ...leadFieldsSchema,
@@ -311,7 +323,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.upsertLead,
     {
-      description: desc`Use this when the user explicitly wants to create a lead or overwrite an existing lead's fields by email. If a lead with the email exists, its fields are overwritten with the supplied values; otherwise a new lead is created. Free to call. Overwriting an existing lead's fields cannot be undone from the API. For save-without-overwrite semantics, use ${TOOL_NAMES.createLeadIfMissing} instead.`,
+      description: desc`Use this when the user explicitly wants to create a lead or overwrite an existing lead's fields by email. If a lead with the email exists, its fields are overwritten with the supplied values; otherwise a new lead is created. On an existing lead, \`custom_attributes\` merges into the current values: a slug that you leave out keeps its value, and an empty string clears the value. Free to call. Overwriting an existing lead's fields cannot be undone from the API. For save-without-overwrite semantics, use ${TOOL_NAMES.createLeadIfMissing} instead.`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the lead (used to match existing leads)"),
@@ -335,7 +347,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.createLeadIfMissing,
     {
-      description: desc`Use this when the user wants to save a verified contact as a new lead without modifying any existing lead. If a lead with the email already exists, returns it with \`alreadyExisted: true\` and never applies the supplied values to it; otherwise creates the lead with the supplied fields. An existing lead in no list (for example, one the team's automatic lead saving stored when ${TOOL_NAMES.emailVerifier} ran) is added to \`leads_list_id\` when you pass one, and Hunter can then refresh its fields from Hunter's own data, as for any lead saved in Hunter. A lead already in a list is never moved, added to another list, or changed. Use ${TOOL_NAMES.upsertLead} instead when the user explicitly wants to overwrite an existing lead. Free (no credits).`,
+      description: desc`Use this when the user wants to save a verified contact as a new lead without modifying any existing lead. If a lead with the email already exists, returns it with \`alreadyExisted: true\` and never applies the supplied values to it; otherwise creates the lead with the supplied fields. Custom attribute values apply only when this tool creates the lead. An existing lead in no list (for example, one the team's automatic lead saving stored when ${TOOL_NAMES.emailVerifier} ran) is added to \`leads_list_id\` when you pass one, and Hunter can then refresh its fields from Hunter's own data, as for any lead saved in Hunter. A lead already in a list is never moved, added to another list, or changed. Use ${TOOL_NAMES.upsertLead} instead when the user explicitly wants to overwrite an existing lead. Free (no credits).`,
       inputSchema: {
         ...leadFieldsSchema,
         email: z.string().email().max(254).describe("Email address of the contact to save"),

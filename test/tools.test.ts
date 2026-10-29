@@ -4404,3 +4404,173 @@ describe("HUN-24702: Lead-Exists finds a lead in no list", () => {
     expect(result.isError).toBe(true)
   })
 })
+
+// HUN-24763: the lead write tools set custom attribute values, keyed by slug. Rails
+// reads them from `custom_attributes[slug]=value`; an empty value clears the slug.
+describe("HUN-24763: lead write tools set custom attribute values", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const LEAD_WRITE_TOOLS = ["Create-Lead", "Update-Lead", "Create-Or-Update-Lead", "Create-Lead-If-Missing"]
+  const respond = (data: unknown) => ({ ok: true, text: () => Promise.resolve(JSON.stringify({ data })) })
+  const bodyOf = (call: unknown[] | undefined) =>
+    new URLSearchParams((call?.[1] as { body?: string } | undefined)?.body ?? "")
+  const inputSchemaOf = (name: string) => z.object(registeredTools.get(name)!.inputSchema as z.ZodRawShape)
+
+  it.each(LEAD_WRITE_TOOLS)("%s accepts string values keyed by slug and rejects other values", (name) => {
+    const schema = inputSchemaOf(name)
+    const args = { id: 1, email: "jane@example.com", custom_attributes: { instagram_handle: "@jane" } }
+    expect(schema.parse(args).custom_attributes).toEqual({ instagram_handle: "@jane" })
+    expect(() => schema.parse({ ...args, custom_attributes: { instagram_handle: 42 } })).toThrow()
+  })
+
+  it("the field says to use slugs of attributes that already exist", () => {
+    const field = inputSchemaOf("Create-Lead").shape.custom_attributes
+    expect(field.description).toContain("keyed by slug (not by label)")
+    expect(field.description).toContain("List-Custom-Attributes")
+    expect(field.description).toContain("Create-Custom-Attribute")
+  })
+
+  it("the descriptions give the merge rules", () => {
+    for (const name of ["Update-Lead", "Create-Or-Update-Lead"]) {
+      expect(registeredTools.get(name)!.description).toContain(
+        "a slug that you leave out keeps its value, and an empty string clears the value",
+      )
+    }
+    expect(registeredTools.get("Create-Lead-If-Missing")!.description).toContain(
+      "Custom attribute values apply only when this tool creates the lead.",
+    )
+  })
+
+  // POST /leads reuses a lead with the same email, applies none of the posted
+  // fields, and still answers 201 with no flag (HUN-22831).
+  it("Create-Lead says that an existing lead keeps its values and names the tools that change them", () => {
+    const description = registeredTools.get("Create-Lead")!.description
+    expect(description).toContain(
+      "If a lead with this email already exists, the call succeeds and returns that lead, but does not apply the supplied values, including `custom_attributes`.",
+    )
+    expect(description).toContain("use Update-Lead or Create-Or-Update-Lead")
+  })
+
+  it("Create-Lead sends the values to POST /leads", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(respond({ id: 42, email: "jane@example.com" }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Create-Lead")!.handler({
+      email: "jane@example.com",
+      custom_attributes: { instagram_handle: "@jane", plan_tier: "Gold" },
+    })
+
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST")
+    expect(Object.fromEntries(bodyOf(fetchMock.mock.calls[0]))).toEqual({
+      email: "jane@example.com",
+      "custom_attributes[instagram_handle]": "@jane",
+      "custom_attributes[plan_tier]": "Gold",
+    })
+  })
+
+  it("Update-Lead sends a changed value and an empty value that clears another", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(respond({ id: 42, email: "jane@example.com" }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Update-Lead")!.handler({
+      id: 42,
+      custom_attributes: { instagram_handle: "@jane.doe", plan_tier: "" },
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/leads/42")
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT")
+    expect(Object.fromEntries(bodyOf(fetchMock.mock.calls[0]))).toEqual({
+      "custom_attributes[instagram_handle]": "@jane.doe",
+      "custom_attributes[plan_tier]": "",
+    })
+  })
+
+  it("Create-Or-Update-Lead sends the values to PUT /leads", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(respond({ id: 42, email: "jane@example.com" }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Create-Or-Update-Lead")!.handler({
+      email: "jane@example.com",
+      custom_attributes: { instagram_handle: "@jane" },
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/leads$/)
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT")
+    expect(bodyOf(fetchMock.mock.calls[0]).get("custom_attributes[instagram_handle]")).toBe("@jane")
+  })
+
+  it("Create-Lead-If-Missing sends the values when it creates the lead", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond([{ email: "new@example.com", id: null }]))
+      .mockResolvedValueOnce(respond({ id: 43, email: "new@example.com" }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Create-Lead-If-Missing")!.handler({
+      email: "new@example.com",
+      custom_attributes: { instagram_handle: "@new" },
+    })
+
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST")
+    expect(bodyOf(fetchMock.mock.calls[1]).get("custom_attributes[instagram_handle]")).toBe("@new")
+  })
+
+  it("Create-Lead-If-Missing does not send the values for an existing lead", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond([{ email: "auto@example.com", id: 60 }]))
+      .mockResolvedValueOnce(respond({ id: 60, email: "auto@example.com", leads_list: { id: null, name: null } }))
+      .mockResolvedValueOnce(respond({ id: 60, email: "auto@example.com", leads_list: { id: 99, name: "New" } }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Create-Lead-If-Missing")!.handler({
+      email: "auto@example.com",
+      leads_list_id: 99,
+      custom_attributes: { instagram_handle: "@auto" },
+    })
+
+    expect(Object.fromEntries(bodyOf(fetchMock.mock.calls[2]))).toEqual({
+      email: "auto@example.com",
+      leads_list_id: "99",
+    })
+  })
+
+  it("an unknown slug returns the Rails 422 as a readable invalid_input error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "invalid_custom_attribute",
+                  code: 422,
+                  details: "The following custom attributes do not exist: instagram.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+
+    const result = await registeredTools.get("Update-Lead")!.handler({
+      id: 42,
+      custom_attributes: { instagram: "@jane" },
+    })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.field).toBe("invalid_custom_attribute")
+    expect(err.message).toBe("The following custom attributes do not exist: instagram.")
+    expect(result.content[0]?.text).toBe("The following custom attributes do not exist: instagram.")
+  })
+})
