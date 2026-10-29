@@ -4198,9 +4198,9 @@ describe("HUN-23709: server version and instructions", () => {
     registerAllTools()
   })
 
-  it("announces version 4.0.1", () => {
+  it("announces version 4.0.2", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.1" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.2" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {

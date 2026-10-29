@@ -189,8 +189,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // people-finding, and API-key tools. A change that alters a constraint (a new
       // required field, a renamed property, a removed tool) needs a bump; an
       // additive or schema-neutral change can ride the current version. 4.0.1 adds
-      // the feature_not_in_plan error code (HUN-24654).
-      version: "4.0.1",
+      // the feature_not_in_plan error code (HUN-24654); 4.0.2 lets Create-Leads-List
+      // and Update-Leads-List save a dynamic list (HUN-24762).
+      version: "4.0.2",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
