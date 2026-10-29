@@ -179,6 +179,7 @@ export const errorSchema = z.object({
   code: z.enum([
     "rate_limited",
     "quota_exceeded",
+    "feature_not_in_plan",
     "invalid_input",
     "not_found",
     "unauthorized",

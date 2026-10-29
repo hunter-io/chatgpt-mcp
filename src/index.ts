@@ -189,8 +189,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // PR. 4.0.0 is the HUN-23709 resubmission, which removes the person-email,
       // people-finding, and API-key tools. A change that alters a constraint (a new
       // required field, a renamed property, a removed tool) needs a bump; an
-      // additive or schema-neutral change can ride the current version.
-      version: "4.0.0",
+      // additive or schema-neutral change can ride the current version. 4.0.1 adds
+      // the feature_not_in_plan error code (HUN-24654).
+      version: "4.0.1",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,

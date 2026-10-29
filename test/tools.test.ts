@@ -1130,6 +1130,63 @@ describe("List-Email-Accounts (Group 01)", () => {
   })
 })
 
+// HUN-24654: a plan gate and a Rack::Attack throttle answer 403 like an
+// authorization failure. Only the error id tells them apart.
+describe("403 mapping", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  function forbidden(id: string, details: string, headers: Record<string, string> = {}) {
+    return vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      headers: new Headers(headers),
+      text: () => Promise.resolve(JSON.stringify({ errors: [{ id, code: 403, details }] })),
+    })
+  }
+
+  it("maps a no_<feature>_access 403 to feature_not_in_plan", async () => {
+    vi.stubGlobal("fetch", forbidden("no_discover_access", "Discover is not enabled on your plan."))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as { error: unknown }).error).toEqual({
+      code: "feature_not_in_plan",
+      retryable: false,
+      field: "no_discover_access",
+      message: "Discover is not enabled on your plan. This is a plan limit, not a connection problem.",
+    })
+  })
+
+  it("maps a Rack::Attack too_many_requests 403 to a retryable rate_limited with its wait", async () => {
+    vi.stubGlobal(
+      "fetch",
+      forbidden("too_many_requests", "Rate limit reached. Please spread your requests.", { "Retry-After": "20" }),
+    )
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as { error: unknown }).error).toEqual({
+      code: "rate_limited",
+      retryable: true,
+      retry_after_seconds: 20,
+      message: "Rate limit reached. Please spread your requests.",
+    })
+  })
+
+  it("keeps any other 403 as unauthorized", async () => {
+    vi.stubGlobal("fetch", forbidden("forbidden", "You are not authorized to perform this action."))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect((result.structuredContent as { error: { code: string } }).error.code).toBe("unauthorized")
+  })
+})
+
 // HUN-18641 / Group 02: List-Sequence-Follow-Ups. GET
 // /v2/sequences/:sequence_id/follow-ups returns the follow-up steps of a
 // sequence ordered by (step ASC, variant ASC). Read-only (no request body),
@@ -4141,9 +4198,9 @@ describe("HUN-23709: server version and instructions", () => {
     registerAllTools()
   })
 
-  it("announces version 4.0.0", () => {
+  it("announces version 4.0.1", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.0" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.1" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {

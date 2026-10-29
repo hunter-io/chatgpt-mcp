@@ -413,6 +413,8 @@ function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
   return result
 }
 
+const PLAN_GATE_ERROR_ID = /^no_[a-z_]+_access$/
+
 /**
  * What the user reads when they run out of credits. Rails' 402 text says to
  * upgrade or buy credits, and OpenAI's app guidelines forbid selling
@@ -520,6 +522,29 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   // so a later retry can succeed.
   if (status === 222) {
     return { code: "upstream_error", retryable: true, message }
+  }
+  // HUN-24654: Rack::Attack throttles the API with a 403 `too_many_requests`
+  // and a Retry-After header (app/config/initializers/rack_attack.rb).
+  if (status === 403 && parsedField === "too_many_requests") {
+    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+    return {
+      code: "rate_limited",
+      retryable: true,
+      ...(Number.isFinite(seconds) && seconds >= 0 && { retry_after_seconds: seconds }),
+      message,
+    }
+  }
+  // HUN-24654: a 403 with a `no_<feature>_access` id is a plan gate (Rails'
+  // `add_plan_access_error`), not an authentication failure. Mapped to
+  // `unauthorized`, it made the agent call the API key invalid and ask the user
+  // to reconnect, which can never fix it.
+  if (status === 403 && parsedField && PLAN_GATE_ERROR_ID.test(parsedField)) {
+    return {
+      code: "feature_not_in_plan",
+      retryable: false,
+      field: parsedField,
+      message: `${message} This is a plan limit, not a connection problem.`,
+    }
   }
   if (status === 401 || status === 403) {
     return { code: "unauthorized", retryable: false, message }

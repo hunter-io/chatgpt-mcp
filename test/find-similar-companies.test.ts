@@ -109,8 +109,8 @@ describe("Find-Similar-Companies: registration", () => {
     expect(description).toMatch(/Free to call\.$/)
     expect(description).toMatch(/free plan/i)
     expect(description).toMatch(/do not ask the user to reconnect/i)
-    expect(description).toContain("Lookalikes is not enabled on the plan")
-    expect(description).toMatch(/Any other unauthorized error/)
+    expect(description).toContain("feature_not_in_plan")
+    expect(description).toMatch(/An unauthorized error/)
     expect(description).toMatch(/static company list/i)
     expect(description).toContain("unsupported_list_type")
     expect(description).toMatch(/ranking preference/i)
@@ -258,7 +258,14 @@ describe("Find-Similar-Companies: handler", () => {
   it.each([
     [
       403,
-      { id: "forbidden", code: 403, details: "Lookalikes is not enabled on your plan." },
+      { id: "no_lookalikes_access", code: 403, details: "Lookalikes is not enabled on your plan." },
+      "feature_not_in_plan",
+      "no_lookalikes_access",
+      false,
+    ],
+    [
+      403,
+      { id: "forbidden", code: 403, details: "You are not authorized to perform this action." },
       "unauthorized",
       undefined,
       false,
