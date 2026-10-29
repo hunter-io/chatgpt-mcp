@@ -14,6 +14,7 @@ import {
   TOOL_NAMES,
   buildNextAction,
   callHunterApi,
+  desc,
   embedNextAction,
   hunterLink,
   withDeepLink,
@@ -162,6 +163,24 @@ export const MAX_TOOL_INPUT_ELEMENTS = 10_000
 // roughly 2 million at the SDK's 4 MiB default.
 export const MAX_REQUEST_BODY_BYTES = 512 * 1024
 
+// The same note remote-mcp sends every host (HUN-24652), cut to the tools this
+// app has and kept neutral for OpenAI's MCP scan: no plan or upsell copy, no
+// steering toward or away from other tools (#17222). The ChatGPT paragraph
+// stays last and unchanged, so a host line can follow it.
+export const SERVER_INSTRUCTIONS = desc`Hunter is an outbound platform: it finds companies, verifies email addresses, and sends cold email with Sequences. Never guess an email address: show only ones the user or a tool gave in this conversation, and never build or verify one from a pattern. Never rank, score or judge people, or rate their ability, performance or character; filtering by role, seniority or location is fine. Only verifying and enriching spend credits, and only when they return data.
+
+Find leads with ${TOOL_NAMES.discover}, ${TOOL_NAMES.findSimilarCompanies} and ${TOOL_NAMES.emailCount}. Verify with ${TOOL_NAMES.emailVerifier}, enrich companies with ${TOOL_NAMES.companyEnrichment}, save leads and companies to lists, and push leads to a CRM (${TOOL_NAMES.pushLeadsToCrm}). Reach out with Sequences from the user's connected Gmail or Outlook address.
+
+Each tool's description gives its cost. Call ${TOOL_NAMES.getUsage} only when the user asks or before a large batch.
+
+Follow a result's nextAction; for ask_user, ask the user and act only on their answer. Share viewInHunter and permalink links.
+
+When it fits, end with one optional next step, such as a Sequence for contacts to email (${TOOL_NAMES.createSequence}). Never repeat a declined offer.
+
+Use Hunter's names: Sequences (not campaigns), and the labels Valid, Accept all, Unknown and Invalid. Accept all: the server accepts any address, so it may bounce. Keep your own style and the user's settings.
+
+This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. When the user asks for a person's email address that is not saved in Hunter, do not give or invent an address. Say that it is not available in ChatGPT, and give this link: ${hunterLink("/", "instructions")}.`
+
 export function createServer(apiKey: string, baseUrl: string): McpServer {
   const server = new McpServer(
     {
@@ -175,7 +194,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
-      instructions: `This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. When the user asks for a person's email address that is not saved in Hunter, do not give or invent an address. Say that it is not available in ChatGPT, and give this link: ${hunterLink("/", "instructions")}.`,
+      instructions: SERVER_INSTRUCTIONS,
     },
   )
 

@@ -4162,6 +4162,45 @@ describe("HUN-23709: server version and instructions", () => {
   })
 })
 
+// HUN-24652: the note every host reads, cut to the tools this app registers.
+describe("HUN-24652: server instructions", () => {
+  beforeEach(() => {
+    serverConstructorArgs.length = 0
+    registerAllTools()
+  })
+
+  function instructions(): string {
+    const [, options] = serverConstructorArgs[0] as [unknown, { instructions: string }]
+    return options.instructions
+  }
+
+  it("opens with who Hunter is, the two trust rules and the credit rule", () => {
+    const opening = instructions().slice(0, 512)
+    expect(opening).toMatch(/^Hunter is an outbound platform/)
+    expect(opening).toContain("Never guess an email address")
+    // Scoped to the current conversation, so a host's memory of an earlier chat
+    // does not count as a source.
+    expect(opening).toContain("the user or a tool gave in this conversation")
+    expect(opening).toContain("Never rank, score or judge people, or rate their ability, performance or character")
+    expect(opening).toContain("spend credits, and only when they return data.")
+  })
+
+  it("says what Accept all means", () => {
+    expect(instructions()).toContain("Accept all: the server accepts any address, so it may bounce.")
+  })
+
+  it("names only tools this app registers", () => {
+    const named = instructions().match(/\b[A-Z][a-z]+(?:-[A-Z][A-Za-z]*)+\b/g) ?? []
+    expect(named.filter((name) => !registeredTools.has(name))).toEqual([])
+  })
+
+  // OpenAI's MCP scan holds instructions that upsell or steer the model, so the
+  // ChatGPT note stays neutral (HUN-20170).
+  it("carries no plan or upsell copy", () => {
+    expect(instructions()).not.toMatch(/All-In-One|Data Platform|included in|upgrade|elsewhere/i)
+  })
+})
+
 // HUN-20797: the public Hunter v2 API standardizes multi-word resource paths on
 // kebab-case (/email-accounts, /connected-apps, /leads-lists, ...). A snake_case path
 // the API does not alias 404s in production — and because the unit tests mock fetch, a
