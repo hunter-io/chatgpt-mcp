@@ -238,7 +238,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | L2 | `Get-Lead` | `Get details for lead <LEAD_ID>` | Returns one lead's full record | ☐ | |
 | L3 | `Create-Lead` | `Add a new lead: name "Test Person", email "test+playbook@hunter.io", at example.com` | Creates new lead, returns deep link to `/leads/<id>` | ☐ | |
 | L4 | `Update-Lead` | `Update lead <LEAD_ID> — set position to "Head of Testing"` | Lead's position field updated, deep link returned | ☐ | |
-| L5 | `Lead-Exists` | `Do I already have a lead with email test+playbook@hunter.io?` | Returns true/false | ☐ | |
+| L5 | `Lead-Exists` | `Do I already have a lead with email test+playbook@hunter.io?` | Returns the lead id and its list, or no id. A lead in no list (for example one that Email-Verifier auto-saved) is found too, with no list | ☐ | |
 | L6 | `Save-Company` | `Save netflix.com to my Hunter leads as a company` | Saves company, deep link to `/leads` | ☐ | |
 | L7 | `Delete-Lead` (destructive) | `Delete lead <LEAD_ID>` (use the one from L3) | Confirmation prompt shown (destructive hint), then on accept the lead is removed. Verify it's gone via L1 | ☐ | |
 

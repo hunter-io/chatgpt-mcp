@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import {
+  HUNTER_SOURCE_SUFFIX,
   type McpTextResult,
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
@@ -115,6 +116,59 @@ function buildLeadParams(fields: Record<string, unknown>): Record<string, string
     }
   }
   return params
+}
+
+/**
+ * Lead-Exists answer in the same `{ data: { id, leads_list_id, leads_list_name } }`
+ * shape that /leads/exist returns, built from /leads/bulk/exist and the lead
+ * record (HUN-24702).
+ */
+async function findExistingLead(email: string, apiKey: string, baseUrl: string): Promise<McpTextResult> {
+  // /leads/bulk/exist, not /leads/exist: on a team with automatic lead saving,
+  // /leads/exist hides a lead that is in no list, and the Email Verifier
+  // auto-saves exactly such a lead (HUN-24240).
+  const existsResult = await callHunterApi({
+    path: "/leads/bulk/exist",
+    apiKey,
+    baseUrl,
+    params: { "emails[]": email },
+  })
+  if (existsResult.isError) return existsResult
+
+  const id = parseHunterApiData<Array<{ id?: number | null }>>(existsResult)?.[0]?.id
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+    return leadExistsResult(existsResult, { id: null, leads_list_id: null, leads_list_name: null })
+  }
+
+  // The lead record (free GET) says which list it is in.
+  const leadResult = await callHunterApi({ path: `/leads/${id}`, apiKey, baseUrl })
+  if (leadResult.isError) return leadResult
+  const list = parseHunterApiData<{ leads_list?: { id?: number | null; name?: string | null } | null }>(
+    leadResult,
+  )?.leads_list
+  return leadExistsResult(leadResult, {
+    id,
+    leads_list_id: list?.id ?? null,
+    leads_list_name: list?.name ?? null,
+  })
+}
+
+function leadExistsResult(
+  result: McpTextResult,
+  data: { id: number | null; leads_list_id: number | null; leads_list_name: string | null },
+): McpTextResult {
+  const structuredContent = { data }
+  return {
+    ...result,
+    content: [
+      {
+        type: "text" as const,
+        text: `${JSON.stringify(structuredContent)}${HUNTER_SOURCE_SUFFIX}`,
+        annotations: { audience: ["user"] },
+      },
+    ],
+    structuredContent,
+  }
 }
 
 /**
@@ -377,7 +431,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
       annotations: PRIVATE_READ_ANNOTATIONS,
     },
     async ({ email }) => {
-      return callHunterApi({ path: "/leads/exist", apiKey, baseUrl, params: { email } })
+      return findExistingLead(email, apiKey, baseUrl)
     },
   )
 }

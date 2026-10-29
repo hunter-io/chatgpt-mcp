@@ -4330,3 +4330,77 @@ describe("HUN-21259: Add-Sequence-Recipients started-only confirmation gate", ()
     expect(addSequenceRecipientsArgsSchema.safeParse(nextAction.pendingToolCall!.args).success).toBe(true)
   })
 })
+
+// HUN-24702: on a team with automatic lead saving, /leads/exist hides a lead in
+// no list, which is what the Email Verifier saves. Lead-Exists must still find it.
+describe("HUN-24702: Lead-Exists finds a lead in no list", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const respond = (data: unknown) => ({ ok: true, text: () => Promise.resolve(JSON.stringify({ data })) })
+
+  const lookUp = async (email: string) => {
+    const tool = registeredTools.get("Lead-Exists")!
+    const result = await tool.handler({ email })
+    publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>).parse(result.structuredContent)
+    return result
+  }
+
+  it("reports no lead when /leads/bulk/exist finds none", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(respond([{ email: "none@example.com", id: null }]))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await lookUp("none@example.com")
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/leads/bulk/exist?emails%5B%5D=none%40example.com")
+    expect(result.structuredContent).toEqual({ data: { id: null, leads_list_id: null, leads_list_name: null } })
+  })
+
+  it("returns the id of a lead in no list", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond([{ email: "auto@example.com", id: 60 }]))
+      .mockResolvedValueOnce(respond({ id: 60, email: "auto@example.com", leads_list: { id: null, name: null } }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await lookUp("auto@example.com")
+
+    expect(fetchMock.mock.calls.map((call) => call[0] as string).some((url) => url.includes("/leads/exist"))).toBe(false)
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/leads/60")
+    expect(result.structuredContent).toEqual({ data: { id: 60, leads_list_id: null, leads_list_name: null } })
+    expect(result.content[0]?.text).toContain('"id":60')
+  })
+
+  it("returns the list of a lead in a list", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond([{ email: "listed@example.com", id: 61 }]))
+      .mockResolvedValueOnce(respond({ id: 61, email: "listed@example.com", leads_list: { id: 7, name: "Q4" } }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await lookUp("listed@example.com")
+
+    expect(result.structuredContent).toEqual({ data: { id: 61, leads_list_id: 7, leads_list_name: "Q4" } })
+  })
+
+  it("returns the error when the lead record cannot be read", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond([{ email: "gone@example.com", id: 62 }]))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({ errors: [{ id: "not_found", code: 404, details: "Not found" }] })),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await registeredTools.get("Lead-Exists")!.handler({ email: "gone@example.com" })
+
+    expect(result.isError).toBe(true)
+  })
+})
