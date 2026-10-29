@@ -4617,3 +4617,121 @@ describe("HUN-24763: lead write tools set custom attribute values", () => {
     expect(result.content[0]?.text).toBe("The following custom attributes do not exist: instagram.")
   })
 })
+
+// HUN-24761: Create-Leads-List and Update-Leads-List file a list in a folder, and
+// the list's leads_list_folder_id comes back so a model can check where it landed.
+describe("HUN-24761: leads-list folder assignment", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const list = (leads_list_folder_id: number | null) => ({
+    id: 5,
+    name: "Q4",
+    leads_count: 0,
+    type: "static",
+    leads_list_folder_id,
+    created_at: "2026-10-29 12:00:00 UTC",
+  })
+  const respond = (body: unknown, status = 200) => ({
+    ok: true,
+    status,
+    text: () => Promise.resolve(body === undefined ? "" : JSON.stringify(body)),
+  })
+  const outputSchema = (name: string) =>
+    publishedOutputSchema(registeredTools.get(name)!.outputSchema as Record<string, z.ZodTypeAny>)
+
+  it("Create-Leads-List places the new list in a folder", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ data: list(3) }, 201))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await registeredTools.get("Create-Leads-List")!.handler({ name: "Q4", leads_list_folder_id: 3 })
+
+    const [, opts] = fetchMock.mock.calls[0]
+    expect(opts.method).toBe("POST")
+    expect(opts.body).toBe("name=Q4&leads_list_folder_id=3")
+    expect(outputSchema("Create-Leads-List").safeParse(result.structuredContent).success).toBe(true)
+    expect((result.structuredContent as { data: { leads_list_folder_id: number } }).data.leads_list_folder_id).toBe(3)
+  })
+
+  it("Create-Leads-List leaves the folder out when none is given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ data: list(null) }, 201))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await registeredTools.get("Create-Leads-List")!.handler({ name: "Q4" })
+
+    expect(fetchMock.mock.calls[0][1].body).toBe("name=Q4")
+  })
+
+  it.each([
+    [{ leads_list_folder_id: 7 }, "leads_list_folder_id=7"],
+    [{ leads_list_folder_id: null }, "leads_list_folder_id="],
+    [{ name: "Renamed" }, "name=Renamed"],
+  ])("Update-Leads-List with %j sends %s", async (args, body) => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(undefined, 204))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await registeredTools.get("Update-Leads-List")!.handler({ id: 5, ...args })
+
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://api.hunter.io/v2/leads-lists/5")
+    expect(opts.method).toBe("PUT")
+    expect(opts.body).toBe(body)
+    expect(result.isError).toBeUndefined()
+    expect(outputSchema("Update-Leads-List").safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("Update-Leads-List rejects a call with neither name nor folder without calling the API", async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await registeredTools.get("Update-Leads-List")!.handler({ id: 5 })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as { error: { code: string } }).error.code).toBe("invalid_input")
+    expect(outputSchema("Update-Leads-List").safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("Update-Leads-List takes a positive folder id or null", () => {
+    const schema = z.object(registeredTools.get("Update-Leads-List")!.inputSchema as Record<string, z.ZodType>)
+    expect(schema.safeParse({ id: 5, leads_list_folder_id: 7 }).success).toBe(true)
+    expect(schema.safeParse({ id: 5, leads_list_folder_id: null }).success).toBe(true)
+    expect(schema.safeParse({ id: 5, leads_list_folder_id: 0 }).success).toBe(false)
+  })
+
+  it("Update-Leads-List surfaces another team's folder as invalid_input", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "wrong_field_value", code: 422, details: "The folder is invalid." }] }),
+          ),
+      }),
+    )
+
+    const result = await registeredTools.get("Update-Leads-List")!.handler({ id: 5, leads_list_folder_id: 99 })
+
+    expect(result.isError).toBe(true)
+    const err = (result.structuredContent as { error: { code: string; message: string } }).error
+    expect(err.code).toBe("invalid_input")
+    expect(err.message).toContain("The folder is invalid.")
+  })
+
+  it("List-Leads-Lists output admits filed and unfiled lists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(respond({ data: { leads_lists: [list(3), list(null)] }, meta: { total: 2 } })),
+    )
+
+    const result = await registeredTools.get("List-Leads-Lists")!.handler({})
+
+    expect(outputSchema("List-Leads-Lists").safeParse(result.structuredContent).success).toBe(true)
+  })
+})

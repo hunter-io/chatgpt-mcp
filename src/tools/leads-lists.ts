@@ -9,7 +9,13 @@ import {
   withDeepLink,
   withDeepLinkFromId,
 } from "../helpers"
-import { buildResponseSchema, hunterUrl, mutationAckSchema, paginationMetaSchema } from "../schemas/common"
+import {
+  buildResponseSchema,
+  hunterUrl,
+  mutationAckSchema,
+  nullableNumber,
+  paginationMetaSchema,
+} from "../schemas/common"
 
 // Hunter leads-list shape from app/app/views/api/leads_lists/_leads_list.json.jbuilder.
 // .loose() at the envelope level (via buildResponseSchema); leaf is strict so a
@@ -19,6 +25,7 @@ const leadsListSchema = z
     id: z.number().int().positive(),
     name: z.string(),
     leads_count: z.number().int().nonnegative().optional(),
+    leads_list_folder_id: nullableNumber().optional(),
     team_id: z.number().int().optional(),
     created_at: z.string().optional(),
     updated_at: z.string().optional(),
@@ -72,7 +79,7 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     TOOL_NAMES.getLeadsList,
     {
       description:
-        "Use this when the user wants to retrieve a single leads list (name, lead count, timestamps) by ID. Free to call.",
+        "Use this when the user wants to retrieve a single leads list (name, lead count, folder, timestamps) by ID. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to retrieve"),
       },
@@ -87,20 +94,29 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
   server.registerTool(
     TOOL_NAMES.createLeadsList,
     {
-      description: "Use this when the user wants to create a new, empty leads list with the given name. Free to call.",
+      description:
+        "Use this when the user wants to create a new, empty leads list with the given name. Optionally place it inside a folder with `leads_list_folder_id` (see List-Leads-List-Folders). Returns an invalid_input error if the folder does not belong to the user's team. Free to call.",
       inputSchema: {
         name: z.string().min(1).max(100).describe("Name of the new leads list"),
+        leads_list_folder_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("ID of the folder to place the list in (optional)"),
       },
       outputSchema: singleOutputSchema.shape,
       annotations: PRIVATE_WRITE_ANNOTATIONS,
     },
-    async ({ name }) => {
+    async ({ name, leads_list_folder_id }) => {
+      const params: Record<string, string> = { name }
+      if (leads_list_folder_id !== undefined) params.leads_list_folder_id = String(leads_list_folder_id)
       const result = await callHunterApi({
         path: "/leads-lists",
         apiKey,
         baseUrl,
         method: "POST",
-        params: { name },
+        params,
       })
       return withDeepLinkFromId(result, (id) => `/leads?leads_list_id=${id}`)
     },
@@ -114,21 +130,43 @@ export function registerLeadsListTools(server: McpServer, apiKey: string, baseUr
     TOOL_NAMES.updateLeadsList,
     {
       description:
-        "Use this when the user wants to rename an existing leads list, identified by ID. Overwrites the existing list name; the previous name cannot be recovered from the API. If the user declines the rename, offer to instead create a new leads list with the desired name. Free to call.",
+        "Use this when the user wants to update a leads list, identified by ID. You can rename it (`name`) and move it to a different folder (`leads_list_folder_id`). Renaming overwrites the existing list name; the previous name cannot be recovered from the API. If the user declines the rename, offer to instead create a new leads list with the desired name. Provide at least one of `name` or `leads_list_folder_id` — a call with neither returns an invalid_input error without contacting the API. Returns an invalid_input error if the folder does not belong to the user's team. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the leads list to update"),
-        name: z.string().min(1).max(100).describe("New name for the leads list"),
+        name: z.string().min(1).max(100).optional().describe("New name for the leads list"),
+        leads_list_folder_id: z
+          .union([z.number().int().positive(), z.null()])
+          .optional()
+          .describe(
+            "Folder to move the list into: a positive folder ID, or null to remove it from its folder (move to Unfiled). Omit to leave the current folder unchanged.",
+          ),
       },
       outputSchema: singleOutputSchema.shape,
       annotations: PRIVATE_DESTRUCTIVE_ANNOTATIONS,
     },
-    async ({ id, name }) => {
+    async ({ id, name, leads_list_folder_id }) => {
+      // Neither field would be a no-op PUT that Rails acknowledges with a 204.
+      if (name === undefined && leads_list_folder_id === undefined) {
+        const message = "Provide name and/or leads_list_folder_id — there is nothing to update."
+        return {
+          content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+          structuredContent: { error: { code: "invalid_input" as const, retryable: false, message } },
+          isError: true,
+        }
+      }
+
+      const params: Record<string, string> = {}
+      if (name !== undefined) params.name = name
+      // null clears the folder (move to Unfiled): Rails coerces a blank id to nil on
+      // the optional folder association. undefined leaves the current folder unchanged.
+      if (leads_list_folder_id === null) params.leads_list_folder_id = ""
+      else if (leads_list_folder_id !== undefined) params.leads_list_folder_id = String(leads_list_folder_id)
       const result = await callHunterApi({
         path: `/leads-lists/${id}`,
         apiKey,
         baseUrl,
         method: "PUT",
-        params: { name },
+        params,
       })
       return withDeepLink(result, `/leads?leads_list_id=${id}`)
     },

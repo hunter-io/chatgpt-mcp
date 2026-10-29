@@ -371,6 +371,8 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | LF1 | `List-Leads-List-Folders` | `Show my leads-list folders` | Folders with name + list count | ☐ | |
 | LF2 | `Create-Leads-List-Folder` (write) | `Create a leads-list folder called "Playbook"` | Folder created, id returned | ☐ | |
 | LF3 | `Update-Leads-List-Folder` (write) | `Rename leads-list folder <FOLDER_ID> to "Playbook Renamed"` | Folder renamed | ☐ | |
+| LF3a | `Update-Leads-List` (destructive) | `Move leads list <LEADS_LIST_ID> into folder <FOLDER_ID>` | Name unchanged; `Get-Leads-List` shows `leads_list_folder_id` = `<FOLDER_ID>` | ☐ | |
+| LF3b | `Update-Leads-List` (destructive) | `Take leads list <LEADS_LIST_ID> out of its folder` | `leads_list_folder_id` is null (Unfiled) | ☐ | |
 | LF4 | `Delete-Leads-List-Folder` (destructive) | `Delete leads-list folder <FOLDER_ID>` | Confirmation; on accept removed (its lists are un-filed, not deleted) | ☐ | |
 | LF5 | `Favorite-Leads-List` (write) | `Mark leads list <LEADS_LIST_ID> as a favorite` | List favorited; reversible | ☐ | |
 | LF6 | `Unfavorite-Leads-List` (write) | `Remove leads list <LEADS_LIST_ID> from my favorites` | List unfavorited | ☐ | |
