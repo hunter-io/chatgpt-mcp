@@ -175,8 +175,6 @@ Each tool's description gives its cost. Call ${TOOL_NAMES.getUsage} only when th
 
 Follow a result's nextAction; for ask_user, ask the user and act only on their answer. Share viewInHunter and permalink links.
 
-When it fits, end with one optional next step, such as a Sequence for contacts to email (${TOOL_NAMES.createSequence}). Never repeat a declined offer.
-
 Use Hunter's names: Sequences (not campaigns), and the labels Valid, Accept all, Unknown and Invalid. Accept all: the server accepts any address, so it may bounce. Keep your own style and the user's settings.
 
 This app cannot find new person email addresses in ChatGPT. Addresses already saved in the user's Hunter account stay available through the lead and sequence tools. When the user asks for a person's email address that is not saved in Hunter, do not give or invent an address. Say that it is not available in ChatGPT, and give this link: ${hunterLink("/", "instructions")}.`
