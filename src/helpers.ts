@@ -414,6 +414,17 @@ function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
 }
 
 /**
+ * What the user reads when they run out of credits. Rails' 402 text says to
+ * upgrade or buy credits, and OpenAI's app guidelines forbid selling
+ * subscriptions, tokens, or credits inside ChatGPT, freemium upsells included.
+ * So the notice ignores it and stays neutral (HUN-20170). The main MCP server
+ * says how to get more (HUN-24653).
+ */
+function quotaExceededMessage(_upstream: string): string {
+  return "Your monthly Hunter quota is exhausted. Quota resets at the start of your next billing cycle."
+}
+
+/**
  * Maps Hunter API HTTP status + body to a typed `errorSchema` envelope. Even
  * though the MCP SDK skips validation when `isError: true`, the agent needs
  * typed recovery information (retryable? retry_after? which field?) to plan
@@ -446,6 +457,38 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   const rawMessage = parsedDetails || body || `HTTP ${status}`
   const message = sanitizeUpstreamMessage(rawMessage)
 
+  // QUOTA_EXCEEDED_START
+  // Out of credits. Rails tells the ChatGPT app with a 402 and every other API
+  // caller with a 429 `too_many_requests` (Api::Concerns::Validation
+  // #add_rate_limit_error). Rack::Attack throttling reuses that id with a 403,
+  // and a restricted account answers 429 with its own id, so neither lands here.
+  // Before HUN-24653 the 429 fell through to `rate_limited`, which invites a retry.
+  //
+  // The upstream message is logged for triage. What the user reads comes from
+  // each worker's own `quotaExceededMessage`, outside this region.
+  //
+  // This block must be BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and
+  // remote-mcp/src/helpers.ts — enforced by scripts/check-tool-names-aligned.mjs.
+  if (status === 402 || (status === 429 && parsedField === "too_many_requests")) {
+    console.warn(`mapHunterError: out-of-credits ${status} response; upstream message: ${message}`)
+    return {
+      code: "quota_exceeded",
+      retryable: false,
+      ...(parsedField && { field: parsedField }),
+      message: quotaExceededMessage(message),
+    }
+  }
+  // QUOTA_EXCEEDED_END
+  // Api::Concerns::Validation answers 429 `restricted_account` for a team with no
+  // usable subscription, a suspended or unpaid team, or a blocked user; it also
+  // defines `blocked_account`. No retry lifts either.
+  if (status === 429 && (parsedField === "restricted_account" || parsedField === "blocked_account")) {
+    return {
+      code: "unauthorized",
+      retryable: false,
+      message: `This Hunter account is restricted, so no request can run until access is restored. Retrying will not help. Log in to Hunter to see why, or contact Hunter support at ${hunterLink("/contact")}.`,
+    }
+  }
   if (status === 429) {
     const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
     return {
@@ -455,31 +498,6 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
       message,
     }
   }
-  // QUOTA_SCRUB_START
-  // HUN-20170: scrub the upstream upgrade/checkout CTA. Hunter's 402 response
-  // body includes copy like "Please log in to Hunter to upgrade your plan or
-  // purchase additional credits." OpenAI's app submission guidelines forbid
-  // selling subscriptions, tokens, or credits inside ChatGPT (including
-  // freemium upsells), so the user-facing message must be a neutral quota
-  // notice — the upstream message is logged once (sanitized) for operator
-  // triage and `parsedField` is surfaced on the envelope so the agent can
-  // distinguish which quota bucket tripped (search vs verification vs
-  // enrichment) without grepping prose.
-  //
-  // This block must be BYTE-IDENTICAL between chatgpt-mcp/src/helpers.ts and
-  // remote-mcp/src/helpers.ts — enforced by scripts/check-tool-names-aligned.mjs.
-  if (status === 402) {
-    console.warn(
-      `mapHunterError: scrubbed 402 quota response; upstream message: ${sanitizeUpstreamMessage(rawMessage)}`,
-    )
-    return {
-      code: "quota_exceeded",
-      retryable: false,
-      ...(parsedField && { field: parsedField }),
-      message: "Your monthly Hunter quota is exhausted. Quota resets at the start of your next billing cycle.",
-    }
-  }
-  // QUOTA_SCRUB_END
   // HUN-18680: Rails' Api::Concerns::Idempotency returns 409 with
   // `Retry-After: 2` (IDEMPOTENCY_RETRY_AFTER_SECONDS) while a request
   // carrying the same Idempotency-Key is still in flight. The original

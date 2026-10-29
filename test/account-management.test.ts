@@ -155,7 +155,7 @@ describe("Get-Usage", () => {
     ).not.toThrow()
   })
 
-  it("passes a 429 restricted-account error through as isError", async () => {
+  it("passes a 429 restricted-account error through as a non-retryable isError", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonError(
         { errors: [{ id: "restricted_account", code: 429, details: "Your account has no usable subscription." }] },
@@ -165,7 +165,11 @@ describe("Get-Usage", () => {
     const result = await tool("Get-Usage").handler({})
     expect(result.isError).toBe(true)
     const sc = result.structuredContent as any
-    expect(sc.error.code).toBe("rate_limited")
+    expect(sc.error).toMatchObject({ code: "unauthorized", retryable: false })
+    expect(sc.error.message).toContain(
+      "contact Hunter support at https://hunter.io/contact?utm_source=hunter-chatgpt&utm_medium=chatgpt-app",
+    )
+    expect(sc.error.message.toLowerCase()).not.toMatch(/upgrade|purchase|buy/)
     const schema = publishedOutputSchema(tool("Get-Usage").outputSchema!)
     expect(() => schema.parse(sc)).not.toThrow()
   })

@@ -3252,11 +3252,14 @@ describe("HUN-20170: 402 quota response scrubs the upstream upgrade CTA", () => 
       const err = (result.structuredContent as { error: { code: string; message: string; field?: string } }).error
       expect(err.code).toBe("quota_exceeded")
 
-      // CRITICAL: the user-facing message must not contain ANY upgrade-CTA copy.
+      // CRITICAL: the user-facing message must not contain ANY upgrade-CTA copy,
+      // nor the main MCP server's how-to-get-more copy (HUN-24653).
       const userText = result.content[0]?.text ?? ""
       expect(userText.toLowerCase()).not.toContain("upgrade")
       expect(userText.toLowerCase()).not.toContain("purchase")
+      expect(userText.toLowerCase()).not.toContain("buy")
       expect(userText.toLowerCase()).not.toContain("please log in")
+      expect(userText).not.toContain("hunter.io/usage")
 
       // And it MUST contain the neutral quota notice.
       expect(userText).toContain("quota is exhausted")
@@ -3267,12 +3270,52 @@ describe("HUN-20170: 402 quota response scrubs the upstream upgrade CTA", () => 
       // logs. Verify the warn fired with the upstream content.
       expect(warnSpy).toHaveBeenCalledTimes(1)
       const warnArg = warnSpy.mock.calls[0]?.[0] ?? ""
-      expect(warnArg).toContain("scrubbed 402 quota response")
+      expect(warnArg).toContain("out-of-credits 402 response")
+      expect(warnArg).toContain("purchase additional credits")
 
       // And `parsedField` (the Hunter `errors[0].id` hint) is surfaced on the
       // envelope so the agent can recover programmatically without grepping
       // the user-facing prose.
       expect(err.field).toBe("payment_required")
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  // HUN-24653: the shared QUOTA_EXCEEDED region also reads the 429 Rails sends
+  // other API callers. ChatGPT never gets it today, but it must stay neutral too.
+  it("treats a 429 too_many_requests as out of credits, with the same neutral notice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [
+                {
+                  id: "too_many_requests",
+                  code: 429,
+                  details: "You've reached the limit for the number of verifications per billing period included in your plan.",
+                },
+              ],
+            }),
+          ),
+      }),
+    )
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    try {
+      const result = await registeredTools.get("Email-Verifier")!.handler({ email: "user@example.com" })
+
+      const err = (result.structuredContent as { error: { code: string; retryable: boolean; message: string } }).error
+      expect(err.code).toBe("quota_exceeded")
+      expect(err.retryable).toBe(false)
+      expect(err.message).toBe(
+        "Your monthly Hunter quota is exhausted. Quota resets at the start of your next billing cycle.",
+      )
     } finally {
       warnSpy.mockRestore()
     }
