@@ -16,6 +16,7 @@ import {
   withDeepLink,
 } from "../helpers"
 import { buildResponseSchema, nullableNumber } from "../schemas/common"
+import { withCodexFullServerHint } from "../codex-hint"
 
 interface EmailVerifierData {
   status?: string
@@ -141,13 +142,15 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       // The ChatGPT app cannot show the addresses (HUN-23709). Hand the user the
       // Hunter page that does.
       const linked = withDeepLink(result, hunterDomainSearchPath(domain), "email-count")
-      return embedNextAction(
-        linked,
-        buildNextAction({
-          kind: "complete",
-          summary:
-            "Tell the user how many email addresses Hunter has for this domain, and that they can see them on Hunter with the viewInHunter link.",
-        }),
+      return withCodexFullServerHint(
+        embedNextAction(
+          linked,
+          buildNextAction({
+            kind: "complete",
+            summary:
+              "Tell the user how many email addresses Hunter has for this domain, and that they can see them on Hunter with the viewInHunter link.",
+          }),
+        ),
       )
     },
   )

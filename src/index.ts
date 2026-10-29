@@ -20,6 +20,7 @@ import {
   withDeepLink,
 } from "./helpers"
 import { withClientUserAgent } from "./client-context"
+import { withCodexFullServerHint } from "./codex-hint"
 import { buildResponseSchema, nullableString, nullish, paginationMetaSchema } from "./schemas/common"
 import { stripDialectOnSend } from "./schema-dialect"
 
@@ -294,13 +295,15 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // path we preserve the original result so error narration in content[]
       // is not wiped.
       const widgetResult = result.isError ? result : { ...result, content: [] as McpTextResult["content"] }
-      return embedNextAction(
-        widgetResult,
-        buildNextAction({
-          kind: "ask_user",
-          question:
-            "I found matching companies. Should I save any of them, look one up in detail, or refine the search?",
-        }),
+      return withCodexFullServerHint(
+        embedNextAction(
+          widgetResult,
+          buildNextAction({
+            kind: "ask_user",
+            question:
+              "I found matching companies. Should I save any of them, look one up in detail, or refine the search?",
+          }),
+        ),
       )
     },
   )
@@ -344,12 +347,14 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       const widgetResult = result.isError
         ? result
         : { ...withoutEmailAddresses(result), content: [] as McpTextResult["content"] }
-      return embedNextAction(
-        widgetResult,
-        buildNextAction({
-          kind: "ask_user",
-          question: "Save this company as a lead? Once it is saved, I can also add it to a company list.",
-        }),
+      return withCodexFullServerHint(
+        embedNextAction(
+          widgetResult,
+          buildNextAction({
+            kind: "ask_user",
+            question: "Save this company as a lead? Once it is saved, I can also add it to a company list.",
+          }),
+        ),
       )
     },
   )

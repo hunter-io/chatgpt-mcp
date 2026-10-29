@@ -26,6 +26,7 @@ import {
   nullish,
   paginationMetaSchema,
 } from "../schemas/common"
+import { withCodexFullServerHint } from "../codex-hint"
 
 // ─── Count-Company-Emails (HUN-20855) ──────────────────────────────────────
 //
@@ -225,13 +226,15 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
         method: "POST",
         params,
       })
-      return embedNextAction(
-        withHunterLinks(result),
-        buildNextAction({
-          kind: "complete",
-          summary:
-            "Tell the user how many email addresses Hunter has at each company, and give each company's emails_on_hunter link to see them on Hunter.",
-        }),
+      return withCodexFullServerHint(
+        embedNextAction(
+          withHunterLinks(result),
+          buildNextAction({
+            kind: "complete",
+            summary:
+              "Tell the user how many email addresses Hunter has at each company, and give each company's emails_on_hunter link to see them on Hunter.",
+          }),
+        ),
       )
     },
   )

@@ -21,6 +21,7 @@ import {
   nullableString,
   paginationMetaSchema,
 } from "../schemas/common"
+import { withCodexFullServerHint } from "../codex-hint"
 
 // Company-list leaf shape from app/app/views/api/company_lists/_company_list.jbuilder:
 //   id, name, type ("static" | "dynamic"), filters (only when dynamic),
@@ -273,13 +274,15 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
       if (limit !== undefined) search.set("limit", String(limit))
       const result = await callHunterApi({ path: `/lookalikes?${search}`, apiKey, baseUrl })
       const data = (result.structuredContent as { data?: unknown } | undefined)?.data
-      if (!Array.isArray(data) || data.length === 0) return result
-      return embedNextAction(
-        result,
-        buildNextAction({
-          kind: "ask_user",
-          question: "I found similar companies. Should I save any of them to a company list?",
-        }),
+      if (!Array.isArray(data) || data.length === 0) return withCodexFullServerHint(result)
+      return withCodexFullServerHint(
+        embedNextAction(
+          result,
+          buildNextAction({
+            kind: "ask_user",
+            question: "I found similar companies. Should I save any of them to a company list?",
+          }),
+        ),
       )
     },
   )
