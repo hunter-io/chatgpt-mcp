@@ -1224,3 +1224,79 @@ describe("Delete-Sequence-Follow-Up", () => {
     expect(schema.safeParse(result.structuredContent).success).toBe(true)
   })
 })
+
+// HUN-24764: the sequence's unsubscribe wording, in HTML and plain text.
+describe("unsubscribe sentences", () => {
+  const HTML_SENTENCE = "{{link}}Unsubscribe{{/link}} if you don't want to hear from me again."
+
+  it("Create-Sequence and Update-Sequence describe the wording rules", () => {
+    for (const name of ["Create-Sequence", "Update-Sequence"]) {
+      const shape = tool(name).inputSchema as Record<string, z.ZodTypeAny>
+      const html = shape.unsubscribe_sentence.description ?? ""
+      expect(html).toContain("{{link}}")
+      expect(html).toContain("{{/link}}")
+      expect(html).toContain("200 characters")
+      expect(html).toContain("empty string")
+      expect(html).toContain("add_unsubscribe_link")
+      const plain = shape.unsubscribe_sentence_plain_text.description ?? ""
+      expect(plain).toContain("no link")
+      expect(plain).toContain("empty string")
+    }
+    expect(tool("Update-Sequence").description).toContain("unsubscribe sentences")
+  })
+
+  it("Create-Sequence forwards both sentences in the form body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(SEQUENCE_DETAIL))
+    vi.stubGlobal("fetch", mockFetch)
+    await tool("Create-Sequence").handler({
+      name: "Q3 outreach",
+      add_unsubscribe_link: true,
+      unsubscribe_sentence: HTML_SENTENCE,
+      unsubscribe_sentence_plain_text: "Reply STOP to opt out.",
+    })
+    const body = new URLSearchParams(fetchCall(mockFetch).opts.body)
+    expect(body.get("add_unsubscribe_link")).toBe("true")
+    expect(body.get("unsubscribe_sentence")).toBe(HTML_SENTENCE)
+    expect(body.get("unsubscribe_sentence_plain_text")).toBe("Reply STOP to opt out.")
+  })
+
+  it("Update-Sequence sends an empty string to go back to the default, and omits what was not given", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(okJson(SEQUENCE_DETAIL))
+    vi.stubGlobal("fetch", mockFetch)
+    await tool("Update-Sequence").handler({ sequence_id: 42, unsubscribe_sentence: "" })
+    const body = new URLSearchParams(fetchCall(mockFetch).opts.body)
+    expect(body.has("unsubscribe_sentence")).toBe(true)
+    expect(body.get("unsubscribe_sentence")).toBe("")
+    expect(body.has("unsubscribe_sentence_plain_text")).toBe(false)
+    expect(body.has("add_unsubscribe_link")).toBe(false)
+  })
+
+  it("passes an invalid sentence through as a readable invalid_input error", async () => {
+    const rule = "The unsubscribe sentence should contain the {{link}} and {{/link}} tags exactly once."
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(railsError(422, "validation_failed", rule)))
+    const result = await tool("Update-Sequence").handler({ sequence_id: 42, unsubscribe_sentence: "No link." })
+    expect(result.isError).toBe(true)
+    const error = (result.structuredContent as { error: { code: string; field?: string; message: string } }).error
+    expect(error.code).toBe("invalid_input")
+    expect(error.field).toBe("validation_failed")
+    expect(error.message).toContain(rule)
+    const schema = publishedOutputSchema(tool("Update-Sequence").outputSchema!)
+    expect(schema.safeParse(result.structuredContent).success).toBe(true)
+  })
+
+  it("Get-Sequence's published schema accepts the sentences, set, null, or not shipped yet", () => {
+    const schema = publishedOutputSchema(tool("Get-Sequence").outputSchema!)
+    const withSettings = (extra: Record<string, unknown>) => ({
+      data: { ...SEQUENCE_DETAIL.data, settings: { ...SEQUENCE_DETAIL.data.settings, ...extra } },
+    })
+    expect(
+      schema.safeParse(
+        withSettings({ unsubscribe_sentence: HTML_SENTENCE, unsubscribe_sentence_plain_text: "Reply STOP." }),
+      ).success,
+    ).toBe(true)
+    expect(
+      schema.safeParse(withSettings({ unsubscribe_sentence: null, unsubscribe_sentence_plain_text: null })).success,
+    ).toBe(true)
+    expect(schema.safeParse(withSettings({})).success).toBe(true)
+  })
+})

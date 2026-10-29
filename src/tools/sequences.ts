@@ -394,6 +394,10 @@ const sequenceSettingsSchema = z.object({
   tracked: z.boolean(),
   tracked_links: z.boolean(),
   add_unsubscribe_link: z.boolean(),
+  // The sequence's own wording, or null when it uses the owner's default. Optional so a payload
+  // from an API that has not shipped the fields yet still validates (HUN-24764).
+  unsubscribe_sentence: nullableString().optional(),
+  unsubscribe_sentence_plain_text: nullableString().optional(),
   ai_assistant_enabled: z.boolean(),
   bcc_recipient: nullableString(),
 })
@@ -603,6 +607,20 @@ const sequenceWriteFields = {
     .describe(
       "Whether an unsubscribe link is appended to outgoing emails (editable even after the sequence has started)",
     ),
+  // Content rules live in the model (Outreach#valid_unsubscribe_sentence, PlainTextValidator); the
+  // API returns a readable validation_failed error, so they are not duplicated here.
+  unsubscribe_sentence: z
+    .string()
+    .optional()
+    .describe(
+      "Unsubscribe sentence for HTML emails. Put the link text between {{link}} and {{/link}}: each tag exactly once, with text between them, for example \"{{link}}Unsubscribe{{/link}} if you don't want to hear from me again.\" At most 200 characters, tags included. Plain text only: no HTML and no URLs. Pass an empty string to go back to the account's default sentence. Used only when add_unsubscribe_link is true. Editable after the sequence has started",
+    ),
+  unsubscribe_sentence_plain_text: z
+    .string()
+    .optional()
+    .describe(
+      "Unsubscribe sentence for plain-text emails. It has no link and no {{link}} tags, for example \"If you don't want to hear from me again, please let me know.\" Plain text only: no HTML and no URLs. Pass an empty string to go back to the account's default sentence. Used only when add_unsubscribe_link is true. Editable after the sequence has started",
+    ),
 }
 
 interface SequenceWriteArgs {
@@ -616,6 +634,8 @@ interface SequenceWriteArgs {
   tracked?: boolean
   tracked_links?: boolean
   add_unsubscribe_link?: boolean
+  unsubscribe_sentence?: string
+  unsubscribe_sentence_plain_text?: string
 }
 
 // Rails-form-style body builder shared by Create-Sequence and Update-Sequence.
@@ -634,6 +654,10 @@ function buildSequenceWriteParams(args: SequenceWriteArgs): Record<string, strin
   if (args.tracked !== undefined) params.tracked = String(args.tracked)
   if (args.tracked_links !== undefined) params.tracked_links = String(args.tracked_links)
   if (args.add_unsubscribe_link !== undefined) params.add_unsubscribe_link = String(args.add_unsubscribe_link)
+  if (args.unsubscribe_sentence !== undefined) params.unsubscribe_sentence = args.unsubscribe_sentence
+  if (args.unsubscribe_sentence_plain_text !== undefined) {
+    params.unsubscribe_sentence_plain_text = args.unsubscribe_sentence_plain_text
+  }
   return params
 }
 
@@ -800,7 +824,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSequence,
     {
       description:
-        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, the `owner`, and the `ab_testing` state (`enabled`, the Variant A/B split percentages, and any `winner_variant`; every field but `enabled` is null when no A/B test is on). Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, the HTML and plain-text unsubscribe sentences — null when the account default applies, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, the `owner`, and the `ab_testing` state (`enabled`, the Variant A/B split percentages, and any `winner_variant`; every field but `enabled` is null when no A/B test is on). Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to fetch"),
       },
@@ -827,7 +851,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.createSequence,
     {
       description:
-        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Monday..6=Sunday; a Monday-Friday schedule is [0, 1, 2, 3, 4], not [1, 2, 3, 4, 5]), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, and tracking toggles (`tracked_links` requires a premium plan). The introduction email (step 0) is created automatically with an empty subject and body, and Start-Sequence fails validation while it is blank — fill it in with Update-Sequence-Follow-Up, targeting the step whose `step` is 0 (get its id from List-Sequence-Follow-Ups). Typical next steps: write the introduction email with Update-Sequence-Follow-Up, append any further steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Given a sending account that is already connected, the whole sequence can be built this way without opening the Hunter dashboard. Connecting a sending inbox is the one step that still needs the dashboard — the API only attaches an ALREADY-connected account, and email-account settings are read-only here. Free to call.",
+        "Use this when the user wants to create a new outreach sequence. Only `name` is required; the sequence is created as a DRAFT that sends nothing until it is started. Lifecycle: draft → started (Start-Sequence) → paused/archived — the schedule and sender fields lock once started, so configure them while drafting. Optional fields: sender `email_account_ids` (connected email accounts — see List-Email-Accounts; unknown ids are rejected with unknown_email_account_ids), `schedule_days` (0=Monday..6=Sunday; a Monday-Friday schedule is [0, 1, 2, 3, 4], not [1, 2, 3, 4, 5]), the daily sending window `schedule_time_start`/`schedule_time_end` (seconds since midnight, start before end), a `start_at` date (YYYY-MM-DD, not in the past), `bcc_recipient`, tracking toggles (`tracked_links` requires a premium plan), and `add_unsubscribe_link` (false by default on a sequence created here) with its wording, `unsubscribe_sentence` for HTML emails (the link text goes between {{link}} and {{/link}}) and `unsubscribe_sentence_plain_text`. The introduction email (step 0) is created automatically with an empty subject and body, and Start-Sequence fails validation while it is blank — fill it in with Update-Sequence-Follow-Up, targeting the step whose `step` is 0 (get its id from List-Sequence-Follow-Ups). Typical next steps: write the introduction email with Update-Sequence-Follow-Up, append any further steps with Create-Sequence-Follow-Up, add recipients with Add-Sequence-Recipients, then launch with Start-Sequence (a connected email account, subject, and message body are required to start). Given a sending account that is already connected, the whole sequence can be built this way without opening the Hunter dashboard. Connecting a sending inbox is the one step that still needs the dashboard — the API only attaches an ALREADY-connected account, and email-account settings are read-only here. Free to call.",
       inputSchema: {
         name: z.string().min(1).describe("Name of the new sequence (required; must not be blank)"),
         ...sequenceWriteFields,
@@ -860,7 +884,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.updateSequence,
     {
       description:
-        "Use this when the user wants to modify an existing sequence's name, schedule, senders, or settings; omitted fields are left unchanged. On a draft every field is editable. Once the sequence has STARTED or been ARCHIVED, the schedule and sender fields are locked: changing `schedule_time_start`, `schedule_time_end`, `schedule_days`, `start_at`, `email_account_ids`, `bcc_recipient`, `tracked`, or `tracked_links` is rejected with an invalid_input error (id sequence_locked) — only `name` and `add_unsubscribe_link` (a compliance lever) stay editable, and re-sending an unchanged value is tolerated. Other validation failures return field-specific errors (unknown_email_account_ids, invalid_schedule_days, invalid_schedule_window, start_at_in_the_past, tracked_links_requires_premium, ...). Returns the updated sequence. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to modify an existing sequence's name, schedule, senders, or settings; omitted fields are left unchanged. On a draft every field is editable. Once the sequence has STARTED or been ARCHIVED, the schedule and sender fields are locked: changing `schedule_time_start`, `schedule_time_end`, `schedule_days`, `start_at`, `email_account_ids`, `bcc_recipient`, `tracked`, or `tracked_links` is rejected with an invalid_input error (id sequence_locked) — only `name`, `add_unsubscribe_link` (a compliance lever), and the unsubscribe sentences (`unsubscribe_sentence`, `unsubscribe_sentence_plain_text`) stay editable, and re-sending an unchanged value is tolerated. Other validation failures return field-specific errors (unknown_email_account_ids, invalid_schedule_days, invalid_schedule_window, start_at_in_the_past, tracked_links_requires_premium, ...); an unsubscribe sentence that breaks a wording rule returns validation_failed with the rule in the message. Returns the updated sequence. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to update"),
         name: z.string().min(1).optional().describe("New name for the sequence"),
