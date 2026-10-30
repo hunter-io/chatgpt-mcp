@@ -190,8 +190,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // required field, a renamed property, a removed tool) needs a bump; an
       // additive or schema-neutral change can ride the current version. 4.0.1 adds
       // the feature_not_in_plan error code (HUN-24654); 4.0.2 lets Create-Leads-List
-      // and Update-Leads-List save a dynamic list (HUN-24762).
-      version: "4.0.2",
+      // and Update-Leads-List save a dynamic list (HUN-24762); 4.0.3 accepts * and ~
+      // in a dynamic list's verification_status and sending_status.
+      version: "4.0.3",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,

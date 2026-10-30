@@ -24,7 +24,17 @@ const DEPARTMENTS = [
   "health",
   "operations",
 ] as const
-const VERIFICATION_STATUSES = ["valid", "accept_all", "unknown", "invalid", "webmail", "disposable", "pending"] as const
+const VERIFICATION_STATUSES = [
+  "valid",
+  "accept_all",
+  "unknown",
+  "invalid",
+  "webmail",
+  "disposable",
+  "pending",
+  "*",
+  "~",
+] as const
 const SENDING_STATUSES = [
   "clicked",
   "opened",
@@ -34,6 +44,7 @@ const SENDING_STATUSES = [
   "bounced",
   "unsubscribed",
   "replied",
+  "*",
   "~",
 ] as const
 
@@ -73,8 +84,11 @@ export const leadFiltersSchema = z.strictObject({
   verification_status: z
     .array(z.enum(VERIFICATION_STATUSES))
     .optional()
-    .describe("Filter leads by verification status"),
-  sending_status: z.array(z.enum(SENDING_STATUSES)).optional().describe("Sending statuses; ~ means none"),
+    .describe("Filter leads by verification status, or * (any status) or ~ (no status)"),
+  sending_status: z
+    .array(z.enum(SENDING_STATUSES))
+    .optional()
+    .describe("Filter leads by sending status, or * (any status) or ~ (no status)"),
   tags: ids.optional().describe("Filter leads by tag IDs"),
   sequence_ids: z
     .union([z.array(z.union([z.number().int().positive(), z.literal("~")])), z.enum(["*", "~"])])

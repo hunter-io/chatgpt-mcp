@@ -122,6 +122,22 @@ describe("dynamic leads lists", () => {
     expect(input.safeParse({ name: "CEOs", type: "dynamic", filters: { sequence_ids: ["~", 123] } }).success).toBe(true)
   })
 
+  it("accepts the * and ~ status sentinels that the API reads", async () => {
+    const input = z.object(registeredTools.get("Create-Leads-List")!.inputSchema)
+    const filters = { verification_status: ["~", "valid"], sending_status: ["*"] }
+
+    expect(input.safeParse({ name: "Unverified", type: "dynamic", filters }).success).toBe(true)
+    expect(input.safeParse({ name: "CEOs", type: "dynamic", filters: { sending_status: ["any"] } }).success).toBe(false)
+
+    const mockFetch = vi.fn().mockResolvedValue(okJson({ data: dynamicList }, 201))
+    vi.stubGlobal("fetch", mockFetch)
+    await registeredTools.get("Create-Leads-List")!.handler({ name: "Unverified", type: "dynamic", filters })
+
+    const body = new URLSearchParams(mockFetch.mock.calls[0][1].body)
+    expect(body.getAll("filters[verification_status][]")).toEqual(["~", "valid"])
+    expect(body.getAll("filters[sending_status][]")).toEqual(["*"])
+  })
+
   it("surfaces the API's 422 as invalid_input", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(railsError(422, "A dynamic list needs at least one filter")))
 
