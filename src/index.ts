@@ -485,17 +485,18 @@ function addCorsHeaders(response: Response, request: Request): Response {
   })
 }
 
-// Sentry `beforeSend` — strip everything sensitive before an event leaves the
-// Worker. Two sinks (HUN-20813):
-//   1. Request headers — @sentry/cloudflare attaches them even with
-//      sendDefaultPii:false, and `x-api-key` is NOT in its default scrub
-//      denylist, so the Hunter API key would ship in plaintext.
-//   2. The request body (`request.data`) — @sentry/cloudflare captures it for
-//      textual POSTs regardless of sendDefaultPii, and the /mcp body is the
-//      JSON-RPC tools/call payload, full of end-user PII (emails, names, phone
-//      numbers, lead notes).
-// We keep url/method + the scrubbed headers for triage; drop the body, cookies,
-// and query string.
+// Sentry `beforeSend` — the backstop behind `dataCollection` in sentryOptions:
+// it removes outright what the SDK only masks, and anything a later SDK version
+// starts collecting in these places (HUN-20813).
+//   1. Credential headers — the SDK masks them as "[Filtered]"; drop them too.
+//   2. The request body (`request.data`) — the /mcp body is the JSON-RPC
+//      tools/call payload, full of end-user PII (emails, names, phone numbers,
+//      lead notes).
+//   3. `event.user` — where the SDK puts the client IP (`user.ip_address`), read
+//      from cf-connecting-ip.
+//   4. Query strings — on `request.url`, `request.query_string`, and fetch
+//      breadcrumbs.
+// We keep url/method + the scrubbed headers for triage.
 export function scrubSensitive(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   const request = event.request
   if (request) {
@@ -513,25 +514,31 @@ export function scrubSensitive(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
     delete request.cookies
     delete request.query_string
 
-    // `query_string` above is only the parsed field; the SDK also normalizes
-    // `request.url` from the raw Request.url, which still carries the `?...`
-    // search string. Drop it so no query-string value can leak via the URL.
+    // `query_string` above is only the parsed field; `request.url` comes from the
+    // raw Request.url, so drop its `?...` search string as well.
     if (request.url) {
       const queryStart = request.url.indexOf("?")
       if (queryStart !== -1) request.url = request.url.slice(0, queryStart)
     }
   }
 
-  // Fetch breadcrumbs record outgoing api.hunter.io URLs whose query string
+  delete event.user
+
+  // Fetch breadcrumbs record outgoing api.hunter.io calls whose query string
   // carries end-user PII (the email passed to Email-Verifier, lead lookups,
-  // …). Those live on event.breadcrumbs, not event.request, so strip the query
-  // here too — keeping the path so the breadcrumb trail stays useful.
+  // …). The SDK splits it off `data.url` into `data["url.query"]`, on
+  // event.breadcrumbs rather than event.request. Remove it from both, keeping
+  // the path so the breadcrumb trail stays useful.
   if (event.breadcrumbs) {
     for (const crumb of event.breadcrumbs) {
       const data = crumb.data
-      if (data && typeof data.url === "string") {
-        const queryStart = data.url.indexOf("?")
-        if (queryStart !== -1) data.url = data.url.slice(0, queryStart)
+      if (data) {
+        delete data["url.query"]
+        delete data["url.fragment"]
+        if (typeof data.url === "string") {
+          const queryStart = data.url.indexOf("?")
+          if (queryStart !== -1) data.url = data.url.slice(0, queryStart)
+        }
       }
     }
   }
@@ -689,22 +696,45 @@ const handler = {
   },
 } satisfies ExportedHandler<Env>
 
-// withSentry auto-captures uncaught exceptions / unhandled rejections from the
-// handler (and re-throws, so Cloudflare's own handling is unchanged). The DSN is
-// read from the Worker var; an empty DSN disables the SDK (ships dormant until
-// the `hunter-chatgpt-mcp` Sentry project DSN is set — HUN-20813).
-export default Sentry.withSentry(
-  (env) => ({
+// Header names matching these are masked as "[Filtered]", on top of the SDK's own
+// list (auth, token, key, cookie, …), which already covers `x-api-key`.
+const SENTRY_HEADER_DENYLIST = ["forwarded", "-ip", "remote-", "via", "-user"]
+
+export function sentryOptions(env: Env): Sentry.CloudflareOptions {
+  return {
     dsn: env.SENTRY_DSN,
     environment: env.SENTRY_ENVIRONMENT,
     // Errors only — a non-zero trace rate would keep a span open on the
     // never-closing GET /mcp stream and on streamed tool responses.
     tracesSampleRate: 0,
+    // Every category the SDK collects when left unset. `urlQueryParams` is off
+    // rather than a denylist because outgoing query strings hold values under
+    // ordinary names (`email=`, `full_name=`) that no name filter would catch.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { deny: SENTRY_HEADER_DENYLIST },
+        response: { deny: SENTRY_HEADER_DENYLIST },
+      },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    },
     // Don't buffer incoming request bodies — we always discard them in
     // beforeSend anyway, so capturing wastes a read + memory on every textual
     // POST (including unauthenticated ones). beforeSend stays a backstop.
     integrations: [Sentry.httpServerIntegration({ maxRequestBodySize: "none" })],
     beforeSend: scrubSensitive,
-  }),
-  handler,
-)
+  }
+}
+
+// withSentry auto-captures uncaught exceptions / unhandled rejections from the
+// handler (and re-throws, so Cloudflare's own handling is unchanged). The DSN is
+// read from the Worker var; an empty DSN disables the SDK (ships dormant until
+// the `hunter-chatgpt-mcp` Sentry project DSN is set — HUN-20813).
+export default Sentry.withSentry(sentryOptions, handler)

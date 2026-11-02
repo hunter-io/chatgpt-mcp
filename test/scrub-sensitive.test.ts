@@ -3,11 +3,10 @@ import { describe, expect, it } from "vitest"
 import { scrubSensitive } from "../src/index"
 
 // `scrubSensitive` is the Sentry `beforeSend` hook. Before any event leaves the
-// Worker it must remove (a) credential headers — `x-api-key` is NOT in Sentry's
-// default scrub denylist, so a regression leaks Hunter API keys — and (b) the
-// request body, which @sentry/cloudflare captures for /mcp POSTs and which holds
-// end-user PII (emails, names, phone numbers, lead notes). Tested directly (not
-// through a live SDK init) so it never depends on a DSN. See HUN-20813.
+// Worker it must remove (a) credential headers, (b) the request body, which holds
+// end-user PII (emails, names, phone numbers, lead notes), (c) `event.user`, and
+// (d) query strings. Tested directly here; sentry-options.test.ts runs the real
+// SDK. See HUN-20813.
 
 describe("scrubSensitive", () => {
   it("strips credential headers (case-insensitive) and keeps benign ones", () => {
@@ -83,6 +82,36 @@ describe("scrubSensitive", () => {
     expect(crumbs[0]?.data?.method).toBe("GET")
     // Breadcrumbs without a url are left untouched (no throw).
     expect(crumbs[2]?.category).toBe("navigation")
+  })
+
+  it("drops the query and fragment the SDK splits off fetch breadcrumb URLs", () => {
+    const event = {
+      breadcrumbs: [
+        {
+          category: "fetch",
+          data: {
+            url: "https://api.hunter.io/v2/email-finder",
+            method: "GET",
+            status_code: 200,
+            "url.query": "domain=acme.com&full_name=Jane+Doe",
+            "url.fragment": "jane@acme.com",
+          },
+        },
+      ],
+    } as unknown as ErrorEvent
+
+    const data = scrubSensitive(event).breadcrumbs?.[0]?.data ?? {}
+
+    expect(data).not.toHaveProperty(["url.query"])
+    expect(data).not.toHaveProperty(["url.fragment"])
+    expect(data.url).toBe("https://api.hunter.io/v2/email-finder")
+    expect(data.method).toBe("GET")
+  })
+
+  it("drops event.user, which holds the client IP", () => {
+    const event = { user: { ip_address: "203.0.113.7" } } as unknown as ErrorEvent
+
+    expect(scrubSensitive(event)).not.toHaveProperty("user")
   })
 
   it("returns the event unchanged when there is no request payload", () => {

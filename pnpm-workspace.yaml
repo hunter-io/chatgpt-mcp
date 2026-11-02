@@ -10,7 +10,7 @@ overrides:
   "katex@>=0.11.0 <0.18.2": "0.18.10" # 0.18.11 is deprecated
   "qs@>=6.0.0 <6.16.0": "^6.16.0"
   "tinypool@<2.1.2": "^2.1.2"
-  "undici@>=7.0.0 <7.29.1": "^7.29.1"
+  "undici@>=7.0.0 <7.30.1": "^7.30.1"
 
 # Keeps pnpm-lock.yaml a single YAML document: GitHub's dependency graph reads
 # only the first one, so the env document pnpm writes for the packageManager pin
