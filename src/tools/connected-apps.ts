@@ -27,7 +27,8 @@ const connectedAppSchema = z.object({
 const listConnectedAppsOutputSchema = buildResponseSchema(z.array(connectedAppSchema), paginationMetaSchema)
 
 // Attribute mapping pairs an integration field with a Hunter field. From
-// show.jbuilder: `json.attribute_mappings ... { target_field, source_field }`.
+// show.jbuilder: `json.attribute_mappings ... { target_field, source_field }`,
+// plus `direction` and `conflict_policy` while salesforce_sync_object is on.
 // Both `target_field` and `source_field` are NULLABLE columns on
 // attribute_mappings (db/structure.sql) and the jbuilder emits them raw, so a
 // mapping with an unset side serializes as null. Admit null — otherwise the SDK
@@ -36,6 +37,8 @@ const listConnectedAppsOutputSchema = buildResponseSchema(z.array(connectedAppSc
 const attributeMappingSchema = z.object({
   target_field: nullableString(),
   source_field: nullableString(),
+  direction: z.string().optional(),
+  conflict_policy: nullableString().optional(),
 })
 
 // show.jbuilder wraps the same per-item shape plus an `attribute_mappings`
@@ -75,7 +78,7 @@ export function registerConnectedAppTools(server: McpServer, apiKey: string, bas
     TOOL_NAMES.getConnectedApp,
     {
       description:
-        "Use this when the user wants the details of a single connected app, identified by ID, including its `attribute_mappings` — the list of `target_field` ↔ `source_field` pairs that map Hunter fields to the integration's fields. Present the mappings as a table or list. Also returns the `provider`, resolved `name`, `category`, `provider_email`, and `connected_at` / `updated_at` timestamps. Returns a not_found error if the app does not exist or belongs to a different team. Free to call.",
+        "Use this when the user wants the details of a single connected app, identified by ID, including its `attribute_mappings` — the list of `target_field` ↔ `source_field` pairs that map Hunter fields to the integration's fields. Each mapping may also include a `direction` (`export` to the integration, `import` into Hunter, or `both`) and a `conflict_policy` for imports (`crm_wins` overwrites the Hunter value, `fill_if_empty` only fills an empty one; null for export-only mappings). Present the mappings as a table or list. Also returns the `provider`, resolved `name`, `category`, `provider_email`, and `connected_at` / `updated_at` timestamps. Returns a not_found error if the app does not exist or belongs to a different team. Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the connected app to retrieve"),
       },
