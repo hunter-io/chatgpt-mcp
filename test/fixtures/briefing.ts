@@ -129,7 +129,7 @@ export function peopleResultsBody() {
 
 export function companyResultsBody() {
   return {
-    data: [{ domain: "acme.io", emails_count: { personal: 12, generic: 3, total: 15 } }],
+    data: [{ domain: "acme.io", company_name: "Acme", emails_count: { personal: 12, generic: 3, total: 15 } }],
     meta: { type: "companies", results: 1, limit: 20, offset: 0 },
   }
 }
@@ -142,7 +142,7 @@ export function signalsBody() {
         source: "leads",
         type: "funding_round",
         occurred_at: "2026-11-02T10:00:00.000000Z",
-        company: { domain: "stripe.com", name: null },
+        company: { domain: "stripe.com", name: "Stripe" },
         details: { round_type: "Series A", amount_usd: 12000000, announced_on: "2026-11-02" },
         signal_id: null,
         next_call: nextCall("GET /v2/domain-search", { domain: "stripe.com" }, "Domain-Search", true),

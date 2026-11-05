@@ -16,17 +16,16 @@ import {
   hunterResultText,
   withDeepLink,
 } from "../helpers"
-import { buildResponseSchema, nullableBoolean, nullableNumber, nullableString } from "../schemas/common"
+import { buildResponseSchema, nullableBoolean, nullableNumber, nullableString, nullish } from "../schemas/common"
 
 // The Agent briefing endpoints of P-HUN-674 (HUN-24935): GET /v2/briefing,
 // /v2/opportunities, /v2/opportunities/:id/results, /v2/signals and
 // /v2/monitored-signals. All are free and read-only.
 //
 // Each handler keeps only the fields the output schemas declare: the endpoints
-// leave out every LinkedIn-derived value, and a field Rails adds later must not
-// reach the model before someone checks it. `company_name` and `company.name`,
-// always null for that reason, are left out too. remote-mcp/src/tools/briefing.ts
-// is the main server's copy. This one has no Domain-Search, so the next steps
+// leave out LinkedIn job, hiring and people-move data, and a field Rails adds
+// later must not reach the model before someone checks it.
+// remote-mcp/src/tools/briefing.ts is the main server's copy. This one has no Domain-Search, so the next steps
 // differ, and it shows no person rows (HUN-23709).
 
 // The tool behind each `next_call`, from its endpoint. The API text never picks
@@ -134,6 +133,8 @@ const opportunityPersonSchema = z.object({
 
 const opportunityCompanySchema = z.object({
   domain: z.string(),
+  // Optional: a Rails deploy older than this worker sends no company_name.
+  company_name: nullish(z.string()),
   emails_count: z.object({
     personal: z.number().int(),
     generic: z.number().int(),
@@ -153,7 +154,7 @@ const signalEventSchema = z.object({
   source: z.string(),
   type: z.string(),
   occurred_at: z.string(),
-  company: z.object({ domain: z.string() }),
+  company: z.object({ domain: z.string(), name: nullableString() }),
   details: z.object({
     round_type: nullableString().optional(),
     amount_usd: nullableNumber().optional(),

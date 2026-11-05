@@ -211,6 +211,10 @@ describe("List-Signals", () => {
       ["types[]", "technology_added"],
     ])
     expect(result.structuredContent.data[0].next_call.mcp_tool).toBeNull()
+    expect(result.structuredContent.data.map((event: { company: unknown }) => event.company)).toEqual([
+      { domain: "stripe.com", name: "Stripe" },
+      { domain: "acme.io", name: null },
+    ])
     expect(result.structuredContent.nextAction.kind).toBe("complete")
     expect(JSON.stringify(result.structuredContent.nextAction)).not.toContain("Domain-Search")
   })
