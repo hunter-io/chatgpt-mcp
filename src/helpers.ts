@@ -58,6 +58,18 @@ export const HUNTER_BASE = "https://hunter.io"
 // silently desync the success-path text from the structuredContent.
 export const HUNTER_SOURCE_SUFFIX = "\n\nSource: Hunter.io (https://hunter.io)"
 
+/**
+ * The text block of a Hunter JSON result, as callHunterApi builds it on success:
+ * the body and the source, with credential-shaped strings redacted. A tool that
+ * rewrites `structuredContent` rebuilds its text with it.
+ */
+export function hunterResultText(structuredContent: Record<string, unknown>): string {
+  return sanitizeUpstreamMessage(
+    `${JSON.stringify(structuredContent)}${HUNTER_SOURCE_SUFFIX}`,
+    Number.POSITIVE_INFINITY,
+  )
+}
+
 // TOOL_NAMES_START
 // Single source of truth for every tool name exposed by Hunter MCPs.
 // All names use PascalCase-Hyphenated for consistency. Semantic renames:
@@ -184,6 +196,12 @@ export const TOOL_NAMES = {
   pushLeadsToCrm: "Push-Leads-To-CRM",
   listWebhooks: "List-Webhooks",
   updateWebhook: "Update-Webhook",
+  // briefing, opportunities and signals (HUN-24935)
+  getBriefing: "Get-Briefing",
+  listOpportunities: "List-Opportunities",
+  getOpportunityResults: "Get-Opportunity-Results",
+  listSignals: "List-Signals",
+  listMonitoredSignals: "List-Monitored-Signals",
   // usage
   getUsage: "Get-Usage",
   // feedback
@@ -426,6 +444,12 @@ function quotaExceededMessage(_upstream: string): string {
   return "Your monthly Hunter quota is exhausted. Quota resets at the start of your next billing cycle."
 }
 
+// The seconds of a Retry-After header, or undefined when it holds no usable number.
+function parseRetryAfter(retryAfter: string | null): number | undefined {
+  const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined
+}
+
 /**
  * Maps Hunter API HTTP status + body to a typed `errorSchema` envelope. Even
  * though the MCP SDK skips validation when `isError: true`, the agent needs
@@ -492,11 +516,11 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
     }
   }
   if (status === 429) {
-    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+    const seconds = parseRetryAfter(retryAfter)
     return {
       code: "rate_limited",
       retryable: true,
-      ...(Number.isFinite(seconds) && seconds >= 0 && { retry_after_seconds: seconds }),
+      ...(seconds !== undefined && { retry_after_seconds: seconds }),
       message,
     }
   }
@@ -508,8 +532,7 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   // explicit wait (Retry-After parsing mirrors the 429 branch, defaulting to
   // 2) and steer the model to verify before re-creating.
   if (status === 409) {
-    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
-    const retryAfterSeconds = Number.isFinite(seconds) && seconds >= 0 ? seconds : 2
+    const retryAfterSeconds = parseRetryAfter(retryAfter) ?? 2
     return {
       code: "rate_limited",
       retryable: true,
@@ -526,11 +549,11 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   // HUN-24654: Rack::Attack throttles the API with a 403 `too_many_requests`
   // and a Retry-After header (app/config/initializers/rack_attack.rb).
   if (status === 403 && parsedField === "too_many_requests") {
-    const seconds = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN
+    const seconds = parseRetryAfter(retryAfter)
     return {
       code: "rate_limited",
       retryable: true,
-      ...(Number.isFinite(seconds) && seconds >= 0 && { retry_after_seconds: seconds }),
+      ...(seconds !== undefined && { retry_after_seconds: seconds }),
       message,
     }
   }
@@ -544,6 +567,16 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
       retryable: false,
       field: parsedField,
       message: `${message} This is a plan limit, not a connection problem.`,
+    }
+  }
+  // HUN-24935: the opportunities endpoints answer this when the team turned optional AI
+  // features off. It shares the plan gate's code because no retry or reconnect lifts it.
+  if (status === 403 && parsedField === "optional_ai_features_off") {
+    return {
+      code: "feature_not_in_plan",
+      retryable: false,
+      field: parsedField,
+      message: `${message} This is a team setting, not a plan limit or a connection problem.`,
     }
   }
   if (status === 401 || status === 403) {
@@ -561,7 +594,14 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
     }
   }
   if (status >= 500) {
-    return { code: "upstream_error", retryable: true, message }
+    // The signals and opportunities endpoints send a Retry-After with their 503 (HUN-24935).
+    const seconds = parseRetryAfter(retryAfter)
+    return {
+      code: "upstream_error",
+      retryable: true,
+      ...(seconds !== undefined && { retry_after_seconds: seconds }),
+      message,
+    }
   }
   return { code: "validation", retryable: false, message }
 }

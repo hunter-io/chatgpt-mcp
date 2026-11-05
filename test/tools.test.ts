@@ -193,6 +193,12 @@ const ALL_TOOL_NAMES = [
   "Update-Webhook",
   "Get-Usage",
   "Report-API-Feedback",
+  // Briefing, opportunities and signals (HUN-24935)
+  "Get-Briefing",
+  "List-Opportunities",
+  "Get-Opportunity-Results",
+  "List-Signals",
+  "List-Monitored-Signals",
 ]
 
 describe("tool registration", () => {
@@ -259,7 +265,14 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
 
   // READ_ONLY_PUBLIC: public-data lookups (Hunter's hosted index of public-
   // internet data). readOnly=true, destructive=false, openWorld=true.
-  const readOnlyPublicTools = ["Find-Companies", "Email-Count", "Count-Company-Emails", "Find-Similar-Companies"]
+  const readOnlyPublicTools = [
+    "Find-Companies",
+    "Email-Count",
+    "Count-Company-Emails",
+    "Find-Similar-Companies",
+    "Get-Opportunity-Results",
+    "List-Signals",
+  ]
 
   it.each(readOnlyPublicTools)("tool '%s' has read-only-public annotations", (name) => {
     const tool = registeredTools.get(name)
@@ -324,6 +337,9 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Get-Custom-Attribute",
     "List-Sequences",
     "List-Sequence-Recipients",
+    "Get-Briefing",
+    "List-Opportunities",
+    "List-Monitored-Signals",
   ]
 
   it.each(privateReadTools)("tool '%s' has private-read annotations", (name) => {
@@ -1184,6 +1200,75 @@ describe("403 mapping", () => {
     const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
 
     expect((result.structuredContent as { error: { code: string } }).error.code).toBe("unauthorized")
+  })
+
+  // HUN-24935: the opportunities endpoints answer this when the team turned optional AI
+  // features off. Mapped to `unauthorized`, it made the agent ask the user to reconnect.
+  it("maps the optional_ai_features_off 403 to a team setting", async () => {
+    vi.stubGlobal(
+      "fetch",
+      forbidden(
+        "optional_ai_features_off",
+        "Opportunities are turned off because your team turned off optional AI features.",
+      ),
+    )
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect((result.structuredContent as { error: unknown }).error).toEqual({
+      code: "feature_not_in_plan",
+      retryable: false,
+      field: "optional_ai_features_off",
+      message:
+        "Opportunities are turned off because your team turned off optional AI features. This is a team setting, not a plan limit or a connection problem.",
+    })
+  })
+})
+
+// HUN-24935: the signals and opportunities endpoints answer 503 with a Retry-After when a feed times out.
+describe("5xx mapping", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  function unavailable(headers: Record<string, string>) {
+    return vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: new Headers(headers),
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            errors: [{ id: "signals_unavailable", code: 503, details: "Signals are temporarily unavailable." }],
+          }),
+        ),
+    })
+  }
+
+  it("keeps a 503 retryable and passes on its Retry-After", async () => {
+    vi.stubGlobal("fetch", unavailable({ "Retry-After": "30" }))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect((result.structuredContent as { error: unknown }).error).toEqual({
+      code: "upstream_error",
+      retryable: true,
+      retry_after_seconds: 30,
+      message: "Signals are temporarily unavailable.",
+    })
+  })
+
+  it("leaves the wait out when the 5xx sends no Retry-After", async () => {
+    vi.stubGlobal("fetch", unavailable({}))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect((result.structuredContent as { error: unknown }).error).toEqual({
+      code: "upstream_error",
+      retryable: true,
+      message: "Signals are temporarily unavailable.",
+    })
   })
 })
 
@@ -4829,5 +4914,30 @@ describe("HUN-24761: leads-list folder assignment", () => {
     const result = await registeredTools.get("List-Leads-Lists")!.handler({})
 
     expect(outputSchema("List-Leads-Lists").safeParse(result.structuredContent).success).toBe(true)
+  })
+})
+
+// HUN-24703: the API only accepts Domain::COMPANY_TYPE_LIST values for a lead's
+// company_type, so the lead tools offer exactly those values.
+describe("HUN-24703: lead tools only accept the API's company_type values", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const LEAD_TOOLS = ["Create-Lead", "Update-Lead", "Create-Or-Update-Lead", "Create-Lead-If-Missing"]
+  const inputOf = (name: string) => z.object(registeredTools.get(name)!.inputSchema as z.ZodRawShape)
+
+  it.each(LEAD_TOOLS)("%s rejects a value that the API rejects", (name) => {
+    expect(inputOf(name).safeParse({ id: 1, email: "a@b.com", company_type: "private" }).success).toBe(false)
+  })
+
+  it.each(LEAD_TOOLS)("%s accepts an API value", (name) => {
+    expect(inputOf(name).safeParse({ id: 1, email: "a@b.com", company_type: "privately held" }).success).toBe(true)
+  })
+
+  it.each(["Update-Lead", "Create-Or-Update-Lead"])("%s accepts an empty string to clear the value", (name) => {
+    expect(inputOf(name).safeParse({ id: 1, email: "a@b.com", company_type: "" }).success).toBe(true)
   })
 })

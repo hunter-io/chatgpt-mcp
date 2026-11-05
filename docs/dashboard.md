@@ -38,7 +38,7 @@ justifications from this file.
 
 > **4.0.0 — posture summary.** A tool is `openWorldHint: true` only if it reads
 > the Hunter index of open-internet data (`Find-Companies`, `Find-Similar-Companies`, `Email-Count`,
-> `Count-Company-Emails`, `Email-Verifier`, `Company-Enrichment`), or if it can have an
+> `Count-Company-Emails`, `Email-Verifier`, `Company-Enrichment`, `Get-Opportunity-Results`, `List-Signals`), or if it can have an
 > effect outside the account of the user. These tools have that effect: `Start-Sequence` (sends),
 > `Resume-Sequence` and `Add-Sequence-Recipients` (can schedule real email),
 > and `Push-Leads-To-CRM` (lead data goes to the external CRM of the user). The

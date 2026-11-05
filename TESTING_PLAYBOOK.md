@@ -415,6 +415,16 @@ All five bulk tools are confirmation-gated: the confirmation must state the affe
 |---|------|--------|----------|------|-------|
 | U1 | `Get-Usage` | `How many credits have I used this month?` | Usage summary: searches/verifications/credits used vs plan quota. Free, no credits deducted | ☐ | |
 
+### Briefing, opportunities and signals (HUN-24935)
+
+| # | Tool | Prompt | Expected | Pass | Notes |
+|---|------|--------|----------|------|-------|
+| BR1 | `Get-Briefing` | `What should I do in Hunter today?` | Counts of new lead signal and Monitored Signal events, this week's opportunities, and the plan and credits. An `unavailable` item says to try again later; a `no_access` item says it is not in the plan or is off by a team setting. Chains to `List-Signals` for the first item with a count. Free | ☐ | |
+| BR2 | `List-Opportunities` | `Show me this week's opportunities` | Opportunities with type, source, description, results_count and score. Chains to `Get-Opportunity-Results` for the best companies opportunity. A plan without opportunities → "not available on your plan", no reconnect prompt. Free | ☐ | |
+| BR3 | `Get-Opportunity-Results` (open-world) | `Show the companies of opportunity <OPPORTUNITY_ID>` | Companies with domain and email counts, then asks whether to save them. A people opportunity → no person rows, only the count and a hunter.io link. Free | ☐ | |
+| BR4 | `List-Signals` (open-world) | `What happened at the companies in my lists this week?` | Events with company domain, type, date and details, no email address and no Domain-Search step. Monitored: `Show the events of my Monitored Signal <SIGNAL_ID>`. Free | ☐ | |
+| BR5 | `List-Monitored-Signals` | `Which Monitored Signals do I have?` | Funding signals and company follows with status and filters; chains to `List-Signals` with `source=monitored`. Free | ☐ | |
+
 ### Feedback
 
 | # | Tool | Prompt | Expected | Pass | Notes |
@@ -848,7 +858,7 @@ Annotations follow one posture:
 
 - **Reads** are `readOnlyHint: true` + `openWorldHint: false` — private
   reads of the user's own Hunter data.
-- **Public-index reads** (`Find-Companies`, `Find-Similar-Companies`, `Email-Count`, `Count-Company-Emails`)
+- **Public-index reads** (`Find-Companies`, `Find-Similar-Companies`, `Email-Count`, `Count-Company-Emails`, `Get-Opportunity-Results`, `List-Signals`)
   are `readOnlyHint: true` + `openWorldHint: true`. They read the Hunter
   index of public web data.
 - **Creates** are private, non-destructive writes (`destructiveHint:
@@ -1139,7 +1149,7 @@ The OpenAI Apps SDK submission form has a **Test cases** section (positive `vers
 
 ## Appendix — Tool inventory
 
-The 94 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). If a tool is added, extend the matrix in Section 2 before the next test run. Only `Email-Verifier` and `Company-Enrichment` use credits; all other tools are free.
+The 99 tools exposed by the Hunter ChatGPT MCP (version 4.0.3; the five briefing tools of HUN-24935 joined the 94 of 4.0.0), grouped by domain — mirrors the `TOOL_NAMES` block in `src/helpers.ts` (the single source of truth). If a tool is added, extend the matrix in Section 2 before the next test run. Only `Email-Verifier` and `Company-Enrichment` use credits; all other tools are free.
 
 | Group | Tools |
 |-------|-------|
@@ -1161,6 +1171,7 @@ The 94 tools exposed by the Hunter ChatGPT MCP (version 4.0.0), grouped by domai
 | Discover people counts & saved searches (V3) | `Count-Company-Emails` (counts only, with a hunter.io link), `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
 | Connected apps & integrations | `List-Connected-Apps`, `Get-Connected-App`, `Push-Leads-To-CRM` (V3), `List-Webhooks` (V3), `Update-Webhook` (V3) |
 | Custom attributes | `List-Custom-Attributes`, `Get-Custom-Attribute`, `Create-Custom-Attribute`, `Update-Custom-Attribute`, `Delete-Custom-Attribute` |
+| Briefing, opportunities and signals (HUN-24935) | `Get-Briefing`, `List-Opportunities`, `Get-Opportunity-Results` (companies only; a people opportunity gives its count and a hunter.io link), `List-Signals`, `List-Monitored-Signals` |
 | Feedback | `Report-API-Feedback` (free; agents report API/tool friction — missing endpoints, wrong docs, bad data, bugs) |
 | Named prompts | `build-list` (from email addresses the user gives), `sequence-prep` |
 | Widgets | `discover-widget`, `company-widget` |

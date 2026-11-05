@@ -24,6 +24,22 @@ import {
   verificationSchema,
 } from "../schemas/common"
 
+// Domain::COMPANY_TYPE_LIST (app/app/models/domain.rb): the API rejects any
+// other company_type with "Company type is not included in the list" (HUN-24703).
+// services/remote-mcp/test/tools.test.ts checks this copy against Rails.
+const COMPANY_TYPES = [
+  "educational",
+  "educational institution",
+  "government agency",
+  "non profit",
+  "partnership",
+  "privately held",
+  "public company",
+  "self employed",
+  "self owned",
+  "sole proprietorship",
+] as const
+
 const leadFieldsSchema = {
   email: z.string().optional().describe("Email address of the lead"),
   first_name: z.string().optional().describe("First name of the lead"),
@@ -32,7 +48,11 @@ const leadFieldsSchema = {
   company: z.string().optional().describe("Company name"),
   company_industry: z.string().optional().describe("Industry of the company"),
   company_size: z.string().optional().describe("Size range of the company (e.g. 1-10, 11-50)"),
-  company_type: z.string().optional().describe("Type of company (e.g. public, private, non-profit)"),
+  // "" clears the value on an existing lead: Lead validates with allow_blank.
+  company_type: z
+    .enum([...COMPANY_TYPES, ""])
+    .optional()
+    .describe("Type of company. Leave it out if you are not sure. An empty string clears it on an existing lead."),
   website: z.string().optional().describe("Company website URL"),
   country_code: z.string().optional().describe("Two-letter country code (e.g. US, FR)"),
   linkedin_url: z.string().optional().describe("LinkedIn profile URL"),

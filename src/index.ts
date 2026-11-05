@@ -121,6 +121,7 @@ import { registerPrompts } from "./prompts"
 import { CAPABILITIES_RECOVERY_MD, CAPABILITIES_RECOVERY_URI } from "./resources/capabilities-recovery"
 import { registerAccountTools } from "./tools/account"
 import { registerAccountManagementTools } from "./tools/account-management"
+import { registerBriefingTools } from "./tools/briefing"
 import { registerBulkOperationTools } from "./tools/bulk-operations"
 import { registerCompanyListTools } from "./tools/company-lists"
 import { registerConnectedAppTools } from "./tools/connected-apps"
@@ -400,6 +401,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
   registerDiscoverTools(server, apiKey, baseUrl)
   registerIntegrationTools(server, apiKey, baseUrl)
   registerAccountManagementTools(server, apiKey, baseUrl)
+  registerBriefingTools(server, apiKey, baseUrl)
   registerFeedbackTools(server, apiKey, baseUrl)
   registerPrompts(server)
 
