@@ -201,6 +201,52 @@ describe("Get-Opportunity-Results", () => {
 })
 
 describe("List-Signals", () => {
+  it("keeps the details of every signal type the app shows", async () => {
+    const body = signalsBody()
+    const base = body.data[0]!
+    const events = [
+      {
+        ...base,
+        id: "lead:domain_event:1",
+        type: "job_posted",
+        details: {
+          job: {
+            title: "Engineer",
+            location: "Paris",
+            country: "France",
+            employer_url: "https://stripe.com/jobs/1",
+            active: true,
+          },
+        },
+      },
+      {
+        ...base,
+        id: "lead:domain_event:2",
+        type: "hiring_volume",
+        details: { open_roles: 12, role_clusters: [{ label: "Engineers", count: 6 }] },
+      },
+      {
+        ...base,
+        id: "lead:domain_event:3",
+        type: "company_growth",
+        details: { growth_percent: 25, window_months: 6, base_headcount: 80, current_headcount: 100 },
+      },
+      { ...base, id: "lead:domain_event:4", type: "new_executive", details: { title: "Chief Technology Officer" } },
+      {
+        ...base,
+        id: "lead:email_event:5",
+        type: "position_changed",
+        details: { lead_id: 5, from: "Manager", to: "VP Sales" },
+      },
+    ]
+    stubFetch({ ...body, data: events })
+
+    const result = await call("List-Signals", { source: "leads", types: ["job_posted", "position_changed"] })
+    const details = result.structuredContent.data.map((event: { details: unknown }) => event.details)
+
+    expect(details).toEqual(events.map((event) => event.details))
+  })
+
   it("names no tool that ChatGPT lacks, and completes after the events", async () => {
     const fetchMock = stubFetch(signalsBody())
 

@@ -22,9 +22,8 @@ import { buildResponseSchema, nullableBoolean, nullableNumber, nullableString, n
 // /v2/opportunities, /v2/opportunities/:id/results, /v2/signals and
 // /v2/monitored-signals. All are free and read-only.
 //
-// Each handler keeps only the fields the output schemas declare: the endpoints
-// leave out LinkedIn job, hiring and people-move data, and a field Rails adds
-// later must not reach the model before someone checks it.
+// Each handler keeps only the fields the output schemas declare: a field Rails
+// adds later must not reach the model before someone checks it.
 // remote-mcp/src/tools/briefing.ts is the main server's copy. This one has no Domain-Search, so the next steps
 // differ, and it shows no person rows (HUN-23709).
 
@@ -41,7 +40,21 @@ function nextCallTool(endpoint: string): ToolName | null {
   return NEXT_CALL_TOOLS.find(([pattern]) => pattern.test(endpoint))?.[1] ?? null
 }
 
-const SIGNAL_EVENT_TYPES = ["funding_round", "technology_added", "technology_removed", "new_contact"] as const
+// The lead-signal types the dashboard renders. hiring_volume, hiring_spike and
+// company_growth reach only the accounts that have them.
+const SIGNAL_EVENT_TYPES = [
+  "funding_round",
+  "technology_added",
+  "technology_removed",
+  "new_contact",
+  "new_executive",
+  "job_posted",
+  "hiring_volume",
+  "hiring_spike",
+  "company_growth",
+  "location_changed",
+  "position_changed",
+] as const
 
 const nextCallSchema = z.object({
   endpoint: z.string(),
@@ -160,6 +173,27 @@ const signalEventSchema = z.object({
     amount_usd: nullableNumber().optional(),
     announced_on: nullableString().optional(),
     technology: z.object({ slug: z.string(), name: z.string() }).optional(),
+    title: nullableString().optional(),
+    job: z
+      .object({
+        title: nullableString(),
+        location: nullableString(),
+        country: nullableString(),
+        employer_url: nullableString(),
+        active: nullableBoolean(),
+      })
+      .optional(),
+    open_roles: nullableNumber().optional(),
+    role_clusters: z.array(z.object({ label: z.string(), count: z.number().int() })).optional(),
+    previous_median: nullableNumber().optional(),
+    window_weeks: nullableNumber().optional(),
+    growth_percent: nullableNumber().optional(),
+    window_months: nullableNumber().optional(),
+    base_headcount: nullableNumber().optional(),
+    current_headcount: nullableNumber().optional(),
+    lead_id: z.union([z.number().int(), z.null()]).optional(),
+    from: nullableString().optional(),
+    to: nullableString().optional(),
   }),
   signal_id: z.union([z.number().int(), z.null()]),
   next_call: nextCallSchema,
@@ -185,6 +219,16 @@ const monitoredSignalSchema = z.object({
   filters: z.object({
     countries: filterValueSchema.optional(),
     company_sizes: filterValueSchema.optional(),
+    industries: filterValueSchema.optional(),
+    excluded_industries: filterValueSchema.optional(),
+    title_include: filterValueSchema.optional(),
+    title_exclude: filterValueSchema.optional(),
+    description_include: filterValueSchema.optional(),
+    description_exclude: filterValueSchema.optional(),
+    job_countries: filterValueSchema.optional(),
+    seniority: filterValueSchema.optional(),
+    types_of_contract: filterValueSchema.optional(),
+    departments: filterValueSchema.optional(),
     series: filterValueSchema.optional(),
     amount_raised_from: filterValueSchema.optional(),
     amount_raised_to: filterValueSchema.optional(),
@@ -313,7 +357,7 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getBriefing,
     {
       title: "Get Briefing",
-      description: desc`Get a short summary of what is new in the user's Hunter account. It answers open questions such as "What should I do in Hunter today?" or "What is new in Hunter?". It returns the number of new lead signal events (funding rounds, technology changes and new contacts at companies in the team's lists), the number of new events from the team's Monitored Signals, the number of this week's opportunities (groups of people or companies like the ones the team saved), and the plan and remaining credits. Each item has a status: ok, unavailable (it could not be read now; try again later), or no_access (the plan does not include it, or a team setting turned it off; reason gives the error id). When count_exact is false, count is a lower bound. Each item's next_call names the tool (mcp_tool) and the arguments (params) that read its details, such as ${TOOL_NAMES.listSignals} or ${TOOL_NAMES.listOpportunities}. By default it counts the last 7 days; since counts only what happened after it, at most 30 days back. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
+      description: desc`Get a short summary of what is new in the user's Hunter account. It answers open questions such as "What should I do in Hunter today?" or "What is new in Hunter?". It returns the number of new lead signal events (funding rounds, technology changes, new contacts and executives, job posts, hiring and headcount changes, and contacts who moved or changed position, in the team's lists), the number of new events from the team's Monitored Signals, the number of this week's opportunities (groups of people or companies like the ones the team saved), and the plan and remaining credits. Each item has a status: ok, unavailable (it could not be read now; try again later), or no_access (the plan does not include it, or a team setting turned it off; reason gives the error id). When count_exact is false, count is a lower bound. Each item's next_call names the tool (mcp_tool) and the arguments (params) that read its details, such as ${TOOL_NAMES.listSignals} or ${TOOL_NAMES.listOpportunities}. By default it counts the last 7 days; since counts only what happened after it, at most 30 days back. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
       inputSchema: {
         since: dateTimeSchema
           .optional()
@@ -472,7 +516,7 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listSignals,
     {
       title: "List Signals",
-      description: desc`List signal events, newest first, from the last 30 days. With source=leads, the events are on companies in the team's lists: funding rounds, technologies added or removed, and new contacts. With source=monitored, the events come from the team's Monitored Signals: one signal with signal_id (from ${TOOL_NAMES.listMonitoredSignals}), or else the team's active signals together. Each event gives the company domain, the event type and date, and its details: round type, amount in USD and date for a funding round, the technology for a technology change. Events carry no email address. Filter with types and since. Pages by cursor: pass meta.next_cursor as cursor, with the same source, signal_id, since and types. A page can hold fewer events than limit and still have a next cursor. With source=monitored and no signal_id, meta.signals_skipped lists the active signals that the merged feed did not read; read each one with its signal_id. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
+      description: desc`List signal events, newest first, from the last 30 days: the events the Hunter dashboard and Signals page show. With source=leads, the events are on companies and contacts in the team's lists: funding rounds, technologies added or removed, new contacts, new executives, job posts, hiring volume and hiring spikes, headcount growth, and contacts who changed location or position. With source=monitored, the events come from the team's Monitored Signals (funding rounds, job openings and company follows): one signal with signal_id (from ${TOOL_NAMES.listMonitoredSignals}), or else the team's active signals together. Each event gives the company domain, the event type and date, and its details: round type, amount in USD and date for a funding round; the technology for a technology change; the title for a new executive; the job title, location, country, employer link and whether it is still open for a job post; the open roles and role groups for hiring; the growth percent and headcounts for headcount growth; for a contact change, the previous and new value (from, to) and lead_id, the team's lead for the contact (read it with ${TOOL_NAMES.getLead}). Events carry no email address and no person name. hiring_volume, hiring_spike and company_growth are in early access: they come only for accounts that have them. Filter with types and since. Pages by cursor: pass meta.next_cursor as cursor, with the same source, signal_id, since and types. A page holds limit events unless it reached its read budget; then it can hold fewer and still have a next cursor. With source=monitored and no signal_id, meta.signals_skipped lists the active signals that the merged feed did not read; read each one with its signal_id. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
       inputSchema: {
         source: z
           .enum(["leads", "monitored"])
@@ -570,7 +614,7 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listMonitoredSignals,
     {
       title: "List Monitored Signals",
-      description: desc`List the team's Monitored Signals, newest first: funding signals, which follow the funding rounds that match their filters (country, company size, series, amount and date window), and company follows, which follow the events of one company. Each signal gives its id, name, type (funding_rounds or company_follow), status (active or paused), filters, and the event types its feed can return. Read a signal's events with ${TOOL_NAMES.listSignals}, source=monitored and its id as signal_id; a paused signal can be read only that way. Supports limit and offset. Free (no credits).`,
+      description: desc`List the team's Monitored Signals, newest first, as on the Signals page: funding signals, which follow the funding rounds that match their filters (country, company size, industry, series, amount and date window); job openings signals, which follow the job posts that match their filters (company, job title and description words, job location, seniority, contract type, department and date window); and company follows, which follow the events of one company. Each signal gives its id, name, type (funding_rounds, job_openings or company_follow), status (active or paused), filters, and the event types its feed can return. Read a signal's events with ${TOOL_NAMES.listSignals}, source=monitored and its id as signal_id; a paused signal can be read only that way. Supports limit and offset. Free (no credits).`,
       inputSchema: {
         limit: limitSchema("Monitored Signals"),
         offset: offsetSchema("Monitored Signals"),
