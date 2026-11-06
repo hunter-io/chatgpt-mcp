@@ -1074,7 +1074,7 @@ describe("List-Email-Accounts (Group 01)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/email-accounts", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "List-Email-Accounts" },
       body: undefined,
     })
   })
@@ -1295,7 +1295,7 @@ describe("List-Sequence-Follow-Ups (Group 02)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/follow-ups", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "List-Sequence-Follow-Ups" },
       body: undefined,
     })
   })
@@ -1482,6 +1482,7 @@ describe("Pause-Sequence (Group 03)", () => {
       method: "POST",
       headers: {
         "X-SOURCE": "hunter-chatgpt",
+        "X-MCP-TOOL": "Pause-Sequence",
         Authorization: "Bearer test-api-key",
         "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
@@ -1604,7 +1605,7 @@ describe("Resume-Sequence (Group 04)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/pause", {
       method: "DELETE",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "Resume-Sequence" },
       body: undefined,
     })
   })
@@ -1756,6 +1757,7 @@ describe("Archive-Sequence (Group 05)", () => {
       method: "POST",
       headers: {
         "X-SOURCE": "hunter-chatgpt",
+        "X-MCP-TOOL": "Archive-Sequence",
         Authorization: "Bearer test-api-key",
         "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
@@ -1894,7 +1896,7 @@ describe("Get-Sequence-Stats (Group 06)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/sequences/7/stats", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "Get-Sequence-Stats" },
       body: undefined,
     })
   })
@@ -2169,7 +2171,7 @@ describe("Company-Lists CRUD (Group 07)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "Get-Company-List" },
       body: undefined,
     })
     expect(result.isError).toBeUndefined()
@@ -2809,6 +2811,7 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
       method: "POST",
       headers: {
         "X-SOURCE": "hunter-chatgpt",
+        "X-MCP-TOOL": "Favorite-Company-List",
         Authorization: "Bearer test-api-key",
         "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
@@ -2874,7 +2877,7 @@ describe("Company-List Favorite/Unfavorite (Group 09)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/company-lists/7/favorite", {
       method: "DELETE",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "Unfavorite-Company-List" },
       body: undefined,
     })
     expect(result.isError).toBeUndefined()
@@ -2963,6 +2966,7 @@ describe("Company-List Membership (Group 10)", () => {
     expect(opts.headers).toEqual({
       "Idempotency-Key": expect.stringMatching(/^[0-9a-f-]{36}$/),
       "X-SOURCE": "hunter-chatgpt",
+      "X-MCP-TOOL": "Add-Company-To-List",
       Authorization: "Bearer test-api-key",
       "Content-Type": "application/x-www-form-urlencoded",
     })
@@ -3171,7 +3175,7 @@ describe("Connected Apps (Group 11)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected-apps", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "List-Connected-Apps" },
       body: undefined,
     })
   })
@@ -3285,7 +3289,7 @@ describe("Connected Apps (Group 11)", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://api.hunter.io/v2/connected-apps/3", {
       method: "GET",
-      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key" },
+      headers: { "X-SOURCE": "hunter-chatgpt", Authorization: "Bearer test-api-key", "X-MCP-TOOL": "Get-Connected-App" },
       body: undefined,
     })
     expect(result.isError).toBeUndefined()

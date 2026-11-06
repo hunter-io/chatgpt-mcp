@@ -23,6 +23,7 @@ import { withClientUserAgent } from "./client-context"
 import { withCodexFullServerHint } from "./codex-hint"
 import { buildResponseSchema, nullableString, nullish, paginationMetaSchema } from "./schemas/common"
 import { stripDialectOnSend } from "./schema-dialect"
+import { scopeToolHandlers } from "./tool-context"
 
 // ─── Widget tool output schemas ──────────────────────────────────────────────
 //
@@ -200,6 +201,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       instructions: SERVER_INSTRUCTIONS,
     },
   )
+  scopeToolHandlers(server)
 
   // --- ChatGPT widget resources ---
   server.registerResource("company-widget", "ui://widget/company-widget.html", {}, async () => ({

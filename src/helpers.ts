@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { currentClientUserAgent } from "./client-context"
 import type { HunterError } from "./schemas/common"
+import { currentToolName } from "./tool-context"
 
 // Credential / Bearer scrub for upstream bodies. Three narrowly-scoped patterns
 // to avoid the over-matching trap (e.g. the earlier `(?:bearer|authorization)…`
@@ -742,6 +743,9 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
   // different thing from a User-Agent it cannot name.
   const clientUserAgent = currentClientUserAgent()
   if (clientUserAgent) headers["X-MCP-USER-AGENT"] = clientUserAgent
+  // Absent outside a tool handler; Rails records that as `unknown`.
+  const toolName = currentToolName()
+  if (toolName) headers["X-MCP-TOOL"] = toolName
   if (body !== undefined) {
     headers["Content-Type"] = isJsonBody ? "application/json" : "application/x-www-form-urlencoded"
   }
