@@ -14,6 +14,8 @@
 		"cf-typegen": "wrangler types",
 		"type-check": "tsc --noEmit",
 		"test": "vitest run -c vitest.unit.config.mts",
+		"test:docs": "vitest run -c vitest.docs.config.mts",
+		"docs:update": "vitest run -c vitest.docs.config.mts -u",
 		"test:watch": "vitest -c vitest.unit.config.mts",
 		"dev:widgets": "vite",
 		"build:widgets": "rm -rf dist/assets && pnpm run build:widgets:company && pnpm run build:widgets:discover",

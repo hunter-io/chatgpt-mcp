@@ -1,0 +1,599 @@
+{
+  "server": "chatgpt-mcp",
+  "tools": [
+    {
+      "name": "Add-Company-To-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Add-Sequence-Recipients",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Add-Tag-To-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Archive-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Bulk-Copy-Companies",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Bulk-Delete-Companies",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Bulk-Delete-Leads",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Bulk-Move-Companies",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Bulk-Move-Leads",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Company-Enrichment",
+      "title": "Enrich Company",
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Count-Company-Emails",
+      "title": "Count Emails at Companies",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Company-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Company-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Custom-Attribute",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Lead-If-Missing",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Lead-Tag",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Leads-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Leads-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Message-Template",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Or-Update-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Create-Saved-Search",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Create-Sequence-Follow-Up",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Delete-Company-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Company-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Custom-Attribute",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Lead-Tag",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Leads-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Leads-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Message-Template",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Saved-Search",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Delete-Sequence-Follow-Up",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Email-Count",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Email-Verifier",
+      "title": "Verify Email",
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Favorite-Company-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Favorite-Leads-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Find-Companies",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Find-Similar-Companies",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Account-Details",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Briefing",
+      "title": "Get Briefing",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Company-List",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Connected-App",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Custom-Attribute",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Email-Account",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Lead",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Leads-List",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Message-Template",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Opportunity-Results",
+      "title": "Get Opportunity Results",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Saved-Search",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Sequence",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Sequence-Follow-Up",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Sequence-Stats",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Get-Usage",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Lead-Exists",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Company-List-Folders",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Company-Lists",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Connected-Apps",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Custom-Attributes",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Email-Account-Sequences",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Email-Accounts",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Lead-Tags",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Leads",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Leads-List-Folders",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Leads-Lists",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Message-Templates",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Monitored-Signals",
+      "title": "List Monitored Signals",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Opportunities",
+      "title": "List Opportunities",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Saved-Searches",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Sequence-Follow-Ups",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Sequence-Recipients",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Sequences",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Signals",
+      "title": "List Signals",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "List-Webhooks",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "Merge-Leads-Lists",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Pause-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Push-Leads-To-CRM",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Remove-Company-From-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Remove-Sequence-Recipients",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Remove-Tag-From-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Report-API-Feedback",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Resume-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Save-Company",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Start-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Unfavorite-Company-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Unfavorite-Leads-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": false
+    },
+    {
+      "name": "Update-Company-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Company-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Custom-Attribute",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Lead",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Lead-Tag",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Leads-List",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Leads-List-Folder",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Message-Template",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Sequence",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Sequence-Follow-Up",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    },
+    {
+      "name": "Update-Webhook",
+      "title": null,
+      "readOnlyHint": false,
+      "destructiveHint": true
+    }
+  ]
+}
