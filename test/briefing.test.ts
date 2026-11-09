@@ -285,6 +285,16 @@ describe("List-Signals", () => {
     })
   })
 
+  it("says the skipped early-access types will not come back, instead of polling, when the page is empty", async () => {
+    stubFetch({ ...signalsBody(), data: [], meta: { ...signalsBody().meta, types_skipped: ["hiring_spike"] } })
+
+    const result = await call("List-Signals", { source: "leads", types: ["hiring_spike"] })
+
+    expect(result.structuredContent.nextAction).toMatchObject({ kind: "complete" })
+    expect(result.structuredContent.nextAction.summary).toContain("hiring_spike")
+    expect(result.structuredContent.nextAction.summary).not.toContain("check again later")
+  })
+
   it("gives a Codex user the full-server hint and a ChatGPT user none", async () => {
     stubFetch(signalsBody())
     const codex = await withClientUserAgent("codex-mcp-client/0.50.0", () => call("List-Signals", { source: "leads" }))

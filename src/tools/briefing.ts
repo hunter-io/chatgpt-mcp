@@ -206,6 +206,7 @@ const signalsMetaSchema = z.object({
   window_start: z.string(),
   signals_included: z.array(z.number().int()).optional(),
   signals_skipped: z.array(z.number().int()).optional(),
+  types_skipped: z.array(z.string()).optional(),
 })
 
 // Rails' allow-list of Monitored Signal filters (Signals::Feed::MonitoredSignals).
@@ -516,7 +517,7 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listSignals,
     {
       title: "List Signals",
-      description: desc`List signal events, newest first, from the last 30 days: the events the Hunter dashboard and Signals page show. With source=leads, the events are on companies and contacts in the team's lists: funding rounds, technologies added or removed, new contacts, new executives, job posts, hiring volume and hiring spikes, headcount growth, and contacts who changed location or position. With source=monitored, the events come from the team's Monitored Signals (funding rounds, job openings and company follows): one signal with signal_id (from ${TOOL_NAMES.listMonitoredSignals}), or else the team's active signals together. Each event gives the company domain, the event type and date, and its details: round type, amount in USD and date for a funding round; the technology for a technology change; the title for a new executive; the job title, location, country, employer link and whether it is still open for a job post; the open roles and role groups for hiring; the growth percent and headcounts for headcount growth; for a contact change, the previous and new value (from, to) and lead_id, the team's lead for the contact (read it with ${TOOL_NAMES.getLead}). Events carry no email address and no person name. hiring_volume, hiring_spike and company_growth are in early access: they come only for accounts that have them. Filter with types and since. Pages by cursor: pass meta.next_cursor as cursor, with the same source, signal_id, since and types. A page holds limit events unless it reached its read budget; then it can hold fewer and still have a next cursor. With source=monitored and no signal_id, meta.signals_skipped lists the active signals that the merged feed did not read; read each one with its signal_id. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
+      description: desc`List signal events, newest first, from the last 30 days: the events the Hunter dashboard and Signals page show. With source=leads, the events are on companies and contacts in the team's lists: funding rounds, technologies added or removed, new contacts, new executives, job posts, hiring volume and hiring spikes, headcount growth, and contacts who changed location or position. With source=monitored, the events come from the team's Monitored Signals (funding rounds, job openings and company follows): one signal with signal_id (from ${TOOL_NAMES.listMonitoredSignals}), or else the team's active signals together. Each event gives the company domain, the event type and date, and its details: round type, amount in USD and date for a funding round; the technology for a technology change; the title for a new executive; the job title, location, country, employer link and whether it is still open for a job post; the open roles and role groups for hiring; the growth percent and headcounts for headcount growth; for a contact change, the previous and new value (from, to) and lead_id, the team's lead for the contact (read it with ${TOOL_NAMES.getLead}). Events carry no email address and no person name. hiring_volume, hiring_spike and company_growth are in early access: they come only for accounts that have them, and meta.types_skipped names the requested ones that the account does not have. Filter with types and since. Pages by cursor: pass meta.next_cursor as cursor, with the same source, signal_id, since and types. A page holds limit events unless it reached its read budget; then it can hold fewer and still have a next cursor. With source=monitored and no signal_id, meta.signals_skipped lists the active signals that the merged feed did not read; read each one with its signal_id. To check again later, pass meta.next_since as since. Free (no credits), and it marks nothing as seen.`,
       inputSchema: {
         source: z
           .enum(["leads", "monitored"])
@@ -594,10 +595,7 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
           },
         }
       } else {
-        next = {
-          kind: "complete",
-          summary: "No events after meta.window_start. To check again later, pass meta.next_since as since.",
-        }
+        next = { kind: "complete", summary: noSignalsSummary(parsed.meta.types_skipped) }
       }
       return withCodexFullServerHint(
         finish(
@@ -653,4 +651,10 @@ export function registerBriefingTools(server: McpServer, apiKey: string, baseUrl
 function signalsPath(source: "leads" | "monitored", signalId: number | undefined): string {
   if (source === "leads") return "/dashboard"
   return signalId === undefined ? "/signals" : `/signals/${signalId}`
+}
+
+function noSignalsSummary(typesSkipped: string[] | undefined): string {
+  return typesSkipped?.length
+    ? `No events. The account does not have these early access types, so they were skipped: ${typesSkipped.join(", ")}. Tell the user; asking again will not return them.`
+    : "No events after meta.window_start. To check again later, pass meta.next_since as since."
 }
