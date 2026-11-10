@@ -354,13 +354,11 @@ interface FormParamsMap {
 }
 type FormParams = FormParamsMap
 
-type QueryParams = Record<string, string>
-
 interface GetOptions {
   path: string
   apiKey: string
   baseUrl: string
-  params?: QueryParams
+  params?: FormParams
   signal?: AbortSignal
 }
 
@@ -431,6 +429,9 @@ function buildRailsFormBody(params: FormParams, prefix = ""): URLSearchParams {
 
   return result
 }
+
+// Puma answers a query string over 10 KB with a plain-text 400 (HUN-25033).
+const MAX_GET_QUERY_LENGTH = 8_000
 
 const PLAN_GATE_ERROR_ID = /^no_[a-z_]+_access$/
 
@@ -718,7 +719,16 @@ export async function callHunterApi(options: CallOptions): Promise<McpTextResult
 
   let isJsonBody = false
   if (isGet) {
-    const search = options.params ? new URLSearchParams(options.params).toString() : ""
+    const search = options.params ? buildRailsFormBody(options.params).toString() : ""
+    if (search.length > MAX_GET_QUERY_LENGTH) {
+      return hunterErrorResult({
+        code: "invalid_input",
+        retryable: false,
+        message:
+          `The request is too large to send to Hunter. Its query has ${search.length} characters, and the limit is ${MAX_GET_QUERY_LENGTH}. ` +
+          "Send fewer filter values in each call. If a list has many values, split it across more than one call.",
+      })
+    }
     url = search ? `${options.baseUrl}${options.path}?${search}` : `${options.baseUrl}${options.path}`
   } else {
     url = `${options.baseUrl}${options.path}`

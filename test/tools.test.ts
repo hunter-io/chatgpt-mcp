@@ -226,9 +226,11 @@ describe("tool registration", () => {
   // any description or input field description.
   it("no tool description or input description names a removed tool (HUN-23709)", () => {
     for (const [name, tool] of registeredTools) {
+      // List-Leads passes a full object schema, the other tools a raw shape.
+      const fields = tool.inputSchema instanceof z.ZodObject ? tool.inputSchema.shape : tool.inputSchema
       const texts = [
         tool.description,
-        ...Object.values(tool.inputSchema).map((field) => (field as z.ZodTypeAny).description ?? ""),
+        ...Object.values(fields).map((field) => (field as z.ZodTypeAny).description ?? ""),
       ]
       for (const text of texts) {
         for (const removed of REMOVED_TOOL_NAMES) expect(text, `${name} names ${removed}`).not.toContain(removed)
@@ -4289,7 +4291,7 @@ describe("HUN-23709: server version and instructions", () => {
 
   it("announces version 4.0.3", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.3" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.4" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {

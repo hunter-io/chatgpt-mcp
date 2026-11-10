@@ -23,22 +23,7 @@ import {
   paginationMetaSchema,
   verificationSchema,
 } from "../schemas/common"
-
-// Domain::COMPANY_TYPE_LIST (app/app/models/domain.rb): the API rejects any
-// other company_type with "Company type is not included in the list" (HUN-24703).
-// services/remote-mcp/test/tools.test.ts checks this copy against Rails.
-const COMPANY_TYPES = [
-  "educational",
-  "educational institution",
-  "government agency",
-  "non profit",
-  "partnership",
-  "privately held",
-  "public company",
-  "self employed",
-  "self owned",
-  "sole proprietorship",
-] as const
+import { COMPANY_TYPES, type FormValue, leadFiltersFormParams, leadFiltersSchema } from "../schemas/lead-filters"
 
 const leadFieldsSchema = {
   email: z.string().optional().describe("Email address of the lead"),
@@ -109,6 +94,55 @@ const leadSchema = z
   })
   .loose()
 
+// Strict, so an unknown argument fails instead of being dropped into a wider search.
+const listLeadsInputSchema = z.strictObject({
+  ...leadFiltersSchema.shape,
+  leads_list_id: z
+    .number()
+    .int()
+    .positive()
+    .max(2_147_483_647)
+    .optional()
+    .describe(desc`ID of a static or dynamic list, from ${TOOL_NAMES.listLeadsLists}. Only its leads match.`),
+  offset: z.number().int().nonnegative().optional().describe("Number of leads to skip"),
+  limit: z.number().int().positive().max(100).optional().describe("Maximum number of leads to return (max 100)"),
+  sort: z
+    .enum(["newest", "oldest", "relevance"])
+    .optional()
+    .describe("newest (the default), oldest, or relevance: the best position or position_keywords matches first"),
+  people_per_company: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      "At most this many leads from each company. The cap applies to the whole result, so page with offset as usual. meta.count counts the leads after the cap. It works on at most 10,000 matching leads: past that, narrow the filters.",
+    ),
+})
+
+// GET /v2/leads reads these since HUN-25033, and an older Hunter ignores them. Each one sent must
+// come back in meta.params, or the leads could include leads it should have excluded. A text
+// company is older and is not checked.
+const NEW_LIST_LEADS_PARAMS = [
+  "decision_maker",
+  "seniority_level",
+  "email_type",
+  "position_keywords",
+  "company",
+  "people_per_company",
+]
+
+function unappliedParams(params: Record<string, FormValue>, result: McpTextResult): string[] {
+  const meta = (result.structuredContent as { meta?: { params?: Record<string, unknown> | null } } | undefined)?.meta
+  const echoed = meta?.params ?? {}
+  return NEW_LIST_LEADS_PARAMS.filter((key) => {
+    const value = params[key]
+    const sent = Array.isArray(value) ? value.length > 0 : value !== undefined && key !== "company"
+    return sent && echoed[key] === undefined
+  })
+}
+
 // List response from /v2/leads — { data: { leads: [...] }, meta: { count, total } }
 const listLeadsDataSchema = z.object({ leads: z.array(leadSchema) }).loose()
 
@@ -133,6 +167,36 @@ const leadExistsOutputSchema = buildResponseSchema(
     })
     .loose(),
 )
+
+function errorResult(code: "invalid_input" | "upstream_error", message: string, field: string): McpTextResult {
+  return {
+    content: [{ type: "text" as const, text: message, annotations: { audience: ["user"] } }],
+    structuredContent: { error: { code, retryable: code === "upstream_error", field, message } },
+    isError: true,
+  }
+}
+
+/**
+ * GET /v2/leads drops a custom attribute slug the team does not have, which
+ * widens the search, so List-Leads checks the slugs first (HUN-25033).
+ */
+async function checkCustomAttributeSlugs(
+  slugs: string[],
+  apiKey: string,
+  baseUrl: string,
+): Promise<McpTextResult | undefined> {
+  const result = await callHunterApi({ path: "/leads_custom_attributes", apiKey, baseUrl })
+  if (result.isError) return result
+  const attributes = parseHunterApiData<{ leads_custom_attributes?: { slug?: string }[] }>(result)
+  const known = new Set(attributes?.leads_custom_attributes?.map((attribute) => attribute.slug))
+  const unknown = slugs.filter((slug) => !known.has(slug))
+  if (unknown.length === 0) return undefined
+  return errorResult(
+    "invalid_input",
+    `The team has no custom attribute with the slug ${unknown.join(", ")}. Get each slug from ${TOOL_NAMES.listCustomAttributes}.`,
+    "custom_attributes",
+  )
+}
 
 type LeadParams = Record<string, string | Record<string, string>>
 
@@ -233,30 +297,38 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.listLeads,
     {
-      description:
-        "Use this when the user wants to list leads from their Hunter account, with optional filters on email, name, company, or list. Returns up to 100 leads per page; use `offset` to paginate. Free to call.",
-      inputSchema: {
-        offset: z.number().int().nonnegative().optional().describe("Number of leads to skip"),
-        limit: z.number().int().positive().max(100).optional().describe("Maximum number of leads to return (max 100)"),
-        leads_list_id: z.number().int().positive().optional().describe("Filter leads by list ID"),
-        email: z.string().optional().describe("Filter leads by email address"),
-        first_name: z.string().optional().describe("Filter leads by first name"),
-        last_name: z.string().optional().describe("Filter leads by last name"),
-        company: z.string().optional().describe("Filter leads by company name"),
-      },
+      description: desc`Use this when the user wants to list the leads saved in their Hunter account, filtered for example by replied, invalid email, country, saved date, tags, sequence or job title. A lead must match every filter that you send, and a lead matching any one value of a filter matches that filter. \`*\` means any value and \`~\` means no value. Get tag ids from ${TOOL_NAMES.listLeadTags}, sequence ids from ${TOOL_NAMES.listSequences}, custom attribute slugs from ${TOOL_NAMES.listCustomAttributes}, and list ids from ${TOOL_NAMES.listLeadsLists}. \`meta.count\` is the number of leads that match. Returns up to 100 leads per page, newest first by default; use \`offset\` to paginate. Do not create a dynamic list only to read leads: call this tool. Free to call.`,
+      inputSchema: listLeadsInputSchema,
       outputSchema: listLeadsOutputSchema.shape,
       annotations: PRIVATE_READ_ANNOTATIONS,
     },
-    async ({ offset, limit, leads_list_id, email, first_name, last_name, company }) => {
-      const params: Record<string, string> = {}
+    async ({ offset, limit, sort, people_per_company, ...filters }) => {
+      const slugs = Object.keys(filters.custom_attributes ?? {})
+      if (slugs.length > 0) {
+        const slugError = await checkCustomAttributeSlugs(slugs, apiKey, baseUrl)
+        if (slugError) return slugError
+      }
+
+      const params: Record<string, FormValue> = {}
       if (offset !== undefined) params.offset = String(offset)
       if (limit !== undefined) params.limit = String(limit)
-      if (leads_list_id !== undefined) params.leads_list_id = String(leads_list_id)
-      if (email) params.email = email
-      if (first_name) params.first_name = first_name
-      if (last_name) params.last_name = last_name
-      if (company) params.company = company
-      return callHunterApi({ path: "/leads", apiKey, baseUrl, params })
+      // Rails drops a blank text filter, so it is not sent.
+      for (const [key, value] of Object.entries(leadFiltersFormParams(filters)))
+        if (typeof value !== "string" || value.trim() !== "") params[key] = value
+      if (sort !== undefined) params.sort = sort
+      if (people_per_company !== undefined) params.people_per_company = String(people_per_company)
+
+      const result = await callHunterApi({ path: "/leads", apiKey, baseUrl, params })
+      if (result.isError) return result
+      const unapplied = unappliedParams(params, result)
+      if (unapplied.length === 0) return result
+      const names = unapplied.join(", ")
+      // Rails deploys after the workers, so a new filter can reach an API that ignores it.
+      return errorResult(
+        "upstream_error",
+        `Hunter did not apply the filter ${names}, so no leads are returned: they would include leads that do not match. The filter may not be available yet. Tell the user, and ask before you list leads without it.`,
+        names,
+      )
     },
   )
 
