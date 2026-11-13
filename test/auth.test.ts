@@ -7,18 +7,12 @@ function request(headers: Record<string, string> = {}): Request {
 
 describe("extractApiKey", () => {
   it.each(["Bearer", "bearer", "BEARER", "bEaReR"])("accepts the %s scheme", (scheme) => {
-    expect(extractApiKey(request({ Authorization: `${scheme} hunter-test-token` }))).toBe(
-      "hunter-test-token",
-    )
+    expect(extractApiKey(request({ Authorization: `${scheme} hunter-test-token` }))).toBe("hunter-test-token")
   })
 
   it("accepts one or more spaces or tabs between scheme and token", () => {
-    expect(extractApiKey(request({ Authorization: "Bearer   hunter-test-token" }))).toBe(
-      "hunter-test-token",
-    )
-    expect(extractApiKey(request({ Authorization: "Bearer\thunter-test-token" }))).toBe(
-      "hunter-test-token",
-    )
+    expect(extractApiKey(request({ Authorization: "Bearer   hunter-test-token" }))).toBe("hunter-test-token")
+    expect(extractApiKey(request({ Authorization: "Bearer\thunter-test-token" }))).toBe("hunter-test-token")
   })
 
   it("returns null for missing, empty, or malformed Bearer credentials", () => {
