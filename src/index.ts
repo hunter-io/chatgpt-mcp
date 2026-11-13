@@ -20,6 +20,7 @@ import {
   withDeepLink,
 } from "./helpers"
 import { withClientUserAgent } from "./client-context"
+import { extractApiKey } from "./auth"
 import { withCodexFullServerHint } from "./codex-hint"
 import { buildResponseSchema, nullableString, nullish, paginationMetaSchema } from "./schemas/common"
 import { stripDialectOnSend } from "./schema-dialect"
@@ -466,17 +467,6 @@ function corsHeadersFor(request: Request): Record<string, string> {
   }
   // Unknown origin: no Allow-Origin header, browser blocks.
   return CORS_METHOD_HEADERS
-}
-
-function extractApiKey(request: Request): string | null {
-  const explicit = request.headers.get("x-api-key")
-  if (explicit) return explicit
-  const authHeader = request.headers.get("authorization")
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.split(/\s+/)[1] ?? ""
-    if (token) return token
-  }
-  return null
 }
 
 function addCorsHeaders(response: Response, request: Request): Response {
