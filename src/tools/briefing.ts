@@ -54,6 +54,7 @@ const SIGNAL_EVENT_TYPES = [
   "company_growth",
   "location_changed",
   "position_changed",
+  "email_invalidated",
 ] as const
 
 const nextCallSchema = z.object({

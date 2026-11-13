@@ -194,8 +194,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // the feature_not_in_plan error code (HUN-24654); 4.0.2 lets Create-Leads-List
       // and Update-Leads-List save a dynamic list (HUN-24762); 4.0.3 accepts * and ~
       // in a dynamic list's verification_status and sending_status; 4.0.4 lets List-Leads
-      // use every lead filter and the Leads-page filters (HUN-25033).
-      version: "4.0.4",
+      // use every lead filter and the Leads-page filters (HUN-25033); 4.0.5 accepts
+      // email_invalidated in the List-Signals types filter (HUN-25031).
+      version: "4.0.5",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,

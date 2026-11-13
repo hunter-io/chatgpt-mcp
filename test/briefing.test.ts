@@ -238,10 +238,11 @@ describe("List-Signals", () => {
         type: "position_changed",
         details: { lead_id: 5, from: "Manager", to: "VP Sales" },
       },
+      { ...base, id: "lead:email_event:6", type: "email_invalidated", details: { lead_id: 6 } },
     ]
     stubFetch({ ...body, data: events })
 
-    const result = await call("List-Signals", { source: "leads", types: ["job_posted", "position_changed"] })
+    const result = await call("List-Signals", { source: "leads", types: ["job_posted", "position_changed", "email_invalidated"] })
     const details = result.structuredContent.data.map((event: { details: unknown }) => event.details)
 
     expect(details).toEqual(events.map((event) => event.details))
