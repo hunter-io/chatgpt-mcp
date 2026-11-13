@@ -4947,3 +4947,64 @@ describe("HUN-24703: lead tools only accept the API's company_type values", () =
     expect(inputOf(name).safeParse({ id: 1, email: "a@b.com", company_type: "" }).success).toBe(true)
   })
 })
+
+// HUN-24815: /v2/email-verifier adds `data.provenance` ("found" | "inferred" |
+// null), and some plans get `data.sources: []`. The published outputSchema and
+// the handler must accept both, or the MCP SDK rejects the result with -32602.
+describe("HUN-24815: Email-Verifier accepts provenance and empty sources", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registeredPrompts.clear()
+    registerAllTools()
+  })
+
+  const verifierResponse = (provenance: string | null) => ({
+    data: {
+      status: "valid",
+      result: "deliverable",
+      score: 100,
+      email: "alice@example.com",
+      regexp: true,
+      gibberish: false,
+      disposable: false,
+      webmail: false,
+      mx_records: true,
+      smtp_server: true,
+      smtp_check: true,
+      accept_all: false,
+      block: false,
+      sources: [],
+      provenance,
+    },
+    meta: { params: { email: "alice@example.com" } },
+  })
+
+  const verifierOutputSchema = () =>
+    publishedOutputSchema(registeredTools.get("Email-Verifier")!.outputSchema as Record<string, z.ZodTypeAny>)
+
+  it.each(["found", "inferred", null])("outputSchema parses sources: [] with provenance %s", (provenance) => {
+    const parsed = verifierOutputSchema().safeParse(verifierResponse(provenance))
+    expect(parsed.success).toBe(true)
+    const data = (parsed.data as { data: { sources: unknown[]; provenance: unknown } }).data
+    expect(data.sources).toEqual([])
+    expect(data.provenance).toBe(provenance)
+  })
+
+  it.each(["found", null])("handler returns a valid result for provenance %s", async (provenance) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(verifierResponse(provenance))),
+      }),
+    )
+    const result = await registeredTools.get("Email-Verifier")!.handler({ email: "alice@example.com" })
+
+    expect(result.isError).toBeUndefined()
+    expect(verifierOutputSchema().safeParse(result.structuredContent).success).toBe(true)
+    const sc = result.structuredContent as { data: { status: string; sources: unknown[]; provenance: unknown } }
+    expect(sc.data.status).toBe("valid")
+    expect(sc.data.sources).toEqual([])
+    expect(sc.data.provenance).toBe(provenance)
+  })
+})
