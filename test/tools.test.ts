@@ -3491,6 +3491,26 @@ function softFailResponse() {
   }
 }
 
+// HUN-25357: the body Rails sends when a check runs past its time budget.
+function pendingResponse() {
+  return {
+    ok: true,
+    status: 202,
+    headers: { get: () => null },
+    text: () =>
+      Promise.resolve(
+        JSON.stringify({
+          meta: {
+            params: { email: "user@example.com" },
+            message:
+              "The email verification is still in progress. To avoid the request running for too long we return HTTP 202 responses.",
+          },
+          data: {},
+        }),
+      ),
+  }
+}
+
 // HUN-24159: Rails answers a soft-failed verification with HTTP 222 and an
 // `{ errors }` body. callHunterApi treated every 2xx as success, so the raw
 // `errors` key reached the closed Email-Verifier schema and the client failed
@@ -3517,6 +3537,23 @@ describe("HUN-24159: Email-Verifier code 222 soft-fail", () => {
     expect(result.structuredContent.message).toContain("do not retry it")
     expect(result.structuredContent.nextAction).toMatchObject({ kind: "complete" })
     expect(result.content[0]?.text).not.toContain("retry later")
+    const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
+    expect(() => schema.parse(result.structuredContent)).not.toThrow()
+  })
+
+  it("answers a 202 still-running check as the unknown status, asks for one retry, within the published schema", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(pendingResponse()))
+    const tool = registeredTools.get("Email-Verifier")!
+    const result = await tool.handler({ email: "user@example.com" })
+
+    expect(result.isError).toBeUndefined()
+    expect(result.structuredContent.data).toEqual({ email: "user@example.com", status: "unknown", score: null })
+    expect(result.structuredContent.message).toContain("again for this address once")
+    expect(result.structuredContent.nextAction).toMatchObject({
+      kind: "call_tool",
+      tool: "Email-Verifier",
+      suggestedArgs: { email: "user@example.com" },
+    })
     const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
     expect(() => schema.parse(result.structuredContent)).not.toThrow()
   })

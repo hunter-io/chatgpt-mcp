@@ -1384,12 +1384,31 @@ export const VERIFICATION_UNKNOWN_MESSAGE =
   "Hunter could not get a definite answer from this address's mail server, so the address stays unverified (status unknown). " +
   "Checking it again soon returns the same answer, so do not retry it. No credit was used."
 
-export function verificationSoftFailAsUnknown(result: McpTextResult, email: string): McpTextResult {
-  const error = (result.structuredContent as { error?: { field?: string } } | undefined)?.error
-  if (!result.isError || error?.field !== "verification_failed") return result
-  const structuredContent = {
-    data: { email, status: "unknown", score: null },
-    message: VERIFICATION_UNKNOWN_MESSAGE,
-  }
+// HUN-25357: Rails answers a check that runs past its time budget with HTTP 202 and
+// an empty `data` (`check_later.json.jbuilder`), which failed the output schema. Here
+// a later check can finish, so the answer asks for one more try.
+export const VERIFICATION_PENDING_MESSAGE =
+  "Hunter is still checking this address: its mail server is slow to answer, so the status is unknown for now. " +
+  "Call Email-Verifier again for this address once, in about a minute. Hunter counts both checks as one request."
+
+// The machine-readable next step for a 202: the same Email-Verifier call again.
+// A later call returns Velen's stored answer once the check finishes, which ends the retry.
+export const VERIFICATION_PENDING_REASON =
+  "Hunter is still checking this address. Wait about a minute, then call Email-Verifier again with these arguments, once. " +
+  "If it is still running after that, report the status as unknown and go on."
+
+export function isVerifierPending(result: McpTextResult): boolean {
+  return (result.structuredContent as { message?: unknown } | undefined)?.message === VERIFICATION_PENDING_MESSAGE
+}
+
+/** Email-Verifier answers without a status (a 222 soft fail or a 202 still running) as the `unknown` status. */
+export function verifierNoAnswerAsUnknown(result: McpTextResult, email: string): McpTextResult {
+  const sc = result.structuredContent as { error?: { field?: string }; data?: Record<string, unknown> } | undefined
+  let message: string
+  if (result.isError && sc?.error?.field === "verification_failed") message = VERIFICATION_UNKNOWN_MESSAGE
+  else if (!result.isError && sc?.data !== undefined && sc.data.status === undefined)
+    message = VERIFICATION_PENDING_MESSAGE
+  else return result
+  const structuredContent = { data: { email, status: "unknown", score: null }, message }
   return { content: [{ type: "text", text: hunterResultText(structuredContent) }], structuredContent }
 }

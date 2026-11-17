@@ -14,7 +14,9 @@ import {
   parseHunterApiData,
   verifierAutoSaveNote,
   withDeepLink,
-  verificationSoftFailAsUnknown,
+  verifierNoAnswerAsUnknown,
+  isVerifierPending,
+  VERIFICATION_PENDING_REASON,
 } from "../helpers"
 import { buildResponseSchema, nullableNumber } from "../schemas/common"
 import { withCodexFullServerHint } from "../codex-hint"
@@ -86,11 +88,28 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Verify Email" },
     },
     async ({ email, save_leads, leads_list_id }) => {
-      const result = verificationSoftFailAsUnknown(
+      const result = verifierNoAnswerAsUnknown(
         await callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } }),
         email,
       )
       if (result.isError) return result
+
+      // HUN-25357: Hunter is still checking. Ask for the same call again rather than completing.
+      if (isVerifierPending(result)) {
+        return embedNextAction(
+          result,
+          buildNextAction({
+            kind: "call_tool",
+            tool: TOOL_NAMES.emailVerifier,
+            reason: VERIFICATION_PENDING_REASON,
+            suggestedArgs: {
+              email,
+              ...(save_leads !== undefined && { save_leads }),
+              ...(leads_list_id !== undefined && { leads_list_id }),
+            },
+          }),
+        )
+      }
 
       const status = parseHunterApiData<EmailVerifierData>(result)?.status
       // Only a save request may chain into a write (HUN-20651 review fix K).
