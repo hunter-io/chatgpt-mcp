@@ -14,6 +14,7 @@ import {
   parseHunterApiData,
   verifierAutoSaveNote,
   withDeepLink,
+  verificationSoftFailAsUnknown,
 } from "../helpers"
 import { buildResponseSchema, nullableNumber } from "../schemas/common"
 import { withCodexFullServerHint } from "../codex-hint"
@@ -85,7 +86,10 @@ export function registerSearchTools(server: McpServer, apiKey: string, baseUrl: 
       annotations: { ...BILLABLE_LOOKUP_ANNOTATIONS, title: "Verify Email" },
     },
     async ({ email, save_leads, leads_list_id }) => {
-      const result = await callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } })
+      const result = verificationSoftFailAsUnknown(
+        await callHunterApi({ path: "/email-verifier", apiKey, baseUrl, params: { email } }),
+        email,
+      )
       if (result.isError) return result
 
       const status = parseHunterApiData<EmailVerifierData>(result)?.status

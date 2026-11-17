@@ -544,9 +544,10 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   }
   // HUN-24159: Rails answers a soft-failed verification (`verification_failed`)
   // with HTTP 222 and an `errors` body. The cause is outside Hunter's control,
-  // so a later retry can succeed.
+  // so a later retry can succeed. Email-Verifier turns it into an `unknown`
+  // status with `verificationSoftFailAsUnknown` (HUN-25337).
   if (status === 222) {
-    return { code: "upstream_error", retryable: true, message }
+    return { code: "upstream_error", retryable: true, ...(parsedField && { field: parsedField }), message }
   }
   // HUN-24654: Rack::Attack throttles the API with a 403 `too_many_requests`
   // and a Retry-After header (app/config/initializers/rack_attack.rb).
@@ -1373,4 +1374,22 @@ export function stripResponseFields(result: McpTextResult, fieldsToStrip: Readon
     ],
     structuredContent: trimmedStructured,
   }
+}
+
+// HUN-25337: a 222 soft fail means the mail server gave no definite answer. Velen
+// caches that answer, so a retry soon after gets it again. As a retryable error it
+// made agents retry the same addresses for days, so Email-Verifier reports it as
+// the `unknown` status instead. A soft fail is not charged.
+export const VERIFICATION_UNKNOWN_MESSAGE =
+  "Hunter could not get a definite answer from this address's mail server, so the address stays unverified (status unknown). " +
+  "Checking it again soon returns the same answer, so do not retry it. No credit was used."
+
+export function verificationSoftFailAsUnknown(result: McpTextResult, email: string): McpTextResult {
+  const error = (result.structuredContent as { error?: { field?: string } } | undefined)?.error
+  if (!result.isError || error?.field !== "verification_failed") return result
+  const structuredContent = {
+    data: { email, status: "unknown", score: null },
+    message: VERIFICATION_UNKNOWN_MESSAGE,
+  }
+  return { content: [{ type: "text", text: hunterResultText(structuredContent) }], structuredContent }
 }

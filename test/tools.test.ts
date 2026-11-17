@@ -3470,51 +3470,53 @@ describe("HUN-20170: 402 quota response scrubs the upstream upgrade CTA", () => 
   })
 })
 
+function softFailResponse() {
+  return {
+    ok: true,
+    status: 222,
+    headers: { get: () => null },
+    text: () =>
+      Promise.resolve(
+        JSON.stringify({
+          errors: [
+            {
+              id: "verification_failed",
+              code: 222,
+              details:
+                "We failed to verify the email address for reasons outside of our control. We advise you to retry later.",
+            },
+          ],
+        }),
+      ),
+  }
+}
+
 // HUN-24159: Rails answers a soft-failed verification with HTTP 222 and an
 // `{ errors }` body. callHunterApi treated every 2xx as success, so the raw
 // `errors` key reached the closed Email-Verifier schema and the client failed
 // with -32602 instead of showing a usable result.
-describe("HUN-24159: Email-Verifier code 222 soft-fail returns a structured error", () => {
+describe("HUN-24159: Email-Verifier code 222 soft-fail", () => {
   beforeEach(async () => {
     registeredTools.clear()
     registerAllTools()
   })
 
-  it("maps the 222 errors body to a retryable upstream_error that conforms to the published schema", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValueOnce({
-        ok: true,
-        status: 222,
-        headers: { get: () => null },
-        text: () =>
-          Promise.resolve(
-            JSON.stringify({
-              errors: [
-                {
-                  id: "verification_failed",
-                  code: 222,
-                  details:
-                    "We failed to verify the email address for reasons outside of our control. We advise you to retry later.",
-                },
-              ],
-            }),
-          ),
-      }),
-    )
+  // HUN-25337: Velen caches a soft fail, so a retry gets the same answer. As a
+  // retryable error it made agents retry the same addresses for days.
+  it("answers a 222 soft fail as the unknown status, not an error, within the published schema", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(softFailResponse()))
     const tool = registeredTools.get("Email-Verifier")!
     const result = await tool.handler({ email: "user@example.com" })
 
-    expect(result.isError).toBe(true)
-    expect(result.structuredContent).toEqual({
-      error: {
-        code: "upstream_error",
-        retryable: true,
-        message:
-          "We failed to verify the email address for reasons outside of our control. We advise you to retry later.",
-      },
+    expect(result.isError).toBeUndefined()
+    expect(result.structuredContent.data).toEqual({
+      email: "user@example.com",
+      status: "unknown",
+      score: null,
     })
-    expect(result.content[0]?.text).toContain("retry later")
+    expect(result.structuredContent.message).toContain("do not retry it")
+    expect(result.structuredContent.nextAction).toMatchObject({ kind: "complete" })
+    expect(result.content[0]?.text).not.toContain("retry later")
     const schema = publishedOutputSchema(tool.outputSchema as Record<string, z.ZodTypeAny>)
     expect(() => schema.parse(result.structuredContent)).not.toThrow()
   })
