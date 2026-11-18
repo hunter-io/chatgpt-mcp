@@ -16,6 +16,7 @@ import {
   TOOL_NAMES,
   withDeepLink,
   withDeepLinkFromId,
+  reconcileCompanyEmailCounts,
 } from "../helpers"
 import {
   buildResponseSchema,
@@ -219,13 +220,18 @@ export function registerDiscoverTools(server: McpServer, apiKey: string, baseUrl
       // Rails ignores structured filters when `query` is present
       // (Api::Discover::Params#api_input_params), so don't send them.
       if (!query && domains && domains.length > 0) params.organization = { domain: domains }
-      const result = await callHunterApi({
-        path: qs ? `/discover/people?${qs}` : "/discover/people",
-        apiKey,
-        baseUrl,
-        method: "POST",
-        params,
-      })
+      const result = reconcileCompanyEmailCounts(
+        await callHunterApi({
+          path: qs ? `/discover/people?${qs}` : "/discover/people",
+          apiKey,
+          baseUrl,
+          method: "POST",
+          params,
+        }),
+        query ? undefined : domains,
+        offset,
+        limit,
+      )
       return withCodexFullServerHint(
         embedNextAction(
           withHunterLinks(result),

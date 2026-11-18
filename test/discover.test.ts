@@ -208,6 +208,90 @@ describe("discover tools: annotations", () => {
 })
 
 describe("Count-Company-Emails handler", () => {
+  // HUN-25341: row counts come from the database, meta.total_emails from a lagging
+  // Elasticsearch sum. When every match is on the page, the total is the rows' sum.
+  it("sums meta.total_emails from the rows and adds a zero row for a requested domain with no data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        okResponse({
+          data: [
+            { domain: "stripe.com", organization: "Stripe", emails_count: { personal: 30, generic: 4, total: 34 } },
+            { domain: "adyen.com", organization: "Adyen", emails_count: { personal: 6, generic: 2, total: 8 } },
+          ],
+          meta: { results: 2, limit: 100, offset: 0, total_emails: { personal: 29, generic: 6, total: 35 } },
+        }),
+      ),
+    )
+
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({
+      domains: ["stripe.com", "WWW.Adyen.com", "unknown-company.example"],
+    })
+
+    expect(result.structuredContent.meta.total_emails).toEqual({ personal: 36, generic: 6, total: 42 })
+    expect(result.structuredContent.data).toHaveLength(3)
+    expect(result.structuredContent.data[2]).toMatchObject({
+      domain: "unknown-company.example",
+      organization: null,
+      emails_count: { personal: 0, generic: 0, total: 0 },
+    })
+  })
+
+  it("adds no zero row for a requested domain that sits on a later page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        okResponse({
+          data: [{ domain: "stripe.com", organization: "Stripe", emails_count: { personal: 30, generic: 4, total: 34 } }],
+          meta: { results: 2, limit: 1, offset: 0, total_emails: { personal: 36, generic: 6, total: 42 } },
+        }),
+      ),
+    )
+
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ domains: ["stripe.com", "adyen.com"], limit: 1 })
+
+    expect(result.structuredContent.data).toHaveLength(1)
+    expect(result.structuredContent.meta.total_emails).toEqual({ personal: 36, generic: 6, total: 42 })
+  })
+
+  it("keeps zero rows within the requested limit and keeps the result block's audience", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        okResponse({
+          data: [{ domain: "stripe.com", organization: "Stripe", emails_count: { personal: 30, generic: 4, total: 34 } }],
+          meta: { results: 1, limit: 1, offset: 0, total_emails: { personal: 29, generic: 4, total: 33 } },
+        }),
+      ),
+    )
+
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({
+      domains: ["stripe.com", "unknown.example"],
+      limit: 1,
+    })
+
+    expect(result.structuredContent.data).toHaveLength(1)
+    expect(result.structuredContent.meta.total_emails).toEqual({ personal: 30, generic: 4, total: 34 })
+    expect(result.content[0].annotations).toEqual({ audience: ["user"] })
+  })
+
+  it("keeps meta.total_emails when more companies match than this page holds", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        okResponse({
+          data: [{ domain: "stripe.com", organization: "Stripe", emails_count: { personal: 30, generic: 4, total: 34 } }],
+          meta: { results: 250, limit: 1, offset: 0, total_emails: { personal: 900, generic: 100, total: 1000 } },
+        }),
+      ),
+    )
+
+    const result = await registeredTools.get("Count-Company-Emails")!.handler({ query: "payment companies", limit: 1 })
+
+    expect(result.structuredContent.meta.total_emails).toEqual({ personal: 900, generic: 100, total: 1000 })
+    expect(result.structuredContent.data).toHaveLength(1)
+  })
+
   it("POSTs the natural-language query (and paging) as URL parameters, like Find-Companies", async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(okResponse(findPeoplePayload))
     vi.stubGlobal("fetch", mockFetch)

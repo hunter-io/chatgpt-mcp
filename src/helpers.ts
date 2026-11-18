@@ -1412,3 +1412,67 @@ export function verifierNoAnswerAsUnknown(result: McpTextResult, email: string):
   const structuredContent = { data: { email, status: "unknown", score: null }, message }
   return { content: [{ type: "text", text: hunterResultText(structuredContent) }], structuredContent }
 }
+
+interface CompanyEmailCountRow {
+  domain?: string
+  organization?: string | null
+  emails_count?: { personal?: number | null; generic?: number | null; total?: number | null }
+}
+
+const comparableDomain = (domain: string) =>
+  domain
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "")
+    .replace(/\.$/, "")
+
+// HUN-25341: each Count-Company-Emails row reads its counts from the database, while
+// `meta.total_emails` is an Elasticsearch sum that can lag behind it, so the two
+// disagreed. When every matching company is on this page, the rows are the whole
+// answer and the total is their sum. A requested domain Hunter has no data on gets a
+// zero row instead of being left out.
+export function reconcileCompanyEmailCounts(
+  result: McpTextResult,
+  requestedDomains: string[] | undefined,
+  offset: number | undefined,
+  limit: number | undefined,
+): McpTextResult {
+  const sc = result.structuredContent as
+    | { data?: CompanyEmailCountRow[]; meta?: { results?: number; total_emails?: unknown } }
+    | undefined
+  if (result.isError || !sc || !Array.isArray(sc.data)) return result
+  // Every matching company is on this page; otherwise a requested domain may sit on a later page.
+  const wholeSet = !offset && sc.meta?.results !== undefined && sc.meta.results <= sc.data.length
+  let data = sc.data
+  if (wholeSet && requestedDomains && requestedDomains.length > 0) {
+    const seen = new Set(data.flatMap((row) => (row.domain ? [comparableDomain(row.domain)] : [])))
+    // Zero rows never take the page past the requested `limit` (Rails defaults to 100).
+    const room = Math.max(0, (limit ?? 100) - data.length)
+    const missing: CompanyEmailCountRow[] = []
+    for (const domain of requestedDomains) {
+      if (missing.length >= room) break
+      const key = comparableDomain(domain)
+      if (seen.has(key)) continue
+      seen.add(key)
+      missing.push({ domain, organization: null, emails_count: { personal: 0, generic: 0, total: 0 } })
+    }
+    data = [...data, ...missing]
+  }
+  let meta = sc.meta
+  if (meta && wholeSet) {
+    const sum = (key: "personal" | "generic") => data.reduce((acc, row) => acc + (row.emails_count?.[key] ?? 0), 0)
+    const personal = sum("personal")
+    const generic = sum("generic")
+    meta = { ...meta, total_emails: { personal, generic, total: personal + generic } }
+  }
+  if (data === sc.data && meta === sc.meta) return result
+  const structuredContent = { ...sc, data, meta }
+  return {
+    ...result,
+    content: [
+      { ...result.content[0], type: "text", text: hunterResultText(structuredContent) },
+      ...result.content.slice(1),
+    ],
+    structuredContent,
+  }
+}
