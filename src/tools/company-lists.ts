@@ -5,6 +5,7 @@ import {
   callHunterApi,
   desc,
   embedNextAction,
+  HUNTER_SOURCE_SUFFIX,
   PRIVATE_DESTRUCTIVE_ANNOTATIONS,
   PRIVATE_READ_ANNOTATIONS,
   PRIVATE_WRITE_ANNOTATIONS,
@@ -148,6 +149,24 @@ const companyMembershipSchema = z.object({
   already_in_list: z.boolean().optional(),
 })
 const companyMembershipOutputSchema = buildResponseSchema(companyMembershipSchema)
+
+// companies_controller.rb#index renders app/app/views/api/company_lists/companies/index.jbuilder:
+//   data: [{ id, domain, created_at, organization }], newest membership first;
+//   `created_at` is the company's, not the membership's.
+//   meta: { results, limit, offset, params: { company_list_id } }.
+// `domain` is null when the company's domain was purged, and `organization` is
+// null when Hunter has no name for the domain.
+const listedCompanySchema = z.object({
+  id: z.number().int().positive(),
+  domain: nullableString(),
+  created_at: z.string(),
+  organization: nullableString(),
+})
+// `dynamic_list` marks the answer for a dynamic list, which has no saved members (see the handler).
+const listCompanyListCompaniesOutputSchema = buildResponseSchema(
+  z.array(listedCompanySchema),
+  paginationMetaSchema.extend({ params: jsonArgs.optional() }),
+).extend({ dynamic_list: z.literal(true).optional() })
 
 // companies_controller.rb#destroy responds `head :no_content` (204 empty body),
 // so callHunterApi synthesises a mutationAckSchema-shaped payload — the
@@ -331,6 +350,50 @@ export function registerCompanyListTools(server: McpServer, apiKey: string, base
       // returns the typed error envelope unchanged; we pass it through so the
       // model gets `structuredContent.error`.
       return callHunterApi({ path: `/company-lists/${id}`, apiKey, baseUrl })
+    },
+  )
+
+  server.registerTool(
+    TOOL_NAMES.listCompanyListCompanies,
+    {
+      description: desc`Use this when the user wants to see which companies are in a static company list. Companies come newest first, with each company's \`id\`, \`domain\`, \`organization\` (company name) and \`created_at\` (when the company was first saved to Hunter, not when it joined the list). \`meta.results\` is the total number of companies in the list. Page with \`limit\` and \`offset\`. A dynamic list has no saved companies: its companies come from its filters. For a dynamic list the tool returns an empty \`data\` array with \`dynamic_list: true\`; then read the list's \`filters\` with ${TOOL_NAMES.getCompanyList}, describe them to the user as a natural-language query for ${TOOL_NAMES.discover}, and let the user confirm it. That search is approximate: it cannot re-apply the saved filters exactly, so its results can differ from the list. Returns a not-found error if the list does not exist or belongs to another team. Free to call.`,
+      inputSchema: {
+        company_list_id: z.number().int().positive().describe("ID of the company list"),
+        offset: z.number().int().nonnegative().optional().describe("Number of companies to skip (default 0)"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Maximum number of companies to return (default 20, max 100)"),
+      },
+      outputSchema: listCompanyListCompaniesOutputSchema.shape,
+      annotations: PRIVATE_READ_ANNOTATIONS,
+    },
+    async ({ company_list_id, offset, limit }) => {
+      // Send explicit defaults so meta echoes the page actually returned (matches List-Company-Lists).
+      const params: Record<string, string> = { offset: String(offset ?? 0), limit: String(limit ?? 20) }
+      const result = await callHunterApi({
+        path: `/company-lists/${company_list_id}/companies`,
+        apiKey,
+        baseUrl,
+        params,
+      })
+      const error = (result.structuredContent as { error?: { code?: string; message?: string } } | undefined)?.error
+      // Rails answers a dynamic list with 400 dynamic_company_list. That is a valid request
+      // with no saved members, so answer it instead of returning an error the agent retries.
+      // This server drops the Rails id from a 400, so match the Rails message.
+      if (!result.isError || error?.code !== "validation" || !/dynamic company list/i.test(error.message ?? "")) {
+        return result
+      }
+      const message = desc`This is a dynamic company list, so it has no saved companies: its companies come from its filters. To find similar companies, read the filters with ${TOOL_NAMES.getCompanyList} and describe them as a query for ${TOOL_NAMES.discover}. That search is approximate, so confirm the query with the user first.`
+      return {
+        content: [
+          { type: "text" as const, text: `${message}${HUNTER_SOURCE_SUFFIX}`, annotations: { audience: ["user"] } },
+        ],
+        structuredContent: { data: [], dynamic_list: true as const, message },
+      }
     },
   )
 

@@ -331,6 +331,7 @@ One minimal prompt per tool not exercised by Section 1. Run these in fresh conve
 | ME3 | `Add-Company-To-List` (write) | `Add company <COMPANY_ID> to company list <LIST_ID>` | Company added to the static list (returns id, domain). Dynamic list → not_found | ☐ | |
 | ME4 | `Remove-Company-From-List` (write) | `Remove company <COMPANY_ID> from company list <LIST_ID>` | Membership removed (reversible by re-adding) | ☐ | |
 | ME5 | `Find-Similar-Companies` | `Find companies similar to the ones in company list <LIST_ID>` | Companies ranked by similarity_score. Dynamic list → invalid_input (unsupported_list_type). Free plan → "not available on your plan", no reconnect prompt | ☐ | |
+| ME6 | `List-Company-List-Companies` | `Which companies are in company list <LIST_ID>?` | Companies newest first (id, domain, organization, created_at); `meta.results` is the total. Dynamic list → empty data with `dynamic_list: true` and a pointer to `Get-Company-List` + `Find-Companies`, not an error | ☐ | |
 
 ### Connected apps (HUN-20196)
 
@@ -1166,7 +1167,7 @@ The 99 tools exposed by the Hunter ChatGPT MCP (version 4.0.3; the five briefing
 | Leads-list folders & favorites (V3) | `List-Leads-List-Folders`, `Create-Leads-List-Folder`, `Update-Leads-List-Folder`, `Delete-Leads-List-Folder`, `Favorite-Leads-List`, `Unfavorite-Leads-List` |
 | Company lists (HUN-20196) | `List-Company-Lists`, `Get-Company-List`, `Create-Company-List`, `Update-Company-List`, `Delete-Company-List` |
 | Company list folders (HUN-20196) | `List-Company-List-Folders`, `Create-Company-List-Folder`, `Update-Company-List-Folder`, `Delete-Company-List-Folder` |
-| Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List` |
+| Company list favorites/membership (HUN-20196) | `Favorite-Company-List`, `Unfavorite-Company-List`, `Add-Company-To-List`, `Remove-Company-From-List`, `List-Company-List-Companies` |
 | Bulk operations (V3) | `Bulk-Move-Leads`, `Bulk-Delete-Leads`, `Bulk-Move-Companies`, `Bulk-Copy-Companies`, `Bulk-Delete-Companies` |
 | Discover people counts & saved searches (V3) | `Count-Company-Emails` (counts only, with a hunter.io link), `List-Saved-Searches`, `Get-Saved-Search`, `Create-Saved-Search`, `Delete-Saved-Search` |
 | Connected apps & integrations | `List-Connected-Apps`, `Get-Connected-App`, `Push-Leads-To-CRM` (V3), `List-Webhooks` (V3), `Update-Webhook` (V3) |

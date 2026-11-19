@@ -344,6 +344,12 @@
       "destructiveHint": false
     },
     {
+      "name": "List-Company-List-Companies",
+      "title": null,
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
       "name": "List-Company-List-Folders",
       "title": null,
       "readOnlyHint": true,

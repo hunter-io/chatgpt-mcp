@@ -195,8 +195,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // and Update-Leads-List save a dynamic list (HUN-24762); 4.0.3 accepts * and ~
       // in a dynamic list's verification_status and sending_status; 4.0.4 lets List-Leads
       // use every lead filter and the Leads-page filters (HUN-25033); 4.0.5 accepts
-      // email_invalidated in the List-Signals types filter (HUN-25031).
-      version: "4.0.5",
+      // email_invalidated in the List-Signals types filter (HUN-25031); 4.0.6 adds
+      // List-Company-List-Companies (HUN-25417).
+      version: "4.0.6",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,

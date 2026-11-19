@@ -142,6 +142,7 @@ const ALL_TOOL_NAMES = [
   "Merge-Leads-Lists",
   "List-Company-Lists",
   "Get-Company-List",
+  "List-Company-List-Companies",
   "Create-Company-List",
   "Update-Company-List",
   "Delete-Company-List",
@@ -332,6 +333,7 @@ describe("tool annotations (HUN-20170 submission-aligned matrix)", () => {
     "Get-Leads-List",
     "List-Company-Lists",
     "Get-Company-List",
+    "List-Company-List-Companies",
     "List-Company-List-Folders",
     "List-Connected-Apps",
     "Get-Connected-App",
@@ -2946,6 +2948,105 @@ describe("Company-List Membership (Group 10)", () => {
     registerAllTools()
   })
 
+  it("List-Company-List-Companies GETs /company-lists/:id/companies with default paging and parses the page", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            data: [
+              { id: 42, domain: "stripe.com", created_at: "2026-11-18T10:00:00Z", organization: "Stripe" },
+              { id: 43, domain: null, created_at: "2026-11-17T10:00:00Z", organization: null },
+            ],
+            meta: { results: 2, limit: 20, offset: 0, params: { company_list_id: 7 } },
+          }),
+        ),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const tool = registeredTools.get("List-Company-List-Companies")!
+    const result = await tool.handler({ company_list_id: 7 })
+
+    const url = new URL(mockFetch.mock.calls[0][0])
+    expect(url.pathname).toBe("/v2/company-lists/7/companies")
+    expect(url.searchParams.get("limit")).toBe("20")
+    expect(url.searchParams.get("offset")).toBe("0")
+    expect(result.isError).toBeUndefined()
+    const parsed = z.object(tool.outputSchema as z.ZodRawShape).parse(result.structuredContent) as {
+      data: Array<{ id: number; domain: string | null }>
+      meta: { results: number }
+    }
+    expect(parsed.data.map((company) => company.domain)).toEqual(["stripe.com", null])
+    expect(parsed.meta.results).toBe(2)
+  })
+
+  it("List-Company-List-Companies forwards limit and offset", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ data: [], meta: { results: 150, limit: 50, offset: 100 } })),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    await registeredTools.get("List-Company-List-Companies")!.handler({ company_list_id: 7, limit: 50, offset: 100 })
+
+    const url = new URL(mockFetch.mock.calls[0][0])
+    expect(url.searchParams.get("limit")).toBe("50")
+    expect(url.searchParams.get("offset")).toBe("100")
+  })
+
+  it("List-Company-List-Companies answers a dynamic list with guidance instead of an error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              errors: [{ id: "dynamic_company_list", code: 400, details: "This is a dynamic company list." }],
+            }),
+          ),
+      }),
+    )
+
+    const tool = registeredTools.get("List-Company-List-Companies")!
+    const result = await tool.handler({ company_list_id: 7 })
+
+    expect(result.isError).toBeUndefined()
+    const parsed = z.object(tool.outputSchema as z.ZodRawShape).parse(result.structuredContent) as {
+      data: unknown[]
+      dynamic_list: boolean
+      message: string
+    }
+    expect(parsed.data).toEqual([])
+    expect(parsed.dynamic_list).toBe(true)
+    expect(parsed.message).toContain("Get-Company-List")
+    expect(parsed.message).toContain("Find-Companies")
+  })
+
+  it("List-Company-List-Companies surfaces a 404 as the typed not_found error envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ errors: [{ id: "not_found", details: "This company list does not exist." }] }),
+          ),
+      }),
+    )
+
+    const result = await registeredTools.get("List-Company-List-Companies")!.handler({ company_list_id: 999 })
+
+    expect(result.isError).toBe(true)
+    expect((result.structuredContent as { error: { code: string } }).error.code).toBe("not_found")
+  })
+
   it("Add-Company-To-List POSTs /company-lists/:id/companies with the company_id form body", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -4328,9 +4429,9 @@ describe("HUN-23709: server version and instructions", () => {
     registerAllTools()
   })
 
-  it("announces version 4.0.5", () => {
+  it("announces version 4.0.6", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.5" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.6" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {
