@@ -4247,6 +4247,19 @@ describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rail
     expect(validate("Get-Lead", result.structuredContent).error).toBeUndefined()
   })
 
+  // HUN-25342: Get-Lead and List-Leads emit the lead's tags as `lead_tags`.
+  it("Get-Lead and List-Leads publish the lead's tags", async () => {
+    const lead = { ...emaillessLead, lead_tags: [{ id: 7, name: "Hot", color: "EF4444" }] }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: lead })))
+    const getResult = await registeredTools.get("Get-Lead")!.handler({ id: 1 })
+    expect(validate("Get-Lead", getResult.structuredContent).error).toBeUndefined()
+    expect(getResult.structuredContent.data.lead_tags).toEqual(lead.lead_tags)
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: { leads: [lead] }, meta: { count: 1, total: 5 } })))
+    const listResult = await registeredTools.get("List-Leads")!.handler({})
+    expect(validate("List-Leads", listResult.structuredContent).error).toBeUndefined()
+  })
+
   it("Add-Sequence-Recipients accepts null skipped_recipients when nobody was skipped", async () => {
     vi.stubGlobal(
       "fetch",
@@ -4429,9 +4442,9 @@ describe("HUN-23709: server version and instructions", () => {
     registerAllTools()
   })
 
-  it("announces version 4.0.6", () => {
+  it("announces version 4.0.7", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.6" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.7" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {

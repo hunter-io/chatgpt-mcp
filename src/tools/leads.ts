@@ -89,6 +89,8 @@ const leadSchema = z
       })
       .optional(),
     verification: verificationSchema.optional(),
+    // Get-Lead and List-Leads only (HUN-25342). `lead_tags`, not `tags`: a custom attribute can own that slug.
+    lead_tags: z.array(z.object({ id: z.number().int().positive(), name: z.string(), color: z.string() })).optional(),
     created_at: z.string().optional(),
     updated_at: z.string().optional(),
   })
@@ -297,7 +299,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
   server.registerTool(
     TOOL_NAMES.listLeads,
     {
-      description: desc`Use this when the user wants to list the leads saved in their Hunter account, filtered for example by replied, invalid email, country, saved date, tags, sequence or job title. A lead must match every filter that you send, and a lead matching any one value of a filter matches that filter. \`*\` means any value and \`~\` means no value. Get tag ids from ${TOOL_NAMES.listLeadTags}, sequence ids from ${TOOL_NAMES.listSequences}, custom attribute slugs from ${TOOL_NAMES.listCustomAttributes}, and list ids from ${TOOL_NAMES.listLeadsLists}. \`meta.count\` is the number of leads that match. Returns up to 100 leads per page, newest first by default; use \`offset\` to paginate. Do not create a dynamic list only to read leads: call this tool. Free to call.`,
+      description: desc`Use this when the user wants to list the leads saved in their Hunter account, filtered for example by replied, invalid email, country, saved date, tags, sequence or job title. A lead must match every filter that you send, and a lead matching any one value of a filter matches that filter. \`*\` means any value and \`~\` means no value. Get tag ids from ${TOOL_NAMES.listLeadTags}, sequence ids from ${TOOL_NAMES.listSequences}, custom attribute slugs from ${TOOL_NAMES.listCustomAttributes}, and list ids from ${TOOL_NAMES.listLeadsLists}. \`meta.count\` is the number of leads that match. \`meta.total\` is the number of all the leads in the user's team, whatever the filters: do not report it as the number of matches. Each lead lists its tags in \`lead_tags\` (\`id\`, \`name\`, \`color\`). Returns up to 100 leads per page, newest first by default; use \`offset\` to paginate. Do not create a dynamic list only to read leads: call this tool. Free to call.`,
       inputSchema: listLeadsInputSchema,
       outputSchema: listLeadsOutputSchema.shape,
       annotations: PRIVATE_READ_ANNOTATIONS,
@@ -336,7 +338,7 @@ export function registerLeadTools(server: McpServer, apiKey: string, baseUrl: st
     TOOL_NAMES.getLead,
     {
       description:
-        "Use this when the user wants to retrieve a single lead from their Hunter account by ID. Free to call.",
+        "Use this when the user wants to retrieve a single lead from their Hunter account by ID. The lead lists its tags in `lead_tags` (`id`, `name`, `color`). Free to call.",
       inputSchema: {
         id: z.number().int().positive().describe("ID of the lead to retrieve"),
       },
