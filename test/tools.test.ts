@@ -4247,6 +4247,15 @@ describe("HUN-24022: lead and add-recipients output schemas admit the nulls Rail
     expect(validate("Get-Lead", result.structuredContent).error).toBeUndefined()
   })
 
+  // HUN-25429: Get-Sequence and List-Sequences say why and when a sequence was paused.
+  it("List-Sequences publishes pause_reason and paused_at", async () => {
+    const sequence = { id: 7, name: "Investors", paused: true, pause_reason: "manual", paused_at: "2026-11-19 10:00:00 UTC" }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: { sequences: [sequence] }, meta: { limit: 20, offset: 0 } })))
+    const result = await registeredTools.get("List-Sequences")!.handler({})
+    expect(validate("List-Sequences", result.structuredContent).error).toBeUndefined()
+    expect(result.structuredContent.data.sequences[0]).toMatchObject({ pause_reason: "manual", paused_at: sequence.paused_at })
+  })
+
   // HUN-25342: Get-Lead and List-Leads emit the lead's tags as `lead_tags`.
   it("Get-Lead and List-Leads publish the lead's tags", async () => {
     const lead = { ...emaillessLead, lead_tags: [{ id: 7, name: "Hot", color: "EF4444" }] }
@@ -4442,9 +4451,9 @@ describe("HUN-23709: server version and instructions", () => {
     registerAllTools()
   })
 
-  it("announces version 4.0.7", () => {
+  it("announces version 4.0.8", () => {
     const [info] = serverConstructorArgs[0] as [{ name: string; version: string }]
-    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.7" })
+    expect(info).toEqual({ name: "Hunter ChatGPT", version: "4.0.8" })
   })
 
   it("instructions say person emails are not available and point to hunter.io", () => {

@@ -89,6 +89,9 @@ const sequenceSchema = z
     started: nullableBoolean().optional(),
     archived: z.boolean().optional(),
     paused: nullableBoolean().optional(),
+    // HUN-25429: null unless paused. Optional so a worker deployed before the Rails field ships still validates.
+    pause_reason: nullableString().optional(),
+    paused_at: nullableString().optional(),
     owner: z.union([z.object({ id: z.number().int().positive(), email: z.string() }).loose(), z.null()]).optional(),
   })
   .loose()
@@ -416,6 +419,9 @@ const sequenceDetailSchema = z.object({
   started: z.boolean(),
   paused: z.boolean(),
   archived: z.boolean(),
+  // HUN-25429: null unless paused. Optional so a worker deployed before the Rails field ships still validates.
+  pause_reason: nullableString().optional(),
+  paused_at: nullableString().optional(),
   schedule: sequenceScheduleSchema,
   settings: sequenceSettingsSchema,
   email_account_ids: z.array(z.number().int()),
@@ -786,7 +792,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.listSequences,
     {
       description:
-        "Use this when the user wants to list the sequences in their Hunter account with name, lifecycle booleans (started/archived/paused), recipient count, and owner, most recent first. Optionally filter by `started` and/or `archived` state and paginate with `limit`/`offset`. New sequences can be created with Create-Sequence and inspected in full with Get-Sequence. Free to call.",
+        "Use this when the user wants to list the sequences in their Hunter account with name, lifecycle booleans (started/archived/paused), recipient count, and owner, most recent first. `pause_reason` says why a paused sequence was paused: `manual` means a user of the account paused it, in Hunter or through the API (including an AI assistant connected to the account), so do not report a `manual` pause as a Hunter error; `system` means Hunter paused it (a sending account problem, or the sequence was archived); `downgrade` means a plan downgrade removed one of its sending accounts (reconnect or choose a sender to resume); `entitlement_removal` means the plan no longer includes this feature (upgrade to resume). `paused_at` is when it was paused. Both are null when the sequence is not paused, and `paused_at` is also null for a sequence paused before Hunter recorded the time. Optionally filter by `started` and/or `archived` state and paginate with `limit`/`offset`. New sequences can be created with Create-Sequence and inspected in full with Get-Sequence. Free to call.",
       inputSchema: {
         started: z
           .boolean()
@@ -824,7 +830,7 @@ export function registerSequenceTools(server: McpServer, apiKey: string, baseUrl
     TOOL_NAMES.getSequence,
     {
       description:
-        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, the HTML and plain-text unsubscribe sentences — null when the account default applies, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, the `owner`, and the `ab_testing` state (`enabled`, the Variant A/B split percentages, and any `winner_variant`; every field but `enabled` is null when no A/B test is on). Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
+        "Use this when the user wants to inspect one sequence's full configuration. Returns the lifecycle `status` (draft, planned, active, paused, completed, preparing, error, or archived) plus the raw `started`/`paused`/`archived` booleans, `pause_reason` and `paused_at`, the `schedule` (start_at date, daily sending window as HH:MM strings, days of week as integers 0=Monday..6=Sunday), the `settings` (open tracking, link tracking, unsubscribe link, the HTML and plain-text unsubscribe sentences — null when the account default applies, AI assistant, BCC recipient), the sender `email_account_ids`, a `follow_ups` step summary (unique_steps_count and step numbers — use List-Sequence-Follow-Ups for the step contents), `recipients_count`, the `owner`, and the `ab_testing` state (`enabled`, the Variant A/B split percentages, and any `winner_variant`; every field but `enabled` is null when no A/B test is on). `pause_reason` says why a paused sequence was paused: `manual` means a user of the account paused it, in Hunter or through the API (including an AI assistant connected to the account), so do not report a `manual` pause as a Hunter error; `system` means Hunter paused it (a sending account problem, or the sequence was archived); `downgrade` means a plan downgrade removed one of its sending accounts (reconnect or choose a sender to resume); `entitlement_removal` means the plan no longer includes this feature (upgrade to resume). `paused_at` is when it was paused. Both are null when the sequence is not paused, and `paused_at` is also null for a sequence paused before Hunter recorded the time. Returns a not-found error if the sequence does not exist or belongs to another team. Free to call.",
       inputSchema: {
         sequence_id: z.number().int().positive().describe("ID of the sequence to fetch"),
       },

@@ -197,8 +197,9 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
       // use every lead filter and the Leads-page filters (HUN-25033); 4.0.5 accepts
       // email_invalidated in the List-Signals types filter (HUN-25031); 4.0.6 adds
       // List-Company-List-Companies (HUN-25417); 4.0.7 publishes lead_tags on Get-Lead and
-      // List-Leads and says what List-Leads meta.total is (HUN-25342, HUN-25423).
-      version: "4.0.7",
+      // List-Leads and says what List-Leads meta.total is (HUN-25342, HUN-25423); 4.0.8 publishes
+      // pause_reason and paused_at on Get-Sequence and List-Sequences (HUN-25429).
+      version: "4.0.8",
     },
     {
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
