@@ -510,12 +510,17 @@ function mapHunterError(status: number, retryAfter: string | null, body: string)
   // QUOTA_EXCEEDED_END
   // Api::Concerns::Validation answers 429 `restricted_account` for a team with no
   // usable subscription, a suspended or unpaid team, or a blocked user; it also
-  // defines `blocked_account`. No retry lifts either.
+  // defines `blocked_account`. No retry lifts either. Rails' details give the cause,
+  // and name the account when it still has to be verified: a user who connected
+  // with another Google login than usual cannot tell otherwise (HUN-25410).
   if (status === 429 && (parsedField === "restricted_account" || parsedField === "blocked_account")) {
+    const cause = parsedDetails
+      ? sanitizeUpstreamMessage(parsedDetails, 300)
+      : "This Hunter account is restricted, so no request can run until access is restored. Log in to Hunter to see why."
     return {
       code: "unauthorized",
       retryable: false,
-      message: `This Hunter account is restricted, so no request can run until access is restored. Retrying will not help. Log in to Hunter to see why, or contact Hunter support at ${hunterLink("/contact")}.`,
+      message: `${cause} If this is not the Hunter account that you want to use, disconnect Hunter in the settings of this app. Then connect it again with the correct Hunter account. For help, contact Hunter support at ${hunterLink("/contact")}.`,
     }
   }
   if (status === 429) {

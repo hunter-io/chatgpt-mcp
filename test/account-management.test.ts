@@ -173,4 +173,15 @@ describe("Get-Usage", () => {
     const schema = publishedOutputSchema(tool("Get-Usage").outputSchema!)
     expect(() => schema.parse(sc)).not.toThrow()
   })
+
+  it("names the account that waits for verification and says how to connect another one (HUN-25410)", async () => {
+    const details =
+      "The Hunter account new.address@gmail.com is not verified. Log in to Hunter with this account to verify it. Then try again."
+    mockFetch.mockResolvedValueOnce(jsonError({ errors: [{ id: "restricted_account", code: 429, details }] }, 429))
+    const result = await tool("Get-Usage").handler({})
+    const sc = result.structuredContent as any
+    expect(sc.error.message).toBe(
+      `${details} If this is not the Hunter account that you want to use, disconnect Hunter in the settings of this app. Then connect it again with the correct Hunter account. For help, contact Hunter support at https://hunter.io/contact?utm_source=hunter-chatgpt&utm_medium=chatgpt-app.`,
+    )
+  })
 })
