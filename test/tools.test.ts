@@ -5170,3 +5170,65 @@ describe("HUN-24815: Email-Verifier accepts provenance and empty sources", () =>
     expect(sc.data.provenance).toBe(provenance)
   })
 })
+
+// HUN-24706: an empty or failed search must never tell the model that companies were found.
+describe("Find-Companies next action follows the result", () => {
+  beforeEach(() => {
+    registeredTools.clear()
+    registerAllTools()
+  })
+
+  const okJson = (body: unknown) => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) })
+  const questionOf = (result: { structuredContent?: unknown }) =>
+    (result.structuredContent as { nextAction?: { kind: string; question?: string } }).nextAction
+
+  it("keeps the found question when companies match", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(okJson({ data: [{ domain: "acme.com" }], meta: { results: 1, limit: 100, offset: 0 } })),
+    )
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect(questionOf(result)).toMatchObject({ kind: "ask_user", question: expect.stringContaining("I found") })
+  })
+
+  it("asks to widen the criteria when no company matches", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: [], meta: { results: 0, limit: 100, offset: 0 } })))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect(questionOf(result)).toEqual({
+      kind: "ask_user",
+      question: "No companies matched this search. Should I change or widen the criteria?",
+    })
+  })
+
+  it("says the results ran out when a later page is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ data: [], meta: { results: 40, limit: 50, offset: 100 } })))
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies", offset: 100 })
+
+    expect(questionOf(result)?.question).toBe(
+      "There are no more matching companies after this page. Should I refine the search?",
+    )
+  })
+
+  it("adds no next action to an error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(JSON.stringify({ errors: [{ id: "unavailable", code: 503, details: "Try again later." }] })),
+      }),
+    )
+
+    const result = await registeredTools.get("Find-Companies")!.handler({ query: "tech companies" })
+
+    expect(result.isError).toBe(true)
+    expect(questionOf(result)).toBeUndefined()
+  })
+})

@@ -66,6 +66,16 @@ const discoverDataSchema = z.array(discoverCompanySchema)
 // the pagination shape strict and let `.loose()` absorb the permalink.
 const discoverOutputSchema = buildResponseSchema(discoverDataSchema, paginationMetaSchema)
 
+// HUN-24706: an empty page must not tell the model that companies were found.
+function discoverQuestion(result: McpTextResult, offset: number | undefined): string {
+  const companies = (result.structuredContent as { data?: unknown } | undefined)?.data
+  if (Array.isArray(companies) && companies.length > 0) {
+    return "I found matching companies. Should I save any of them, look one up in detail, or refine the search?"
+  }
+  if (offset) return "There are no more matching companies after this page. Should I refine the search?"
+  return "No companies matched this search. Should I change or widen the criteria?"
+}
+
 // Company-Enrichment widget reads: id, name, domain, logo, location, description,
 // already_saved / alreadySaved (both forms tolerated), emails_count, metrics.employees,
 // site.emailAddresses. See src/company-widget.tsx:25-44 for CompanyData type and
@@ -310,8 +320,7 @@ export function createServer(apiKey: string, baseUrl: string): McpServer {
           widgetResult,
           buildNextAction({
             kind: "ask_user",
-            question:
-              "I found matching companies. Should I save any of them, look one up in detail, or refine the search?",
+            question: discoverQuestion(result, offset),
           }),
         ),
       )
